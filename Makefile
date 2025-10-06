@@ -1,4 +1,15 @@
-.PHONY: build clean test run dev windows-amd64 linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 all
+.PHONY: build clean test run dev stop windows-amd64 linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 all
+
+# Use bash for better shell compatibility
+SHELL := /bin/bash
+
+# Ensure Go bin is in PATH
+export GOBIN ?= $(shell go env GOBIN)
+export GOPATH ?= $(shell go env GOPATH)
+export PATH := $(GOBIN):$(GOPATH)/bin:$(HOME)/go/bin:/usr/local/bin:/opt/homebrew/bin:$(PATH)
+
+# Air executable name (can be overridden)
+AIR ?= air
 
 BINARY_NAME=claude-code-codex-companion
 
@@ -75,9 +86,20 @@ test:
 run: build
 	./$(BINARY_NAME) -config config.yaml
 
-# Development mode with auto-reload (requires air: go install github.com/cosmtrek/air@latest)
-dev:
-	air
+# Development mode with auto-reload (requires air)
+# Install air: brew install air OR go install github.com/air-verse/air@latest
+dev: stop
+	@if ! command -v $(AIR) >/dev/null 2>&1; then \
+		echo "Air not found. Please install it first:"; \
+		echo "  macOS: brew install air"; \
+		echo "  或者:  go install github.com/air-verse/air@latest"; \
+		exit 1; \
+	fi
+	$(AIR) -c .air.toml
+
+# Stop running air process
+stop:
+	-@pkill -f "$(AIR)" >/dev/null 2>&1 || true
 
 # Initialize go modules
 init:

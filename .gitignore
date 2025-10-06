@@ -1,6 +1,6 @@
 # Binaries
-claude-code-codex-companion
-claude-code-codex-companion.exe
+claude-code-codex-companion*
+claude-code-codex-companion*.exe
 *.exe
 *.dll
 *.so
@@ -74,3 +74,5 @@ test_*.py
 config.yaml
 config-*.yaml
 claude-code-codex-companion-darwin-arm64
+tmp/
+build-errors.log
