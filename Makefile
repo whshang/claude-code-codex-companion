@@ -8,8 +8,13 @@ export GOBIN ?= $(shell go env GOBIN)
 export GOPATH ?= $(shell go env GOPATH)
 export PATH := $(GOBIN):$(GOPATH)/bin:$(HOME)/go/bin:/usr/local/bin:/opt/homebrew/bin:$(PATH)
 
-# Air executable name (can be overridden)
-AIR ?= air
+# Air executable - try to find it in common locations
+AIR := $(shell command -v air 2>/dev/null || \
+	command -v $(GOPATH)/bin/air 2>/dev/null || \
+	command -v $(HOME)/go/bin/air 2>/dev/null || \
+	command -v /usr/local/bin/air 2>/dev/null || \
+	command -v /opt/homebrew/bin/air 2>/dev/null || \
+	echo "air")
 
 BINARY_NAME=claude-code-codex-companion
 
@@ -89,17 +94,23 @@ run: build
 # Development mode with auto-reload (requires air)
 # Install air: brew install air OR go install github.com/air-verse/air@latest
 dev: stop
-	@if ! command -v $(AIR) >/dev/null 2>&1; then \
+	@if [ ! -x "$(AIR)" ] && [ "$(AIR)" = "air" ]; then \
 		echo "Air not found. Please install it first:"; \
 		echo "  macOS: brew install air"; \
 		echo "  或者:  go install github.com/air-verse/air@latest"; \
+		echo ""; \
+		echo "安装后，请确保 air 在以下位置之一:"; \
+		echo "  - $$HOME/go/bin/air"; \
+		echo "  - /usr/local/bin/air"; \
+		echo "  - /opt/homebrew/bin/air"; \
 		exit 1; \
 	fi
+	@echo "Starting air from: $(AIR)"
 	$(AIR) -c .air.toml
 
 # Stop running air process
 stop:
-	-@pkill -f "$(AIR)" >/dev/null 2>&1 || true
+	-@pkill -f "air" >/dev/null 2>&1 || true
 
 # Initialize go modules
 init:

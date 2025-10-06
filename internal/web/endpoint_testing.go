@@ -368,7 +368,6 @@ func (s *AdminServer) testOpenAIPath(ep *endpoint.Endpoint, path string, timeout
 
 	// 根据端点配置选择测试模型
 	testModel := s.selectTestModel(ep, "openai")
-	originalModel := testModel
 
 	// 构建请求体（根据路径选择格式）
 	var reqBody map[string]interface{}
