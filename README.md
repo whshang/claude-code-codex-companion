@@ -42,10 +42,16 @@ CCCC (Claude Code and Codex Companion) 是一个智能 AI API 代理工具，专
 - **智能识别**：自动检测客户端类型和请求格式
 
 ### 🎯 智能路由系统
+- **双URL智能路由**：一个端点同时配置 `url_anthropic` 和 `url_openai`，Claude Code请求自动路由到Anthropic URL，Codex请求自动路由到OpenAI URL
+- **单URL容错转换**：仅配置一个URL时，自动在代理侧完成格式转换（缺少`url_openai`时将Codex请求转为Anthropic格式；缺少`url_anthropic`时将Claude Code请求转为OpenAI格式）
+- **OpenAI格式自适应**：优先尝试 `/responses` 格式（Codex新API），失败后自动切换 `/chat/completions` 格式，学习结果记录到端点配置的 `openai_preference` 字段
 - **优先级选择**：按配置优先级自动选择端点
 - **客户端过滤**：端点级别的客户端类型白名单
 - **标签路由**：基于请求特征的动态路由
 - **健康检查**：实时监控端点状态，自动隔离故障节点
+- **智能拉黑**：区分业务错误、配置错误、服务器错误，可配置拉黑策略
+- **全局拉黑控制**：系统设置中可全局启用/禁用拉黑功能
+- **错误类型识别**：自动识别业务错误（API返回错误）、配置错误（客户端问题）、服务器错误（基础设施问题）
 
 ### 🧠 智能参数学习系统（NEW!）
 - **自动学习不支持的参数**：从 400 错误自动识别端点不支持的参数（如 `tools`、`tool_choice`）
@@ -54,10 +60,30 @@ CCCC (Claude Code and Codex Companion) 是一个智能 AI API 代理工具，专
 - **持久化学习**：学习结果在端点生命周期内保持，避免重复试错
 
 ### 🔧 高级配置能力
-- **模型重写**：`gpt-5` → `qwen3-coder`，`claude-sonnet` → `kimi-k2`
+- **显式模型重写**：`gpt-5` → `qwen3-coder`，`claude-sonnet-4-20250514` → `kimi-k2`，支持正则表达式匹配
+- **隐式模型重写**：通用端点根据客户端类型自动应用默认模型（Claude Code→`claude-sonnet-4-20250514`，Codex→`gpt-5`）
 - **参数覆盖**：动态修改 temperature、max_tokens 等
-- **格式转换**：Anthropic ↔ OpenAI 自动转换
+- **格式转换**：Anthropic ↔ OpenAI 自动转换，支持单URL配置时的跨格式兼容
 - **工具调用**：完整支持 function calling 和 tools
+- **OpenAI格式自适应**：优先尝试 `/responses` 格式（https://platform.openai.com/docs/guides/responses），失败后自动降级到 `/chat/completions`（https://platform.openai.com/docs/guides/chat）并记录偏好
+- **格式偏好配置**：可设置端点优先使用 responses、chat_completions 或自动检测，学习结果可回写端点配置
+
+### 🧪 端点自适应能力
+- **自动接口类型检测**：使用重写后的模型对端点进行自检，确认 Anthropic/OpenAI API 兼容性
+- **认证方式探测**：在 `auth_type` 留空或使用 `auto` 时自动尝试 `Authorization` 与 `x-api-key`，并记忆成功方案
+- **首轮测试向导**：一次性触发所有端点的连通性测试，生成响应时间、HTTP 状态和格式验证报告
+- **配置回写机制**：测试学习到的 `openai_preference`、认证方式等信息可持久化回端点配置（非必填项自动补齐）
+
+#### 批量测试 CLI
+
+```bash
+# 读取指定配置文件批量验证所有端点（默认 ./config.yaml）
+go run ./cmd/test_endpoints -config config.yaml -json
+```
+
+- 同时模拟 **Claude Code (Anthropic 格式)** 与 **Codex (OpenAI Responses/Chat 格式)**，自动补齐认证头与格式；
+- 失败结果会区分账号/额度（429）、认证（401）、格式（400）等类型，并记录到运行时配置；
+- 可配合全局拉黑开关关闭自动拉黑，以安全执行保守测试。
 
 ### 📊 企业级可观测性
 - **Web 管理界面**：实时查看端点状态、请求日志
@@ -125,9 +151,9 @@ make build
 2. 进入"端点管理"
 3. 点击"新增端点"，填写：
    - **名称**：端点标识（如 `openai-primary`）
-   - **URL**：API 地址（如 `https://api.openai.com`）
-   - **类型**：`anthropic` 或 `openai`
-   - **认证**：API Key 或 Bearer Token
+   - **Anthropic URL**：用于 Claude Code 的 API 地址（可选）
+   - **OpenAI URL**：用于 Codex 的 API 地址（可选）
+   - **认证**：API Key、Bearer Token 或选择自动探测
    - **支持的客户端**：`claude-code`、`codex` 或留空（支持所有）
 
 #### 通过配置文件
@@ -142,8 +168,7 @@ server:
 endpoints:
     # Claude Code 端点
     - name: anthropic-official
-      url: https://api.anthropic.com
-      endpoint_type: anthropic
+      url_anthropic: https://api.anthropic.com
       auth_type: api_key
       auth_value: sk-ant-xxxxx
       enabled: true
@@ -151,11 +176,9 @@ endpoints:
 
     # Codex 端点（OpenAI）
     - name: openai-official
-      url: https://api.openai.com
-      endpoint_type: openai
-      path_prefix: "/v1"
+      url_openai: https://api.openai.com
       auth_type: auth_token
-      auth_value: sk-xxxxx
+      auth_value: sk-openai-xxxxx
       enabled: true
       priority: 1
       model_rewrite:
@@ -164,14 +187,16 @@ endpoints:
             - source_pattern: gpt-5*
               target_model: gpt-4-turbo
 
-    # 通用端点（同时支持两者）
+    # 通用端点（同时支持两者）- 双URL配置示例
     - name: universal-api
-      url: https://api.your-provider.com
+      url_anthropic: https://api.your-provider.com/anthropic  # Claude Code 请求路由到此
+      url_openai: https://api.your-provider.com/openai        # Codex 请求路由到此
       endpoint_type: openai
       auth_type: auth_token
       auth_value: your-token
       enabled: true
       priority: 2
+      openai_preference: auto  # OpenAI格式偏好：auto/responses/chat_completions
       # 系统自动检测客户端，无需配置 supported_clients
       model_rewrite:
         enabled: true
@@ -184,6 +209,14 @@ endpoints:
 logging:
     level: info
     log_directory: ./logs
+
+# 黑名单配置（新增功能）
+blacklist:
+    enabled: true              # 全局启用黑名单功能
+    auto_blacklist: true        # 自动拉黑失败的端点
+    business_error_safe: true   # 业务错误（API返回错误）不触发拉黑
+    config_error_safe: false    # 配置错误（客户端问题）触发拉黑
+    server_error_safe: false    # 服务器错误（基础设施问题）触发拉黑
 ```
 
 ---
@@ -281,8 +314,7 @@ trust_level = "trusted"
 ```yaml
 endpoints:
   - name: qwen-api
-    url: https://api.qwen.com
-    endpoint_type: openai
+    url_openai: https://api.qwen.com
     model_rewrite:
       enabled: true
       rules:
@@ -339,6 +371,45 @@ endpoints:
           - key: top_p
             value: 0.9
 ```
+
+### 双URL配置（新增功能）
+
+一个端点同时支持两种API格式，根据请求类型智能路由：
+
+```yaml
+endpoints:
+    - name: dual-endpoint
+      # Claude Code 请求自动路由到 Anthropic URL
+      url_anthropic: https://api.provider.com/v1/anthropic
+      # Codex 请求自动路由到 OpenAI URL  
+      url_openai: https://api.provider.com/v1/openai
+      endpoint_type: openai
+      auth_type: auth_token
+      auth_value: your-token
+      enabled: true
+      priority: 1
+      # OpenAI格式偏好设置
+      openai_preference: auto  # 可选值：auto/responses/chat_completions
+```
+
+### 黑名单配置（新增功能）
+
+精细化控制端点拉黑策略：
+
+```yaml
+# 全局黑名单配置
+blacklist:
+    enabled: true              # 是否启用黑名单功能
+    auto_blacklist: true        # 是否自动拉黑失败端点
+    business_error_safe: true   # 业务错误（如API返回错误信息）是否安全（不触发拉黑）
+    config_error_safe: false    # 配置错误（如认证失败、格式错误）是否安全
+    server_error_safe: false    # 服务器错误（如5xx、网络问题）是否安全
+```
+
+**错误类型说明**：
+- **业务错误**：API正常返回错误信息（如模型不支持、参数错误），通常不应拉黑端点
+- **配置错误**：客户端配置问题（如认证失败、请求格式错误），应该拉黑端点
+- **服务器错误**：基础设施问题（如5xx错误、网络超时），应该拉黑端点
 
 ---
 
@@ -472,6 +543,11 @@ CCCC 是从 [@kxn](https://github.com/kxn) 的 [claude-code-companion](https://g
 - 🔄 Anthropic ↔ OpenAI 格式自动转换
 - 🎯 客户端特定端点路由
 - 🛠️ 增强的模型重写和工具调用支持
+- 🔗 **双URL配置**：一个端点同时配置Anthropic和OpenAI URL，智能路由
+- 🎛️ **OpenAI格式自适应**：智能尝试/responses格式，失败后自动切换/chat/completions
+- 🚫 **智能黑名单策略**：区分业务/配置/服务器错误，可配置拉黑规则
+- ⚙️ **全局黑名单控制**：系统设置中可全局启用/禁用拉黑功能
+- 🤖 **隐式模型重写**：通用端点根据客户端类型自动应用默认模型映射
 
 ---
 
