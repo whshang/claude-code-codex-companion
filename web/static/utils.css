@@ -71,24 +71,28 @@
 }
 
 /* Color utilities */
-.text-success-custom { 
-    color: #28a745 !important; 
+.text-success-custom {
+    color: #28a745 !important;
 }
 
-.text-primary-custom { 
-    color: #007bff !important; 
+.text-primary-custom {
+    color: #007bff !important;
 }
 
-.text-danger-custom { 
-    color: #dc3545 !important; 
+.text-danger-custom {
+    color: #dc3545 !important;
 }
 
-.text-warning-custom { 
-    color: #ffc107 !important; 
+.text-warning-custom {
+    color: #ffc107 !important;
 }
 
-.text-muted-custom { 
-    color: #6c757d !important; 
+.text-orange {
+    color: #fd7e14 !important;
+}
+
+.text-muted-custom {
+    color: #6c757d !important;
 }
 
 /* Cursor utilities */

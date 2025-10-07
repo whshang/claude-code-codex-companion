@@ -58,6 +58,20 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	}
 	endpointRequestFormat := clientRequestFormat
 
+	// 🔧 Bug修复：提前处理 Codex /responses 路径转换
+	// 对于配置了 chat_completions 偏好的端点，立即转换路径
+	if inboundPath == "/responses" && endpointRequestFormat == "openai" {
+		if ep.OpenAIPreference == "chat_completions" {
+			effectivePath = "/chat/completions"
+			s.logger.Debug("Early path conversion for OpenAI endpoint with chat_completions preference", map[string]interface{}{
+				"endpoint":    ep.Name,
+				"inbound":     "/responses",
+				"effective":   "/chat/completions",
+				"preference":  ep.OpenAIPreference,
+			})
+		}
+	}
+
 	targetURL := ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
 
 	// Extract tags from taggedRequest

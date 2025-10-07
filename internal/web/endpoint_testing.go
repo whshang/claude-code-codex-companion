@@ -14,6 +14,7 @@ import (
 	"claude-code-codex-companion/internal/endpoint"
 	"claude-code-codex-companion/internal/logger"
 	"claude-code-codex-companion/internal/modelrewrite"
+	"claude-code-codex-companion/internal/validator"
 )
 
 // EndpointTestResult 单个格式测试结果
@@ -155,6 +156,22 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 
 	if format == "anthropic" {
 		req.Header.Set("anthropic-version", "2023-06-01")
+		// 伪装成 Anthropic SDK 客户端（基于官方 SDK 格式）
+		// 参考：anthropic-sdk-python/typescript 的真实请求头
+		req.Header.Set("User-Agent", "anthropic-sdk-go/0.1.0")
+		req.Header.Set("x-stainless-lang", "go")
+		req.Header.Set("x-stainless-package-version", "0.1.0")
+		req.Header.Set("x-stainless-runtime", "go")
+		req.Header.Set("x-stainless-runtime-version", "1.21.0")
+	} else if format == "openai" {
+		// 伪装成 OpenAI SDK 客户端（基于真实抓包数据）
+		// 参考：OpenAI/Python 1.10.0 的实际请求头
+		req.Header.Set("User-Agent", "OpenAI/Go 1.0.0")
+		req.Header.Set("x-stainless-lang", "go")
+		req.Header.Set("x-stainless-package-version", "1.0.0")
+		req.Header.Set("x-stainless-runtime", "go")
+		req.Header.Set("x-stainless-runtime-version", "1.21.0")
+		req.Header.Set("Openai-Beta", "responses=v1")
 	}
 
 	// 添加认证头
@@ -357,7 +374,19 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 			errorMessage = result.Error
 		}
 
-		// 记录失败的测试请求
+		// 🔍 检查是否为客户端验证失败（端点正常，但拒绝测试请求）
+		isClientValidationFailure := validator.CheckClientValidation(resp.StatusCode, string(body), errorMessage)
+
+		if isClientValidationFailure {
+			// 客户端验证失败视为"成功"（端点正常响应，只是拒绝了测试）
+			result.Success = true
+			result.Error = "" // 清除错误信息
+			// 在日志中标记为客户端验证拒绝
+			s.logger.Info(fmt.Sprintf("Endpoint %s (%s) rejected test request (client validation): %s",
+				ep.Name, format, errorMessage), nil)
+		}
+
+		// 记录测试请求（无论成功或失败）
 		if s.logger != nil {
 			s.logger.LogRequest(&logger.RequestLog{
 				RequestID:      testRequestID,
@@ -376,13 +405,31 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 				ResponseBody:   string(body),
 			})
 		}
+
+		// 如果是客户端验证失败，直接返回成功结果
+		if isClientValidationFailure {
+			return result
+		}
+
+		// 其他错误正常返回失败
 		return result
 	}
 
 	// 验证响应格式
 	var jsonResp map[string]interface{}
 	if err := json.Unmarshal(body, &jsonResp); err != nil {
-		result.Error = fmt.Sprintf("invalid JSON response: %v", err)
+		errorMsg := fmt.Sprintf("invalid JSON response: %v", err)
+		result.Error = errorMsg
+
+		// 🔍 检查JSON解析错误是否为客户端验证失败（通常是返回了HTML页面）
+		if validator.CheckClientValidation(resp.StatusCode, string(body), errorMsg) {
+			result.Success = true
+			result.Error = ""
+			s.logger.Info(fmt.Sprintf("Endpoint %s (%s) rejected test request (non-JSON response): %s",
+				ep.Name, format, errorMsg), nil)
+			return result
+		}
+
 		return result
 	}
 
@@ -406,6 +453,15 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		} else {
 			result.Error = fmt.Sprintf("API error: %v", errorField)
 			errorMessage = result.Error
+		}
+
+		// 🔍 检查API错误是否为客户端验证失败
+		if validator.CheckClientValidation(resp.StatusCode, string(body), errorMessage) {
+			result.Success = true
+			result.Error = ""
+			s.logger.Info(fmt.Sprintf("Endpoint %s (%s) rejected test request (API error): %s",
+				ep.Name, format, errorMessage), nil)
+			return result
 		}
 
 		// 记录200状态码但包含错误的请求

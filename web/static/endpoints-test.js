@@ -47,8 +47,10 @@ function renderTestResult(result) {
     }
 
     if (result.success) {
-        const timeClass = result.response_time < 1000 ? 'text-success' :
-                         result.response_time < 3000 ? 'text-warning' : 'text-danger';
+        // 颜色分级：<2s绿色, 2-5s黄色, 5-10s橙色, >10s红色
+        const timeClass = result.response_time < 2000 ? 'text-success' :
+                         result.response_time < 5000 ? 'text-warning' :
+                         result.response_time < 10000 ? 'text-orange' : 'text-danger';
         const escapedUrl = escapeHtml(result.url || '');
         return `<span class="${timeClass}" title="${result.format.toUpperCase()}: ${escapedUrl}">
             ${formatResponseTime(result.response_time)}
@@ -82,8 +84,10 @@ function renderEndpointTestResults(endpointName) {
         const formatBadge = result.format === 'anthropic' ? 'badge-primary' : 'badge-info';
 
         if (result.success) {
-            const timeClass = result.response_time < 1000 ? 'text-success' :
-                             result.response_time < 3000 ? 'text-warning' : 'text-danger';
+            // 颜色分级：<2s绿色, 2-5s黄色, 5-10s橙色, >10s红色
+            const timeClass = result.response_time < 2000 ? 'text-success' :
+                             result.response_time < 5000 ? 'text-warning' :
+                             result.response_time < 10000 ? 'text-orange' : 'text-danger';
             const escapedUrl = escapeHtml(result.url || '');
             return `<div class="test-result-item" title="${result.format.toUpperCase()}: ${escapedUrl}&#10;响应时间: ${formatResponseTime(result.response_time)}">
                 <span class="badge ${formatBadge}">${formatLabel}</span>

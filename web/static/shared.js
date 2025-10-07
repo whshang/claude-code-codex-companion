@@ -227,10 +227,12 @@ function formatUrlDisplay(url) {
 
 function escapeHtml(text) {
     if (!text) return text;
-    // 保持中文字符不变，只转义必要的HTML字符
+    // 完整的HTML转义，包括双引号（防止HTML属性截断）
     const div = document.createElement('div');
     div.textContent = text;
-    return div.innerHTML;
+    return div.innerHTML
+        .replace(/"/g, '&quot;')  // 转义双引号（关键！防止title属性被截断）
+        .replace(/'/g, '&#39;');   // 转义单引号（额外安全）
 }
 
 // UTF-8 safe base64 encoding/decoding
