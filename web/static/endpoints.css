@@ -62,3 +62,25 @@
     margin-right: 0.25rem;
     color: #6c757d;
 }
+/* 测试结果样式 */
+.test-results-container {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.test-result-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.875rem;
+}
+
+.test-result-item .badge {
+    font-size: 0.75rem;
+    padding: 2px 5px;
+}
+
+.response-cell {
+    min-width: 120px;
+}

@@ -5,30 +5,18 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize common features from shared.js
     initializeCommonFeatures();
     
-    // Format endpoint cells to show only domain with hover for full URL
+    // Format endpoint cells - update code element only, preserve error tooltips
     document.querySelectorAll('.endpoint-cell').forEach(function(cell) {
         const fullEndpoint = cell.getAttribute('data-endpoint');
-        
-        // Check if the cell already has error information (preserve it)
-        const existingErrorInfo = cell.querySelector('small.text-danger');
-        
-        if (fullEndpoint && fullEndpoint !== 'failed') {
+        const codeEl = cell.querySelector('code');
+
+        // Only update if we have a valid endpoint and a code element to update
+        if (fullEndpoint && fullEndpoint !== 'failed' && codeEl) {
             const urlFormatted = formatUrlDisplay(fullEndpoint);
-            const endpointHtml = `<div><small><code title="${escapeHtml(urlFormatted.title)}">${escapeHtml(urlFormatted.display)}</code></small></div>`;
-            
-            if (existingErrorInfo) {
-                // Preserve existing error information
-                cell.innerHTML = endpointHtml + existingErrorInfo.outerHTML;
-            } else {
-                cell.innerHTML = endpointHtml;
-            }
-        } else if (fullEndpoint === 'failed' || !fullEndpoint) {
-            // For 'failed' or empty endpoint values, check if we should preserve existing content
-            if (!existingErrorInfo) {
-                cell.innerHTML = `<div><small>${escapeHtml(fullEndpoint || '')}</small></div>`;
-            }
-            // If existingErrorInfo exists, keep the current content as is
+            codeEl.textContent = urlFormatted.display;
+            codeEl.title = urlFormatted.title;
         }
+        // Don't touch error information - let Bootstrap tooltips work as initialized
     });
     
     // Initialize session ID badges with colors

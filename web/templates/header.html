@@ -1,6 +1,6 @@
 <!-- Language data stored in data attributes -->
-<div id="languageData" class="d-none-custom" 
-     data-available-languages='{{range $i, $lang := .AvailableLanguages}}{{if $i}},{{end}}"{{$lang.code}}":{"flag":"{{$lang.flag}}","name":"{{$lang.name}}"}{{end}}'
+<div id="languageData" class="d-none-custom"
+     data-available-languages='{{range $i, $lang := .AvailableLanguages}}{{if $i}}, {{end}}"{{$lang.code}}": {"flag": "{{$lang.flag}}", "name": "{{$lang.name}}"}{{end}}'
      data-current-language="{{.CurrentLanguage}}">
 </div>
 

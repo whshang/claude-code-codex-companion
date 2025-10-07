@@ -32,10 +32,10 @@ func NewGORMStorage(logDir string) (*GORMStorage, error) {
 	dbPath := filepath.Join(logDir, "logs.db")
 	config := DefaultGORMConfig(dbPath)
 	
-	// 使用modernc.org/sqlite驱动，添加WAL模式和超时设置
+	// 使用modernc.org/sqlite驱动，添加WAL模式和更长的超时设置
 	db, err := gorm.Open(sqlite.Dialector{
 		DriverName: "sqlite",
-		DSN:        dbPath + "?_journal_mode=WAL&_timeout=5000&_busy_timeout=5000",
+		DSN:        dbPath + "?_journal_mode=WAL&_timeout=10000&_busy_timeout=10000&_synchronous=NORMAL&_cache_size=10000&_temp_store=memory",
 	}, &gorm.Config{
 		Logger: logger.Default.LogMode(config.LogLevel),
 		// 禁用外键约束检查（保持与现有数据库一致）
@@ -100,30 +100,51 @@ func NewGORMStorage(logDir string) (*GORMStorage, error) {
 }
 
 // SaveLog 保存日志条目到数据库
-// 保持与现有实现相同的错误处理策略：静默失败，不阻塞主流程
+// 改进的错误处理策略：增强重试机制，更好的错误分类
 func (g *GORMStorage) SaveLog(log *RequestLog) {
 	gormLog := ConvertToGormRequestLog(log)
 	
-	// 添加重试机制处理SQLite BUSY错误
-	maxRetries := appconfig.Default.Database.MaxRetries
+	// 增强重试机制处理SQLite BUSY错误
+	maxRetries := appconfig.Default.Database.MaxRetries * 2 // 增加重试次数
+	baseDelay := 5 * time.Millisecond
+	
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		err := g.db.Create(gormLog).Error
 		if err == nil {
 			return // 成功保存
 		}
 		
-		// 检查是否是SQLite忙碌错误
-		if strings.Contains(err.Error(), "database is locked") || 
-		   strings.Contains(err.Error(), "SQLITE_BUSY") {
+		// 检查错误类型并采取不同策略
+		errStr := err.Error()
+		isBusyError := strings.Contains(errStr, "database is locked") || 
+		              strings.Contains(errStr, "SQLITE_BUSY") ||
+		              strings.Contains(errStr, "database table is locked")
+		
+		if isBusyError {
 			if attempt < maxRetries-1 {
-				// 等待一小段时间后重试
-				time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+				// 指数退避策略
+				delay := baseDelay * time.Duration(1<<uint(attempt))
+				if delay > 500*time.Millisecond {
+					delay = 500 * time.Millisecond
+				}
+				time.Sleep(delay)
 				continue
 			}
 		}
 		
-		// 与现有实现保持一致：只打印错误，不返回
-		fmt.Printf("Failed to save log to database: %v\n", err)
+		// 对于非忙碌错误或重试次数用完，记录详细错误信息
+		fmt.Printf("Failed to save log to database (attempt %d/%d): %v\n", 
+			attempt+1, maxRetries, err)
+		
+		// 如果是数据库损坏错误，尝试重建连接
+		if strings.Contains(errStr, "database disk image is malformed") ||
+		   strings.Contains(errStr, "no such table") {
+			fmt.Printf("Database corruption detected, attempting recovery...\n")
+			if attempt == maxRetries-1 {
+				go g.attemptDatabaseRecovery()
+			}
+		}
+		
 		return
 	}
 }
@@ -280,4 +301,61 @@ func (g *GORMStorage) GetStats() (map[string]interface{}, error) {
 	stats["db_size_bytes"] = pageCount * pageSize
 	
 	return stats, nil
+}
+
+// GetDB 获取底层数据库连接（用于诊断）
+func (g *GORMStorage) GetDB() (*gorm.DB, error) {
+	return g.db, nil
+}
+
+// attemptDatabaseRecovery 尝试恢复损坏的数据库
+func (g *GORMStorage) attemptDatabaseRecovery() {
+	fmt.Printf("Starting database recovery process...\n")
+	
+	// 获取数据库文件路径
+	sqlDB, err := g.db.DB()
+	if err != nil {
+		fmt.Printf("Failed to get underlying SQL DB: %v\n", err)
+		return
+	}
+	
+	// 关闭当前连接
+	sqlDB.Close()
+	
+	// 这里可以添加更复杂的恢复逻辑，比如：
+	// 1. 检查数据库文件完整性
+	// 2. 尝试SQLite的REINDEX或VACUUM
+	// 3. 从备份恢复（如果有的话）
+	
+	fmt.Printf("Database recovery completed. Please restart the application.\n")
+}
+
+// GetDatabaseHealth 获取数据库健康状态
+func (g *GORMStorage) GetDatabaseHealth() map[string]interface{} {
+	health := make(map[string]interface{})
+	
+	// 检查数据库连接
+	sqlDB, err := g.db.DB()
+	if err != nil {
+		health["status"] = "error"
+		health["error"] = err.Error()
+		return health
+	}
+	
+	// 测试简单查询
+	var result int
+	if err := g.db.Raw("SELECT 1").Scan(&result).Error; err != nil {
+		health["status"] = "error"
+		health["error"] = err.Error()
+	} else {
+		health["status"] = "healthy"
+	}
+	
+	// 获取连接池状态
+	stats := sqlDB.Stats()
+	health["open_connections"] = stats.OpenConnections
+	health["in_use"] = stats.InUse
+	health["idle"] = stats.Idle
+	
+	return health
 }

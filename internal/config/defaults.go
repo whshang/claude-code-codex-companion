@@ -80,6 +80,16 @@ type DefaultValues struct {
 		PipelineTimeout string
 	}
 
+	// 拉黑配置默认值
+	Blacklist struct {
+		Enabled            bool
+		AutoBlacklist      bool
+		BusinessErrorSafe  bool
+		ConfigErrorSafe    bool
+		ServerErrorSafe    bool
+		SSEValidationSafe  bool
+	}
+
 	// 数据库配置默认值
 	Database struct {
 		CacheSize       int
@@ -242,6 +252,22 @@ var Default = DefaultValues{
 		PipelineTimeout string
 	}{
 		PipelineTimeout: "5s",
+	},
+
+	Blacklist: struct {
+		Enabled            bool
+		AutoBlacklist      bool
+		BusinessErrorSafe  bool
+		ConfigErrorSafe    bool
+		ServerErrorSafe    bool
+		SSEValidationSafe  bool
+	}{
+		Enabled:            true,  // 默认启用拉黑功能
+		AutoBlacklist:      true,  // 默认启用自动拉黑
+		BusinessErrorSafe:  true,  // 默认业务错误不触发拉黑
+		ConfigErrorSafe:    false, // 默认配置错误会触发拉黑
+		ServerErrorSafe:    false, // 默认服务器错误会触发拉黑
+		SSEValidationSafe:  false, // 默认SSE验证错误会触发拉黑
 	},
 
 	Database: struct {

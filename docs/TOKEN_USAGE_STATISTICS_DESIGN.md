@@ -60,30 +60,24 @@ CREATE TABLE request_logs (
 
 ## 技术实现方案
 
-### 语言选择
-**推荐使用 Python**，原因：
-1. 优秀的 SQLite 支持（sqlite3 模块）
-2. 强大的 JSON 处理能力
-3. 方便的数据统计和格式化输出
-4. 作为独立脚本，易于部署和运行
+### 实现路径规划
 
-### 核心逻辑流程
+可以按以下步骤落地统计逻辑（不限定具体编程语言）：
 
-```python
-1. 连接 SQLite 数据库
+1. 连接 SQLite 数据库，确认时间范围与索引使用情况。
 2. 构建 SQL 查询语句，应用所有筛选条件：
-   - timestamp BETWEEN '2025-08-26 14:00:00' AND '2025-08-26 18:00:00' (需要考虑GMT+8时区转换)
+   - timestamp BETWEEN '2025-08-26 14:00:00' AND '2025-08-26 18:00:00'（考虑 GMT+8 与数据库时区的换算）。
    - endpoint LIKE '%api.anthropic.com%'
    - status_code = 200
-   - model NOT LIKE '%haiku%' (或处理 model 为空的情况)
+   - model NOT LIKE '%haiku%'（处理大小写与空值情况）。
 3. 遍历查询结果：
-   a. 解析 original_response_body（JSON）提取 usage 信息
-   b. 解析 original_response_headers（JSON）提取 rate limit 状态
-   c. 按状态分组累计统计
-4. 格式化输出统计结果
-```
+   - 解析 original_response_body（JSON）提取 usage 信息。
+   - 解析 original_response_headers（JSON）提取 rate limit 状态。
+   - 按状态分组累计统计并输出统一格式的结果。
 
-### SQL 查询语句设计
+上述步骤既可通过 Go/SQL 执行，也可在 Web 界面中调用 API 来实现。
+
+### SQL 查询语句示例
 
 ```sql
 -- 注意：需要根据数据库中时间戳的存储格式调整时间范围
@@ -177,14 +171,12 @@ Total Processed Records: 177
 4. **内存使用**：如果数据量大，考虑分批处理
 5. **脚本独立性**：不依赖主项目的任何模块，可独立运行
 
-## 文件结构建议
+## 实现建议
 
-```
-token_usage_analyzer.py          # 主脚本文件
-├── 数据库连接和查询
-├── JSON 解析和数据提取  
-├── 统计聚合逻辑
-└── 结果格式化输出
-```
+可以通过以下方式实现Token使用统计分析：
+
+1. **Go实现**：在项目中添加独立的统计分析命令
+2. **SQL查询**：直接通过SQL查询生成统计报告
+3. **Web界面**：在管理后台添加Token统计分析页面
 
 该设计确保了程序的独立性和可维护性，同时充分利用了现有数据库结构中的所有相关信息。

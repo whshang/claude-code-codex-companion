@@ -48,5 +48,7 @@ require (
 	google.golang.org/protobuf v1.33.0 // indirect
 	modernc.org/libc v1.66.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
+modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/cosmtrek/air => github.com/air-verse/air v1.63.0

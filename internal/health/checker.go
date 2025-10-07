@@ -17,15 +17,13 @@ type Checker struct {
 	extractor       *RequestExtractor
 	healthTimeouts  config.HealthCheckTimeoutConfig
 	modelRewriter   *modelrewrite.Rewriter
-	converter       conversion.Converter
 }
 
-func NewChecker(healthTimeouts config.HealthCheckTimeoutConfig, modelRewriter *modelrewrite.Rewriter, converter conversion.Converter) *Checker {
+func NewChecker(healthTimeouts config.HealthCheckTimeoutConfig, modelRewriter *modelrewrite.Rewriter) *Checker {
 	return &Checker{
 		extractor:      NewRequestExtractor(),
 		healthTimeouts: healthTimeouts,
 		modelRewriter:  modelRewriter,
-		converter:      converter,
 	}
 }
 
@@ -93,19 +91,22 @@ func (c *Checker) CheckEndpoint(ep *endpoint.Endpoint) error {
 	}
 
 	// 格式转换（在模型重写之后）
-	if c.converter.ShouldConvert(ep.EndpointType) {
-		// 创建端点信息
+	// 注意：健康检查的请求已经是Anthropic格式，只在需要时转换为OpenAI格式
+	shouldConvert := ep.EndpointType == "openai" && ep.URLOpenAI != "" && ep.URLAnthropic == ""
+	if shouldConvert {
+		// 将Anthropic格式请求转换为OpenAI格式
+		reqConverter := conversion.NewRequestConverter(nil)
 		endpointInfo := &conversion.EndpointInfo{
 			Type:               ep.EndpointType,
 			MaxTokensFieldName: ep.MaxTokensFieldName,
 		}
-		
-		convertedBody, _, err := c.converter.ConvertRequest(finalRequestBody, endpointInfo)
+
+		convertedBody, _, err := reqConverter.Convert(finalRequestBody, endpointInfo)
 		if err != nil {
 			return fmt.Errorf("request format conversion failed during health check: %v", err)
 		}
 		finalRequestBody = convertedBody
-		
+
 		// 对于OpenAI端点，需要更新目标URL
 		targetURL = ep.GetFullURL("/chat/completions")
 	}

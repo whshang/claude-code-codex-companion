@@ -45,12 +45,9 @@ func (p *EndpointProfile) ToEndpointConfig(name, authValue, defaultModel, url st
 	if finalURL == "" {
 		finalURL = p.URL
 	}
-	
+
 	endpoint := EndpointConfig{
 		Name:              name,
-		URL:               finalURL,
-		EndpointType:      p.EndpointType,
-		PathPrefix:        p.PathPrefix,
 		AuthType:          p.AuthType,
 		AuthValue:         authValue,
 		Enabled:           true,
@@ -60,7 +57,18 @@ func (p *EndpointProfile) ToEndpointConfig(name, authValue, defaultModel, url st
 		Proxy:             nil,
 		OAuthConfig:       nil,
 	}
-	
+
+	// 根据预设的endpoint_type确定URL字段的赋值
+	// 新格式下使用url_anthropic或url_openai
+	if p.EndpointType == "anthropic" || p.EndpointType == "" {
+		endpoint.URLAnthropic = finalURL
+	} else if p.EndpointType == "openai" {
+		endpoint.URLOpenAI = finalURL
+	} else {
+		// 未知类型，默认为Anthropic
+		endpoint.URLAnthropic = finalURL
+	}
+
 	// 如果需要默认模型且提供了模型名称，添加模型重写配置
 	if p.RequireDefaultModel && defaultModel != "" {
 		endpoint.ModelRewrite = &ModelRewriteConfig{
@@ -73,7 +81,7 @@ func (p *EndpointProfile) ToEndpointConfig(name, authValue, defaultModel, url st
 			},
 		}
 	}
-	
+
 	return endpoint
 }
 

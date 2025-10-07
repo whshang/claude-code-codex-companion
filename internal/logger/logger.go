@@ -69,19 +69,37 @@ type RequestLog struct {
 	DetectedBy         string  `json:"detected_by,omitempty"`          // 检测方法: "path" | "body-structure" | "default"
 }
 
-// StorageInterface defines the interface for log storage backends
-type StorageInterface interface {
-	SaveLog(log *RequestLog)
+// LoggerInterface 日志接口
+type LoggerInterface interface {
+	// 基本日志功能
+	LogRequest(req *RequestLog)
 	GetLogs(limit, offset int, failedOnly bool) ([]*RequestLog, int, error)
 	GetAllLogsByRequestID(requestID string) ([]*RequestLog, error)
 	CleanupLogsByDays(days int) (int64, error)
 	Close() error
+	
+	// 统计功能
+	GetStats() (map[string]interface{}, error)
+	
+	// 健康检查功能
+	GetDatabaseHealth() map[string]interface{}
+	GetStorage() interface{} // 返回底层存储实现
 }
 
 type Logger struct {
 	logger  *logrus.Logger
 	storage StorageInterface
 	config  LogConfig
+}
+
+// StorageInterface 定义存储接口
+type StorageInterface interface {
+	SaveLog(log *RequestLog)
+	GetLogs(limit, offset int, failedOnly bool) ([]*RequestLog, int, error)
+	GetAllLogsByRequestID(requestID string) ([]*RequestLog, error)
+	CleanupLogsByDays(days int) (int64, error)
+	Close() error
+	GetStats() (map[string]interface{}, error)
 }
 
 type LogConfig struct {
@@ -278,5 +296,29 @@ func (l *Logger) Close() error {
 		return l.storage.Close()
 	}
 	return nil
+}
+
+// GetDatabaseHealth 获取数据库健康状态
+func (l *Logger) GetDatabaseHealth() map[string]interface{} {
+	if gormStorage, ok := l.storage.(*GORMStorage); ok {
+		return gormStorage.GetDatabaseHealth()
+	}
+	return map[string]interface{}{
+		"status": "unknown",
+		"message": "Not using GORM storage",
+	}
+}
+
+// GetStorage 获取底层存储实现
+func (l *Logger) GetStorage() interface{} {
+	return l.storage
+}
+
+// GetStats 获取统计信息
+func (l *Logger) GetStats() (map[string]interface{}, error) {
+	if l.storage == nil {
+		return nil, fmt.Errorf("storage not available")
+	}
+	return l.storage.GetStats()
 }
 

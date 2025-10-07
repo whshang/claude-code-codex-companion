@@ -27,6 +27,30 @@ const (
 // MaxEndpointRetries 单个端点最大重试次数
 const MaxEndpointRetries = 2
 
+// shouldSkipHealthRecord 根据错误类型和配置决定是否跳过健康统计记录
+func (s *Server) shouldSkipHealthRecord(errorCategory ErrorCategory) bool {
+	// 如果全局拉黑功能被禁用，跳过所有健康统计
+	if !s.config.Blacklist.Enabled {
+		return true
+	}
+	
+	// 如果自动拉黑被禁用，跳过所有健康统计
+	if !s.config.Blacklist.AutoBlacklist {
+		return true
+	}
+	
+	switch errorCategory {
+	case ErrorCategoryBusinessError:
+		return s.config.Blacklist.BusinessErrorSafe
+	case ErrorCategoryConfigError:
+		return s.config.Blacklist.ConfigErrorSafe
+	case ErrorCategoryServerError:
+		return s.config.Blacklist.ServerErrorSafe
+	default:
+		return false
+	}
+}
+
 // tryProxyRequestWithRetry 尝试向端点发送请求，支持单端点重试
 func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint, requestBody []byte, requestID string, startTime time.Time, path string, taggedRequest *tagging.TaggedRequest, globalAttemptNumber int) (success bool, shouldTryNextEndpoint bool) {
 	// 检查端点是否被拉黑，如果是则记录虚拟日志并跳过
@@ -79,18 +103,8 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 		// 记录失败，但检查是否为 count_tokens 请求，如果是则不计入健康统计
 		skipHealthRecord, _ := c.Get("skip_health_record")
 		isCountTokensRequest := strings.Contains(path, "/count_tokens")
-		shouldSkip := (skipHealthRecord == true) || isCountTokensRequest
-		if !shouldSkip {
-			s.endpointManager.RecordRequest(ep.ID, false, requestID)
-		}
 		
-		// 如果明确指示不应重试任何地方，直接返回
-		if !shouldRetryAnywhere {
-			s.logger.Debug(fmt.Sprintf("Endpoint %s indicated no retry should be attempted", ep.Name))
-			return false, false
-		}
-		
-		// 从context中获取最后一次的错误信息和状态码（如果有的话）
+		// 获取错误分类以决定是否跳过健康统计
 		var lastError error
 		var lastStatusCode int
 		if errInterface, exists := c.Get("last_error"); exists {
@@ -103,6 +117,22 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 				lastStatusCode = status
 			}
 		}
+		errorCategory := s.categorizeError(lastError, lastStatusCode)
+		shouldSkipByConfig := s.shouldSkipHealthRecord(errorCategory)
+		
+		shouldSkip := (skipHealthRecord == true) || isCountTokensRequest || shouldSkipByConfig
+		if !shouldSkip {
+			s.endpointManager.RecordRequest(ep.ID, false, requestID)
+		}
+		
+		// 如果明确指示不应重试任何地方，直接返回
+		if !shouldRetryAnywhere {
+			s.logger.Debug(fmt.Sprintf("Endpoint %s indicated no retry should be attempted", ep.Name))
+			return false, false
+		}
+		
+		// 从context中获取最后一次的错误信息和状态码（如果有的话）
+		// 重用之前声明的 lastError 和 lastStatusCode 变量
 		
 		// 根据错误类型确定重试行为
 		retryBehavior := s.determineRetryBehaviorFromError(lastError, lastStatusCode, endpointAttempt)
@@ -145,6 +175,8 @@ const (
 	ErrorCategorySSEValidationError  ErrorCategory = 4 // SSE流不完整验证错误，原地重试
 	ErrorCategoryOtherValidationError ErrorCategory = 5 // 其他验证错误，切换端点
 	ErrorCategoryResponseTimeoutError ErrorCategory = 6 // 响应超时错误，切换端点
+	ErrorCategoryBusinessError       ErrorCategory = 7 // 业务错误，根据配置决定
+	ErrorCategoryConfigError         ErrorCategory = 8 // 配置错误，根据配置决定
 )
 
 // determineRetryBehaviorFromError 根据错误信息确定重试行为
@@ -210,7 +242,7 @@ func (s *Server) determineRetryBehaviorFromError(err error, statusCode int, curr
 // categorizeError 对错误进行分类
 func (s *Server) categorizeError(err error, statusCode int) ErrorCategory {
 	if err == nil {
-		// 基于HTTP状态码判断
+		// 基于HTTP状态码判断（初步判断）
 		if statusCode >= 400 && statusCode < 500 {
 			return ErrorCategoryClientError
 		} else if statusCode >= 500 {
@@ -218,25 +250,46 @@ func (s *Server) categorizeError(err error, statusCode int) ErrorCategory {
 		}
 		return ErrorCategoryClientError
 	}
-	
+
 	errStr := err.Error()
-	
-	// 客户端错误（基于错误字符串判断的特定错误仍然直接切换端点）
+
+	// 🔍 优先检测服务端异常标志（即使返回 4xx 状态码）
+	// 常见的服务端内部错误特征：NPE、空指针、内部异常等
+	if strings.Contains(errStr, "is null") ||
+	   strings.Contains(errStr, "Cannot invoke") ||
+	   strings.Contains(errStr, "NullPointerException") ||
+	   strings.Contains(errStr, "null pointer") ||
+	   strings.Contains(errStr, "Internal Server Error") ||
+	   strings.Contains(errStr, "internal error") ||
+	   strings.Contains(errStr, "500") {
+		return ErrorCategoryServerError
+	}
+
+	// 业务错误（根据配置决定是否拉黑）
+	if strings.Contains(errStr, "business error:") ||
+	   strings.Contains(errStr, "API error:") ||
+	   strings.Contains(errStr, "rate limit") ||
+	   strings.Contains(errStr, "quota exceeded") ||
+	   strings.Contains(errStr, "invalid request") {
+		return ErrorCategoryBusinessError
+	}
+
+	// 配置错误（根据配置决定是否拉黑）
 	if strings.Contains(errStr, "Request format conversion failed") ||
 	   strings.Contains(errStr, "Authentication failed") ||
 	   strings.Contains(errStr, "Failed to create request") ||
 	   strings.Contains(errStr, "Failed to create final request") ||
 	   strings.Contains(errStr, "Failed to read rewritten request body") ||
 	   strings.Contains(errStr, "Failed to decompress response body") {
-		return ErrorCategoryClientError
+		return ErrorCategoryConfigError
 	}
-	
+
 	// Usage验证错误（原地重试）
 	if strings.Contains(errStr, "Usage validation failed") ||
 	   strings.Contains(errStr, "invalid usage stats") {
 		return ErrorCategoryUsageValidationError
 	}
-	
+
 	// SSE流不完整验证错误（原地重试）
 	if strings.Contains(errStr, "Incomplete SSE stream") ||
 	   strings.Contains(errStr, "incomplete SSE stream") ||
@@ -245,7 +298,7 @@ func (s *Server) categorizeError(err error, statusCode int) ErrorCategory {
 	   strings.Contains(errStr, "missing finish_reason") {
 		return ErrorCategorySSEValidationError
 	}
-	
+
 	// 其他验证错误（切换端点）
 	if strings.Contains(errStr, "validation failed") ||
 	   strings.Contains(errStr, "Response format conversion failed") {
@@ -391,20 +444,19 @@ func (s *Server) isEndpointCompatibleWithFormat(ep *endpoint.Endpoint, requestFo
 		return false
 	}
 
-	// 格式兼容性规则：
-	// 1. OpenAI 请求 → 只能选择 OpenAI 端点（不支持 OpenAI → Anthropic 转换）
-	// 2. Anthropic 请求 → 优先 Anthropic 端点，也可以选择 OpenAI 端点（支持 Anthropic → OpenAI 转换）
+	// 新的格式兼容性规则（基于实际配置的URL）：
+	// 1. OpenAI 请求 → 需要端点配置了 url_openai
+	// 2. Anthropic 请求 → 需要端点配置了 url_anthropic
+	// 3. 如果端点同时配置了两个URL，则支持两种格式
 
 	if requestFormat == "openai" {
-		// OpenAI 请求只能发到 OpenAI 端点
-		return ep.EndpointType == "openai"
+		// OpenAI 请求需要端点有 url_openai
+		return ep.URLOpenAI != ""
 	}
 
 	if requestFormat == "anthropic" {
-		// Anthropic 请求可以发到任何端点
-		// - 发到 Anthropic 端点：直接透传
-		// - 发到 OpenAI 端点：自动转换
-		return true
+		// Anthropic 请求需要端点有 url_anthropic
+		return ep.URLAnthropic != ""
 	}
 
 	// 未知格式，保持向后兼容

@@ -24,6 +24,12 @@
                             <small class="text-muted" data-t="config_changes_auto_save">配置变更自动保存，实时生效</small>
                         </div>
                         <div class="btn-group">
+                            <button class="btn btn-outline-warning" data-action="reset-all-endpoints">
+                                <i class="fas fa-sync-alt"></i> <span data-t="reset_all">全部重置</span>
+                            </button>
+                            <button class="btn btn-outline-info" data-action="test-all-endpoints" title="测试所有启用的端点">
+                                <i class="fas fa-vial"></i> <span data-t="batch_test">批量测试</span>
+                            </button>
                             <button class="btn btn-outline-primary" data-action="show-endpoint-wizard">
                                 <i class="fas fa-magic"></i> <span data-t="wizard_add">向导添加</span>
                             </button>
@@ -47,14 +53,13 @@
                                             <th data-t="priority">优先级</th>
                                             <th data-t="name">名称</th>
                                             <th data-t="url">URL</th>
-                                            <th data-t="type">类型</th>
-                                            <th data-t="path">路径</th>
                                             <th data-t="authentication_method">认证方式</th>
                                             <th data-t="proxy">代理</th>
                                             <th data-t="tags">标签</th>
+                                            <th data-t="response">响应</th>
                                             <th data-t="status">状态</th>
                                             <th data-t="enable">启用</th>
-                                            <th width="160" data-t="actions">操作</th>
+                                            <th width="200" data-t="actions">操作</th>
                                         </tr>
                                     </thead>
                                     <tbody id="special-endpoint-list">
@@ -78,14 +83,13 @@
                                             <th data-t="priority">优先级</th>
                                             <th data-t="name">名称</th>
                                             <th data-t="url">URL</th>
-                                            <th data-t="type">类型</th>
-                                            <th data-t="path">路径</th>
                                             <th data-t="authentication_method">认证方式</th>
                                             <th data-t="proxy">代理</th>
                                             <th data-t="tags">标签</th>
+                                            <th data-t="response">响应</th>
                                             <th data-t="status">状态</th>
                                             <th data-t="enable">启用</th>
-                                            <th width="160" data-t="actions">操作</th>
+                                            <th width="200" data-t="actions">操作</th>
                                         </tr>
                                     </thead>
                                     <tbody id="general-endpoint-list">
@@ -113,6 +117,7 @@
     <script src="/static/endpoints-config.js"></script>
     <script src="/static/endpoints-advanced.js"></script>
     <script src="/static/endpoint-wizard.js"></script>
+    <script src="/static/endpoints-test.js?v=2"></script>
 
     {{template "footer.html" .}}
 </body>

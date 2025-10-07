@@ -18,6 +18,7 @@ func deepCopyConfig(src *config.Config) config.Config {
 		Validation:  src.Validation,
 		Timeouts:    src.Timeouts, // 新的TimeoutConfig是值类型，可以直接赋值
 		I18n:        src.I18n,
+		Blacklist:   src.Blacklist,
 	}
 	
 	// 深拷贝 Tagging.Taggers slice
@@ -94,6 +95,24 @@ func (s *AdminServer) handleSettingsPage(c *gin.Context) {
 	s.renderHTML(c, "settings.html", data)
 }
 
+// handleGetSettings handles getting current server settings
+func (s *AdminServer) handleGetSettings(c *gin.Context) {
+	// 返回当前设置（不包含敏感信息如端点认证等）
+	settings := gin.H{
+		"server": gin.H{
+			"host": s.config.Server.Host,
+			"port": s.config.Server.Port,
+		},
+		"logging": s.config.Logging,
+		"validation": s.config.Validation,
+		"timeouts": s.config.Timeouts,
+		"blacklist": s.config.Blacklist,
+		"i18n": s.config.I18n,
+	}
+	
+	c.JSON(http.StatusOK, settings)
+}
+
 // handleUpdateSettings handles updating server settings
 func (s *AdminServer) handleUpdateSettings(c *gin.Context) {
 	// 定义请求结构
@@ -102,6 +121,7 @@ func (s *AdminServer) handleUpdateSettings(c *gin.Context) {
 		Logging    config.LoggingConfig        `json:"logging"`
 		Validation config.ValidationConfig    `json:"validation"`
 		Timeouts   config.TimeoutConfig        `json:"timeouts"`
+		Blacklist  config.BlacklistConfig      `json:"blacklist"`
 	}
 
 	var request SettingsRequest
@@ -119,6 +139,7 @@ func (s *AdminServer) handleUpdateSettings(c *gin.Context) {
 	newConfig.Logging = request.Logging
 	newConfig.Validation = request.Validation
 	newConfig.Timeouts = request.Timeouts
+	newConfig.Blacklist = request.Blacklist
 
 	// 验证新配置
 	if err := config.ValidateConfig(&newConfig); err != nil {
@@ -148,17 +169,63 @@ func (s *AdminServer) handleUpdateSettings(c *gin.Context) {
 
 // handleHelpPage 处理帮助页面
 func (s *AdminServer) handleHelpPage(c *gin.Context) {
+	// 调试日志
+	if s.logger != nil {
+		s.logger.Info("handleHelpPage called", map[string]interface{}{
+			"path": c.Request.URL.Path,
+			"method": c.Request.Method,
+		})
+	}
+
 	// 获取基础 URL（从请求中推断）
 	scheme := "http"
 	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
-	
+
 	baseURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
-	
+
+	// 创建模板数据
 	data := s.mergeTemplateData(c, "help", map[string]interface{}{
 		"Title":   "Claude Code Setup Guide",
 		"BaseURL": baseURL,
 	})
+
+	if s.logger != nil {
+		s.logger.Info("About to call c.HTML with help.html template", map[string]interface{}{
+			"data_keys": fmt.Sprintf("%+v", data),
+		})
+	}
+
+	c.HTML(200, "help.html", data)
+
+	if s.logger != nil {
+		s.logger.Info("c.HTML call completed successfully", nil)
+	}
+	return
+
+	// 原始模板渲染逻辑（暂时注释掉）
+	/*
+	// 获取基础 URL（从请求中推断）
+	scheme := "http"
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+
+	baseURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
+
+	data := s.mergeTemplateData(c, "help", map[string]interface{}{
+		"Title":   "Claude Code Setup Guide",
+		"BaseURL": baseURL,
+	})
+
+	// 调试日志
+	if s.logger != nil {
+		s.logger.Info("Rendering help template", map[string]interface{}{
+			"data_keys": fmt.Sprintf("%+v", data),
+		})
+	}
+
 	s.renderHTML(c, "help.html", data)
+	*/
 }

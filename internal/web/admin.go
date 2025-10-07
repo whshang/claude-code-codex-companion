@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"claude-code-codex-companion/internal/config"
 	"claude-code-codex-companion/internal/endpoint"
@@ -21,16 +22,23 @@ type HotUpdateHandler interface {
 	HotUpdateConfig(newConfig *config.Config) error
 }
 
+// PersistenceHandler defines the interface for persisting learned endpoint configuration
+type PersistenceHandler interface {
+	PersistEndpointLearning(ep *endpoint.Endpoint)
+}
+
 type AdminServer struct {
-	config            *config.Config
-	endpointManager   *endpoint.Manager
-	taggingManager    *tagging.Manager
-	logger            *logger.Logger
-	configFilePath    string
-	hotUpdateHandler  HotUpdateHandler
-	version           string
-	i18nManager       *i18n.Manager
-	csrfManager       *security.CSRFManager
+	config              *config.Config
+	endpointManager     *endpoint.Manager
+	taggingManager      *tagging.Manager
+	logger              *logger.Logger
+	configFilePath      string
+	hotUpdateHandler    HotUpdateHandler
+	persistenceHandler  PersistenceHandler
+	version             string
+	i18nManager         *i18n.Manager
+	csrfManager         *security.CSRFManager
+	startTime           time.Time
 }
 
 func NewAdminServer(cfg *config.Config, endpointManager *endpoint.Manager, taggingManager *tagging.Manager, log *logger.Logger, configFilePath string, version string, i18nManager *i18n.Manager) *AdminServer {
@@ -43,6 +51,7 @@ func NewAdminServer(cfg *config.Config, endpointManager *endpoint.Manager, taggi
 		version:         version,
 		i18nManager:     i18nManager,
 		csrfManager:     security.NewCSRFManager(),
+		startTime:       time.Now(),
 	}
 }
 
@@ -51,15 +60,78 @@ func (s *AdminServer) SetHotUpdateHandler(handler HotUpdateHandler) {
 	s.hotUpdateHandler = handler
 }
 
+// SetPersistenceCallbacks sets the persistence handler for learned configuration
+func (s *AdminServer) SetPersistenceCallbacks(handler PersistenceHandler) {
+	s.persistenceHandler = handler
+}
+
+// PersistAuthType 持久化端点的认证类型（通过 PersistenceHandler）
+func (s *AdminServer) PersistAuthType(ep *endpoint.Endpoint, authType string) {
+	if s.persistenceHandler != nil {
+		// 更新内存中的端点配置
+		ep.AuthType = authType
+		// 调用持久化处理器
+		s.persistenceHandler.PersistEndpointLearning(ep)
+	}
+}
+
+// PersistOpenAIPreference 持久化端点的OpenAI格式偏好（通过 PersistenceHandler）
+func (s *AdminServer) PersistOpenAIPreference(ep *endpoint.Endpoint, preference string) {
+	if s.persistenceHandler != nil {
+		// 更新内存中的端点配置
+		ep.OpenAIPreference = preference
+		// 调用持久化处理器
+		s.persistenceHandler.PersistEndpointLearning(ep)
+	}
+}
+
 // renderHTML renders template with i18n support
 func (s *AdminServer) renderHTML(c *gin.Context, templateName string, data map[string]interface{}) {
+	// 调试日志
+	if s.logger != nil {
+		s.logger.Info("renderHTML called", map[string]interface{}{
+			"template": templateName,
+			"data":     fmt.Sprintf("%+v", data),
+		})
+	}
+
+	// 添加recover来捕获任何panic
+	defer func() {
+		if r := recover(); r != nil {
+			errMsg := fmt.Sprintf("Panic in renderHTML: %v", r)
+			if s.logger != nil {
+				s.logger.Error(errMsg, nil)
+			}
+			c.JSON(500, gin.H{"error": "Internal server error"})
+		}
+	}()
+
 	// Always detect language fresh
 	lang := s.i18nManager.GetDetector().DetectLanguage(c)
 	i18n.SetLanguageToContext(c, lang)
-	
+
 	// If i18n is disabled or language is default, render normally
 	if s.i18nManager == nil || !s.i18nManager.IsEnabled() || lang == s.i18nManager.GetDefaultLanguage() {
+		if s.logger != nil {
+			s.logger.Info("Rendering directly with c.HTML", map[string]interface{}{
+				"template": templateName,
+			})
+		}
+
+		// 在调用c.HTML之前添加更多调试信息
+		if s.logger != nil {
+			s.logger.Info("About to call c.HTML", map[string]interface{}{
+				"template": templateName,
+			})
+		}
+
 		c.HTML(200, templateName, data)
+
+		if s.logger != nil {
+			s.logger.Info("c.HTML call completed", map[string]interface{}{
+				"template": templateName,
+			})
+		}
 		return
 	}
 	
@@ -140,6 +212,11 @@ func calculateSuccessRate(successRequests, totalRequests int) string {
 
 // hotUpdateEndpoints performs hot update of endpoints configuration
 func (s *AdminServer) hotUpdateEndpoints(endpoints []config.EndpointConfig) error {
+	// 首先验证端点配置的基本有效性
+	if err := s.validateEndpointsConfig(endpoints); err != nil {
+		return fmt.Errorf("endpoint validation failed: %v", err)
+	}
+
 	if s.hotUpdateHandler == nil {
 		// 回退到旧的更新方式
 		return s.saveEndpointsToConfig(endpoints)
@@ -169,6 +246,37 @@ func (s *AdminServer) hotUpdateEndpoints(endpoints []config.EndpointConfig) erro
 	return nil
 }
 
+// validateEndpointsConfig 验证端点配置的基本有效性
+func (s *AdminServer) validateEndpointsConfig(endpoints []config.EndpointConfig) error {
+	if len(endpoints) == 0 {
+		return fmt.Errorf("at least one endpoint must be configured")
+	}
+
+	// 检查端点名称唯一性
+	nameSet := make(map[string]bool)
+	for _, ep := range endpoints {
+		if ep.Name == "" {
+			return fmt.Errorf("endpoint name cannot be empty")
+		}
+		if nameSet[ep.Name] {
+			return fmt.Errorf("duplicate endpoint name: %s", ep.Name)
+		}
+		nameSet[ep.Name] = true
+
+		// 检查URL格式
+		if ep.URLAnthropic == "" && ep.URLOpenAI == "" {
+			return fmt.Errorf("endpoint %s must have at least one URL configured", ep.Name)
+		}
+
+		// 检查认证配置
+		if ep.AuthValue == "" {
+			return fmt.Errorf("endpoint %s must have authentication configured", ep.Name)
+		}
+	}
+
+	return nil
+}
+
 // updateConfigWithRollback 执行配置更新，失败时自动回滚
 func (s *AdminServer) updateConfigWithRollback(updateFunc func() error, rollbackFunc func() error) error {
 	if err := updateFunc(); err != nil {
@@ -190,10 +298,21 @@ func (s *AdminServer) updateConfigWithRollback(updateFunc func() error, rollback
 // RegisterRoutes 注册管理界面路由到指定的 router
 func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 	// 加载嵌入的模板
+	if s.logger != nil {
+		s.logger.Info("Loading embedded templates...", nil)
+	}
+
 	templates, err := webres.LoadTemplates()
 	if err != nil {
 		panic("Failed to load embedded templates: " + err.Error())
 	}
+
+	if s.logger != nil {
+		s.logger.Info("Templates loaded successfully", map[string]interface{}{
+			"template_count": len(templates.Templates()),
+		})
+	}
+
 	router.SetHTMLTemplate(templates)
 	
 	// 设置静态文件服务器（使用嵌入的文件系统）
@@ -206,12 +325,20 @@ func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 	// 注册根目录帮助页面
 	router.GET("/", s.handleHelpPage)
 
+	// 注册健康检查路由（不需要认证）
+	router.GET("/admin/health", s.handleHealthCheck)
+	router.GET("/admin/health/diagnostics", s.handleDiagnostics)
+	router.GET("/admin/health/database", s.handleDatabaseDiagnostics)
+
 	// 注册页面路由
 	router.GET("/admin/", s.handleDashboard)
 	router.GET("/admin/endpoints", s.handleEndpointsPage)
 	router.GET("/admin/taggers", s.handleTaggersPage)
 	router.GET("/admin/logs", s.handleLogsPage)
 	router.GET("/admin/settings", s.handleSettingsPage)
+
+	// 健康检查路由（无需认证）
+	router.GET("/admin/diagnostics", s.handleDiagnostics)
 
 	// 注册 API 路由，添加UTF-8字符集中间件和CSRF防护
 	api := router.Group("/admin/api")
@@ -231,8 +358,12 @@ func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 		api.POST("/endpoints/:id/copy", s.handleCopyEndpoint)
 		api.POST("/endpoints/:id/toggle", s.handleToggleEndpoint)
 		api.POST("/endpoints/:id/reset-status", s.handleResetEndpointStatus)
+		api.POST("/endpoints/reset-all-status", s.handleResetAllEndpointsStatus)
 		api.POST("/endpoints/reorder", s.handleReorderEndpoints)
-		
+		api.POST("/endpoints/:id/test", s.handleTestEndpoint)
+		api.POST("/endpoints/test-all", s.handleTestAllEndpoints)
+		api.GET("/endpoints/test-all-stream", s.handleTestAllEndpointsStream)
+
 		// 端点向导路由
 		s.registerEndpointWizardRoutes(api)
 		
@@ -248,6 +379,7 @@ func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 		api.GET("/logs/:request_id/export", s.handleExportDebugInfo)
 		api.PUT("/config", s.handleHotUpdateConfig)
 		api.GET("/config", s.handleGetConfig)
+		api.GET("/settings", s.handleGetSettings)
 		api.PUT("/settings", s.handleUpdateSettings)
 		
 		// 翻译API
@@ -350,4 +482,33 @@ func (s *AdminServer) handleGetTranslations(c *gin.Context) {
 	
 	c.JSON(http.StatusOK, response)
 }
+
+// handleDatabaseDiagnostics 数据库诊断信息
+func (s *AdminServer) handleDatabaseDiagnostics(c *gin.Context) {
+	diagnostics := make(map[string]interface{})
+	
+	// 获取数据库健康状态
+	diagnostics["health"] = s.logger.GetDatabaseHealth()
+	
+	// 获取数据库统计信息
+	if stats, err := s.logger.GetStats(); err != nil {
+		diagnostics["stats_error"] = err.Error()
+	} else {
+		diagnostics["stats"] = stats
+	}
+	
+	// 获取存储类型信息
+	storage := s.logger.GetStorage()
+	if storage != nil {
+		diagnostics["storage_type"] = "gorm"
+	} else {
+		diagnostics["storage_type"] = "unknown"
+	}
+	
+	c.JSON(http.StatusOK, diagnostics)
+}
+
+
+
+
 

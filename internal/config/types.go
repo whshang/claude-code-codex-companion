@@ -8,6 +8,7 @@ type Config struct {
 	Tagging     TaggingConfig     `yaml:"tagging"`     // 标签系统配置（永远启用）
 	Timeouts    TimeoutConfig     `yaml:"timeouts"`    // 超时配置
 	I18n        I18nConfig        `yaml:"i18n"`        // 国际化配置
+	Blacklist   BlacklistConfig   `yaml:"blacklist"`   // 端点拉黑配置
 }
 
 // I18nConfig 国际化配置
@@ -24,9 +25,8 @@ type ServerConfig struct {
 
 type EndpointConfig struct {
 	Name              string              `yaml:"name"`
-	URL               string              `yaml:"url"`
-	EndpointType      string              `yaml:"endpoint_type"` // "anthropic" | "openai" 等
-	PathPrefix        string              `yaml:"path_prefix,omitempty"` // OpenAI端点的路径前缀，如 "/v1/chat/completions"
+	URLAnthropic      string              `yaml:"url_anthropic,omitempty"` // Anthropic格式URL
+	URLOpenAI         string              `yaml:"url_openai,omitempty"`    // OpenAI格式URL
 	AuthType          string              `yaml:"auth_type"`
 	AuthValue         string              `yaml:"auth_value"`
 	Enabled           bool                `yaml:"enabled"`
@@ -42,6 +42,7 @@ type EndpointConfig struct {
 	RateLimitStatus     *string           `yaml:"rate_limit_status,omitempty" json:"rate_limit_status,omitempty"`     // Anthropic-Ratelimit-Unified-Status
 	EnhancedProtection  bool              `yaml:"enhanced_protection,omitempty" json:"enhanced_protection,omitempty"` // 官方帐号增强保护：allowed_warning时即禁用端点
 	SSEConfig         *SSEConfig        `yaml:"sse_config,omitempty" json:"sse_config,omitempty"` // SSE行为配置
+	OpenAIPreference   string            `yaml:"openai_preference,omitempty" json:"openai_preference,omitempty"` // OpenAI格式偏好："responses"|"chat_completions"|"auto"
 }
 
 // 新增：SSE行为配置结构
@@ -156,6 +157,16 @@ func (tc *TimeoutConfig) ToHealthCheckTimeoutConfig() HealthCheckTimeoutConfig {
 type TaggingConfig struct {
 	PipelineTimeout string          `yaml:"pipeline_timeout"`
 	Taggers         []TaggerConfig  `yaml:"taggers"`
+}
+
+// 端点拉黑配置结构
+type BlacklistConfig struct {
+	Enabled            bool `yaml:"enabled"`               // 是否启用端点拉黑功能
+	AutoBlacklist      bool `yaml:"auto_blacklist"`         // 是否自动拉黑失败的端点
+	BusinessErrorSafe  bool `yaml:"business_error_safe"`    // 业务错误是否安全（不触发拉黑）
+	ConfigErrorSafe    bool `yaml:"config_error_safe"`      // 配置错误是否安全（不触发拉黑）
+	ServerErrorSafe    bool `yaml:"server_error_safe"`      // 服务器错误是否安全（不触发拉黑）
+	SSEValidationSafe  bool `yaml:"sse_validation_safe"`    // SSE验证错误是否安全（不触发拉黑）
 }
 
 type TaggerConfig struct {

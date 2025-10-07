@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"claude-code-codex-companion/internal/endpoint"
@@ -136,6 +137,9 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		return result
 	}
 
+	// 生成测试请求ID
+	testRequestID := fmt.Sprintf("test-%s-%s-%d", ep.Name, format, time.Now().UnixNano())
+
 	// 创建HTTP请求
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -148,6 +152,7 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 
 	// 设置请求头
 	req.Header.Set("Content-Type", "application/json")
+
 	if format == "anthropic" {
 		req.Header.Set("anthropic-version", "2023-06-01")
 	}
@@ -159,10 +164,34 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		return result
 	}
 	if authValue != "" {
-		if format == "anthropic" {
-			req.Header.Set("x-api-key", authValue)
+		// 根据端点的认证类型设置认证头
+		authType := ep.AuthType
+		if authType == "" {
+			authType = "auto"
+		}
+
+		if authType == "api_key" || authType == "x-api-key" {
+			// 使用 x-api-key 头（仅限原生 Anthropic API）
+			if strings.HasPrefix(authValue, "Bearer ") {
+				req.Header.Set("x-api-key", strings.TrimPrefix(authValue, "Bearer "))
+			} else {
+				req.Header.Set("x-api-key", authValue)
+			}
+			// 某些端点需要同时设置 Authorization
+			if format == "openai" || !strings.Contains(ep.GetURLForFormat(format), "api.anthropic.com") {
+				if !strings.HasPrefix(authValue, "Bearer ") {
+					req.Header.Set("Authorization", "Bearer "+authValue)
+				} else {
+					req.Header.Set("Authorization", authValue)
+				}
+			}
 		} else {
-			req.Header.Set("Authorization", authValue)
+			// auth_token, bearer, auto 或其他类型：使用 Authorization 头
+			if !strings.HasPrefix(authValue, "Bearer ") && !strings.HasPrefix(authValue, "Basic ") {
+				req.Header.Set("Authorization", "Bearer "+authValue)
+			} else {
+				req.Header.Set("Authorization", authValue)
+			}
 		}
 	}
 
@@ -201,6 +230,28 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		}
 	}
 
+	// 记录测试请求到日志系统
+	testStartTime := time.Now()
+	if s.logger != nil {
+		// 收集请求头信息
+		requestHeaders := make(map[string]string)
+		for key, values := range req.Header {
+			if len(values) > 0 {
+				requestHeaders[key] = values[0]
+			}
+		}
+
+		// 记录测试请求开始
+		s.logger.Info(fmt.Sprintf("📋 Test request: %s (%s format)", ep.Name, format), map[string]interface{}{
+			"request_id":  testRequestID,
+			"endpoint":    ep.Name,
+			"format":      format,
+			"url":         testURL,
+			"model":       originalModel,
+			"rewritten":   rewrittenModel,
+		})
+	}
+
 	// 发送请求并计时
 	startTime := time.Now()
 
@@ -231,6 +282,23 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 
 	if err != nil {
 		result.Error = fmt.Sprintf("request failed: %v", err)
+		// 记录失败的测试请求
+		if s.logger != nil {
+			s.logger.LogRequest(&logger.RequestLog{
+				RequestID:      testRequestID,
+				Timestamp:      testStartTime,
+				Method:         "POST",
+				Path:           testURL,
+				Endpoint:       ep.Name,
+				ClientType:     "test",
+				RequestFormat:  format,
+				OriginalModel:  originalModel,
+				RewrittenModel: rewrittenModel,
+				StatusCode:     0,
+				Error:          err.Error(),
+				DurationMs:     time.Since(testStartTime).Milliseconds(),
+			})
+		}
 		return result
 	}
 	defer resp.Body.Close()
@@ -262,6 +330,7 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 	}
 
 	// 检查状态码
+	errorMessage := ""
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// 尝试解析错误信息
 		var errResp map[string]interface{}
@@ -270,17 +339,42 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 				if errorMap, ok := errorField.(map[string]interface{}); ok {
 					if msg, ok := errorMap["message"].(string); ok {
 						result.Error = msg
+						errorMessage = msg
 					} else {
 						result.Error = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body))
+						errorMessage = result.Error
 					}
 				} else {
 					result.Error = fmt.Sprintf("HTTP %d: %v", resp.StatusCode, errorField)
+					errorMessage = result.Error
 				}
 			} else {
 				result.Error = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body))
+				errorMessage = result.Error
 			}
 		} else {
 			result.Error = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body))
+			errorMessage = result.Error
+		}
+
+		// 记录失败的测试请求
+		if s.logger != nil {
+			s.logger.LogRequest(&logger.RequestLog{
+				RequestID:      testRequestID,
+				Timestamp:      testStartTime,
+				Method:         "POST",
+				Path:           testURL,
+				Endpoint:       ep.Name,
+				ClientType:     "test",
+				RequestFormat:  format,
+				OriginalModel:  originalModel,
+				RewrittenModel: rewrittenModel,
+				StatusCode:     resp.StatusCode,
+				Error:          errorMessage,
+				DurationMs:     time.Since(testStartTime).Milliseconds(),
+				RequestBody:    string(requestBody),
+				ResponseBody:   string(body),
+			})
 		}
 		return result
 	}
@@ -289,6 +383,50 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 	var jsonResp map[string]interface{}
 	if err := json.Unmarshal(body, &jsonResp); err != nil {
 		result.Error = fmt.Sprintf("invalid JSON response: %v", err)
+		return result
+	}
+
+	// 记录响应体用于调试（截断到前500字符）
+	responsePreview := string(body)
+	if len(responsePreview) > 500 {
+		responsePreview = responsePreview[:500] + "..."
+	}
+	s.logger.Debug(fmt.Sprintf("Endpoint test response (%s): %s", format, responsePreview), nil)
+
+	// 先检查是否是错误响应（某些端点可能用200状态码返回错误）
+	if errorField, hasError := jsonResp["error"]; hasError {
+		if errorMap, ok := errorField.(map[string]interface{}); ok {
+			if msg, ok := errorMap["message"].(string); ok {
+				result.Error = fmt.Sprintf("API error: %s", msg)
+				errorMessage = result.Error
+			} else {
+				result.Error = fmt.Sprintf("API error: %v", errorField)
+				errorMessage = result.Error
+			}
+		} else {
+			result.Error = fmt.Sprintf("API error: %v", errorField)
+			errorMessage = result.Error
+		}
+
+		// 记录200状态码但包含错误的请求
+		if s.logger != nil {
+			s.logger.LogRequest(&logger.RequestLog{
+				RequestID:      testRequestID,
+				Timestamp:      testStartTime,
+				Method:         "POST",
+				Path:           testURL,
+				Endpoint:       ep.Name,
+				ClientType:     "test",
+				RequestFormat:  format,
+				OriginalModel:  originalModel,
+				RewrittenModel: rewrittenModel,
+				StatusCode:     resp.StatusCode,
+				Error:          errorMessage,
+				DurationMs:     time.Since(testStartTime).Milliseconds(),
+				RequestBody:    string(requestBody),
+				ResponseBody:   string(body),
+			})
+		}
 		return result
 	}
 
@@ -314,8 +452,45 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		}
 	}
 
-	// 测试成功
+	// 测试成功 - 记录成功的测试请求
 	result.Success = true
+	if s.logger != nil {
+		s.logger.LogRequest(&logger.RequestLog{
+			RequestID:      testRequestID,
+			Timestamp:      testStartTime,
+			Method:         "POST",
+			Path:           testURL,
+			Endpoint:       ep.Name,
+			ClientType:     "test",
+			RequestFormat:  format,
+			OriginalModel:  originalModel,
+			RewrittenModel: rewrittenModel,
+			StatusCode:     resp.StatusCode,
+			DurationMs:     time.Since(testStartTime).Milliseconds(),
+			RequestBody:    string(requestBody),
+			ResponseBody:   string(body),
+		})
+	}
+
+	// 🎓 持久化学习结果：测试成功后保存格式偏好
+	// 只有在首次探测成功时才持久化（避免重复保存）
+	if format == "openai" && (ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto") {
+		// 根据测试路径推断格式偏好
+		testPath := result.URL
+		if strings.Contains(testPath, "/responses") {
+			ep.OpenAIPreference = "responses"
+			s.logger.Info(fmt.Sprintf("🎓 Test: Learned OpenAI preference 'responses' for endpoint '%s'", ep.Name), nil)
+		} else if strings.Contains(testPath, "/chat/completions") {
+			ep.OpenAIPreference = "chat_completions"
+			s.logger.Info(fmt.Sprintf("🎓 Test: Learned OpenAI preference 'chat_completions' for endpoint '%s'", ep.Name), nil)
+		}
+
+		// 持久化学习结果
+		if s.persistenceHandler != nil && ep.OpenAIPreference != "" && ep.OpenAIPreference != "auto" {
+			s.persistenceHandler.PersistEndpointLearning(ep)
+		}
+	}
+
 	return result
 }
 
@@ -327,34 +502,36 @@ func (s *AdminServer) selectOpenAIPath(ep *endpoint.Endpoint) string {
 		return "/chat/completions"
 	}
 	
-	// 默认优先尝试 responses 格式（Codex新格式）
+	// 默认优先尝试 responses 格式（Codex新格式，更先进）
 	return "/responses"
 }
 
 // testOpenAIFormatWithRetry 测试OpenAI格式并支持格式重试
 func (s *AdminServer) testOpenAIFormatWithRetry(ep *endpoint.Endpoint, timeout time.Duration) *EndpointTestResult {
-	// 先尝试首选格式
-	preferredPath := s.selectOpenAIPath(ep)
-	result := s.testOpenAIPath(ep, preferredPath, timeout)
-	
-	// 如果失败且是自动模式，尝试另一种格式
-	if !result.Success && ep.OpenAIPreference == "auto" {
-		var alternativePath string
-		if preferredPath == "/responses" {
-			alternativePath = "/chat/completions"
-		} else {
-			alternativePath = "/responses"
-		}
-		
-		alternativeResult := s.testOpenAIPath(ep, alternativePath, timeout)
-		if alternativeResult.Success {
-			// 记录成功的格式偏好（这里应该更新端点配置）
-			s.updateOpenAIPreference(ep, alternativePath)
-			return alternativeResult
-		}
+	// 如果端点已经有明确的格式偏好，直接使用
+	if ep.OpenAIPreference == "responses" || ep.OpenAIPreference == "chat_completions" {
+		preferredPath := s.selectOpenAIPath(ep)
+		return s.testOpenAIPath(ep, preferredPath, timeout)
 	}
 	
-	return result
+	// 自动模式：优先尝试 /responses 格式（Codex新格式）
+	responsesResult := s.testOpenAIPath(ep, "/responses", timeout)
+	if responsesResult.Success {
+		// 学习并存储成功的格式偏好
+		s.updateOpenAIPreference(ep, "/responses")
+		return responsesResult
+	}
+	
+	// 如果 /responses 失败，尝试 /chat/completions 格式
+	chatCompletionsResult := s.testOpenAIPath(ep, "/chat/completions", timeout)
+	if chatCompletionsResult.Success {
+		// 学习并存储成功的格式偏好
+		s.updateOpenAIPreference(ep, "/chat/completions")
+		return chatCompletionsResult
+	}
+	
+	// 两种格式都失败，返回第一个结果（通常是 /responses）
+	return responsesResult
 }
 
 // testOpenAIPath 测试特定的OpenAI路径
@@ -477,10 +654,27 @@ func (s *AdminServer) testOpenAIPath(ep *endpoint.Endpoint, path string, timeout
 
 // updateOpenAIPreference 更新端点的OpenAI格式偏好
 func (s *AdminServer) updateOpenAIPreference(ep *endpoint.Endpoint, successfulPath string) {
+	oldPreference := ep.OpenAIPreference
+	
 	if successfulPath == "/responses" {
 		ep.OpenAIPreference = "responses"
 	} else {
 		ep.OpenAIPreference = "chat_completions"
+	}
+	
+	// 🎓 持久化学习结果：如果偏好发生变化
+	if oldPreference != ep.OpenAIPreference {
+		s.logger.Info(fmt.Sprintf("🎓 Test: Learned OpenAI preference '%s' for endpoint '%s' (was: '%s')", 
+			ep.OpenAIPreference, ep.Name, oldPreference), nil)
+		
+		// 尝试持久化学习结果
+		if s.persistenceHandler != nil {
+			s.persistenceHandler.PersistEndpointLearning(ep)
+		} else {
+			// 如果没有持久化处理器，至少记录到日志
+			s.logger.Info(fmt.Sprintf("💾 Learning result not persisted (no persistence handler): %s -> %s", 
+				ep.Name, ep.OpenAIPreference), nil)
+		}
 	}
 }
 
@@ -492,55 +686,119 @@ func (s *AdminServer) testSingleEndpoint(ep *endpoint.Endpoint) *BatchTestResult
 		Results:      make([]*EndpointTestResult, 0),
 	}
 
-	// 测试超时时间
-	timeout := 30 * time.Second
+	// 测试超时时间（减少到10秒，避免慢速端点阻塞太久）
+	timeout := 10 * time.Second
+
+	// 记录测试开始
+	s.logger.Info(fmt.Sprintf("🧪 Testing endpoint: %s", ep.Name), nil)
 
 	// 测试Anthropic格式（如果配置了）
 	if ep.URLAnthropic != "" {
 		anthropicResult := s.testEndpointFormat(ep, "anthropic", timeout)
 		result.Results = append(result.Results, anthropicResult)
+		if anthropicResult.Success {
+			s.logger.Info(fmt.Sprintf("  ✅ Anthropic format test passed (%dms)", anthropicResult.ResponseTime), nil)
+		} else {
+			s.logger.Info(fmt.Sprintf("  ❌ Anthropic format test failed: %s", anthropicResult.Error), nil)
+		}
 	}
 
 	// 测试OpenAI格式（如果配置了）
 	if ep.URLOpenAI != "" {
 		openaiResult := s.testOpenAIFormatWithRetry(ep, timeout)
 		result.Results = append(result.Results, openaiResult)
+		if openaiResult.Success {
+			s.logger.Info(fmt.Sprintf("  ✅ OpenAI format test passed (%dms)", openaiResult.ResponseTime), nil)
+		} else {
+			s.logger.Info(fmt.Sprintf("  ❌ OpenAI format test failed: %s", openaiResult.Error), nil)
+		}
 	}
 
 	result.TotalTime = time.Since(startTime).Milliseconds()
+	s.logger.Info(fmt.Sprintf("📊 Endpoint %s test completed in %dms", ep.Name, result.TotalTime), nil)
+
 	return result
 }
 
-// testAllEndpoints 批量测试所有端点
+// testAllEndpoints 并行批量测试所有端点
 func (s *AdminServer) testAllEndpoints() []*BatchTestResult {
 	allEndpoints := s.endpointManager.GetAllEndpoints()
-	results := make([]*BatchTestResult, 0, len(allEndpoints))
+	results := make([]*BatchTestResult, len(allEndpoints))
 
-	for _, ep := range allEndpoints {
-		// 测试所有端点，不论启用状态
-		result := s.testSingleEndpoint(ep)
-		results = append(results, result)
+	// 使用 WaitGroup 进行并发测试
+	var wg sync.WaitGroup
+
+	// 并发测试所有端点
+	for i, ep := range allEndpoints {
+		wg.Add(1)
+		go func(index int, endpoint *endpoint.Endpoint) {
+			defer wg.Done()
+
+			// 测试单个端点
+			result := s.testSingleEndpoint(endpoint)
+			results[index] = result
+
+			// 实时记录测试结果到日志
+			s.logger.Info(fmt.Sprintf("📊 Endpoint test completed: %s (Anthropic: %v, OpenAI: %v)",
+				endpoint.Name,
+				hasSuccessfulTest(result, "anthropic"),
+				hasSuccessfulTest(result, "openai"),
+			), nil)
+		}(i, ep)
 	}
+
+	// 等待所有测试完成
+	wg.Wait()
 
 	return results
 }
 
+// hasSuccessfulTest 检查特定格式的测试是否成功
+func hasSuccessfulTest(result *BatchTestResult, format string) bool {
+	if result == nil || result.Results == nil {
+		return false
+	}
+	for _, r := range result.Results {
+		if r.Format == format && r.Success {
+			return true
+		}
+	}
+	return false
+}
+
 // selectTestModel 根据端点配置和格式选择合适的测试模型
+// 返回应用模型重写规则后的实际模型
 func (s *AdminServer) selectTestModel(ep *endpoint.Endpoint, format string) string {
-	// 如果端点有模型重写配置，使用重写规则的目标模型作为测试模型
-	if ep.ModelRewrite != nil && ep.ModelRewrite.Enabled && len(ep.ModelRewrite.Rules) > 0 {
-		// 使用第一条规则的源模式作为测试模型（会被重写为目标模型）
-		return ep.ModelRewrite.Rules[0].SourcePattern
-	}
-
 	// 根据格式返回默认测试模型
+	var defaultModel string
 	if format == "anthropic" {
-		return "claude-sonnet-4-20250514"
+		defaultModel = "claude-sonnet-4-5-20250929"
 	} else if format == "openai" {
-		return "gpt-5"
+		defaultModel = "gpt-5"
+	} else {
+		return "test-model"
 	}
 
-	return "test-model"
+	// 如果端点有模型重写配置，应用重写规则获取实际使用的模型
+	if ep.ModelRewrite != nil && ep.ModelRewrite.Enabled && len(ep.ModelRewrite.Rules) > 0 {
+		// 创建模型重写器来应用规则
+		testLogger := logger.Logger{}
+		if s.logger != nil {
+			testLogger = *s.logger
+		}
+		rewriter := modelrewrite.NewRewriter(testLogger)
+
+		// 应用模型重写规则，获取实际会使用的模型
+		rewrittenModel, _, matched := rewriter.TestRewriteRule(defaultModel, ep.ModelRewrite.Rules)
+		if matched {
+			// 返回重写后的模型
+			return rewrittenModel
+		}
+		// 如果没有匹配的规则，返回默认模型
+		return defaultModel
+	}
+
+	return defaultModel
 }
 
 // detectClientType 检测客户端类型

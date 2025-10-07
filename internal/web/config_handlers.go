@@ -120,12 +120,9 @@ func (s *AdminServer) handleUpdateEndpointModelRewrite(c *gin.Context) {
 
 	for i, ep := range currentEndpoints {
 		if ep.Name == endpointName {
-			// 更新模型重写配置
-			if request.Enabled || len(request.Rules) > 0 {
-				currentEndpoints[i].ModelRewrite = &request
-			} else {
-				currentEndpoints[i].ModelRewrite = nil // 禁用时设为nil
-			}
+			// 始终保存模型重写配置对象，即使是禁用状态或空规则
+			// 这样前端编辑时可以正确显示禁用状态，而不是null
+			currentEndpoints[i].ModelRewrite = &request
 			found = true
 			break
 		}

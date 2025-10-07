@@ -334,44 +334,12 @@ func validateModelRewriteConfig(config *ModelRewriteConfig, context string) erro
 }
 
 // validateOpenAIEndpoints 验证 OpenAI 端点配置
+// 注意：新格式下不再需要显式的endpoint_type配置，由url_openai自动判断
 func validateOpenAIEndpoints(endpoints []EndpointConfig) error {
-	for i, endpoint := range endpoints {
-		if endpoint.EndpointType == "openai" {
-			// OpenAI 端点不能使用 api_key 认证类型
-			if endpoint.AuthType == "api_key" {
-				return fmt.Errorf("endpoint[%d] '%s': OpenAI endpoints cannot use auth_type 'api_key', use 'auth_token' instead", i, endpoint.Name)
-			}
-			
-			// 确保 OpenAI 端点有正确的认证配置
-			if endpoint.AuthType == "" {
-				return fmt.Errorf("endpoint[%d] '%s': OpenAI endpoints require auth_type to be specified", i, endpoint.Name)
-			}
-			
-			if endpoint.AuthType != "auth_token" && endpoint.AuthType != "oauth" {
-				return fmt.Errorf("endpoint[%d] '%s': OpenAI endpoints should use auth_type 'auth_token' or 'oauth'", i, endpoint.Name)
-			}
-			
-			// 验证认证配置
-			if endpoint.AuthType == "oauth" {
-				if endpoint.OAuthConfig == nil {
-					return fmt.Errorf("endpoint[%d] '%s': OpenAI endpoints with oauth auth_type require oauth_config", i, endpoint.Name)
-				}
-			} else if endpoint.AuthValue == "" {
-				return fmt.Errorf("endpoint[%d] '%s': OpenAI endpoints with auth_token require auth_value to be specified", i, endpoint.Name)
-			}
-			
-			// OpenAI 端点的 path_prefix 现在是可选的
-			// 如果为空，将直接使用请求路径（如 /responses, /chat/completions）
-			// 如果不为空，将作为前缀与请求路径组合（如 /v1 + /responses）
-		}
-		
-		// Anthropic 端点不应该配置 path_prefix，因为会被固定为 /v1/messages
-		if endpoint.EndpointType == "anthropic" || endpoint.EndpointType == "" {
-			if endpoint.PathPrefix != "" {
-				return fmt.Errorf("endpoint[%d] '%s': Anthropic endpoints cannot have custom path_prefix (automatically set to '/v1/messages')", i, endpoint.Name)
-			}
-		}
-	}
+	// 新格式下此验证函数已不再需要，因为：
+	// 1. endpoint_type由URL自动推断
+	// 2. path_prefix已移除，自动使用/v1
+	// 3. 认证类型由通用的validateEndpoint处理
 	return nil
 }
 
@@ -459,13 +427,14 @@ func validateEndpoint(endpoint EndpointConfig, index int) error {
 	if endpoint.Name == "" {
 		return fmt.Errorf("endpoint %d: name cannot be empty", index)
 	}
-	
-	if endpoint.URL == "" {
-		return fmt.Errorf("endpoint %d: url cannot be empty", index)
+
+	// 新格式：至少需要一个URL（url_anthropic或url_openai）
+	if endpoint.URLAnthropic == "" && endpoint.URLOpenAI == "" {
+		return fmt.Errorf("endpoint %d: at least one URL must be provided (url_anthropic or url_openai)", index)
 	}
 	
-	if endpoint.AuthType != "api_key" && endpoint.AuthType != "auth_token" && endpoint.AuthType != "oauth" {
-		return fmt.Errorf("endpoint %d: invalid auth_type '%s', must be 'api_key', 'auth_token', or 'oauth'", index, endpoint.AuthType)
+	if endpoint.AuthType != "" && endpoint.AuthType != "api_key" && endpoint.AuthType != "auth_token" && endpoint.AuthType != "oauth" && endpoint.AuthType != "auto" {
+		return fmt.Errorf("endpoint %d: invalid auth_type '%s', must be 'api_key', 'auth_token', 'oauth', 'auto', or empty", index, endpoint.AuthType)
 	}
 	
 	// OAuth 认证不需要 auth_value，其他认证类型需要

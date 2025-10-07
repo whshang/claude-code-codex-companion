@@ -40,9 +40,9 @@ type BlacklistReason struct {
 type Endpoint struct {
 	ID                string                   `json:"id"`
 	Name              string                   `json:"name"`
-	URL               string                   `json:"url"`
-	EndpointType      string                   `json:"endpoint_type"` // "anthropic" | "openai" 等
-	PathPrefix        string                   `json:"path_prefix,omitempty"` // OpenAI端点的路径前缀
+	URLAnthropic      string                   `json:"url_anthropic,omitempty"` // Anthropic格式URL
+	URLOpenAI         string                   `json:"url_openai,omitempty"`    // OpenAI格式URL
+	EndpointType      string                   `json:"endpoint_type"` // 自动推断的端点类型（内部使用）
 	AuthType          string                   `json:"auth_type"`
 	AuthValue         string                   `json:"auth_value"`
 	Enabled           bool                     `json:"enabled"`
@@ -58,6 +58,7 @@ type Endpoint struct {
 	RateLimitStatus     *string                `json:"rate_limit_status,omitempty"`     // Anthropic-Ratelimit-Unified-Status
 	EnhancedProtection  bool                   `json:"enhanced_protection,omitempty"`   // 官方帐号增强保护：allowed_warning时即禁用端点
 	SSEConfig         *config.SSEConfig       `json:"sse_config,omitempty"` // SSE行为配置
+	OpenAIPreference   string                 `json:"openai_preference,omitempty"` // OpenAI格式偏好："responses"|"chat_completions"|"auto"
 	Status              Status                   `json:"status"`
 	LastCheck           time.Time                `json:"last_check"`
 	FailureCount        int                      `json:"failure_count"`
@@ -88,38 +89,66 @@ type Endpoint struct {
 	// 新增：保护 LearnedUnsupportedParams 的互斥锁
 	learnedParamsMutex sync.RWMutex
 
+	// 新增：自动检测到的有效认证方式（运行时学习，不持久化）
+	// "x-api-key" 或 "Authorization" 或空字符串(未检测)
+	DetectedAuthHeader string `json:"-"`
+
+	// 新增：保护 DetectedAuthHeader 的互斥锁
+	AuthHeaderMutex sync.RWMutex
+
 	mutex               sync.RWMutex
 }
 
 func NewEndpoint(cfg config.EndpointConfig) *Endpoint {
-	// 如果没有指定 endpoint_type，使用统一默认值
-	endpointType := config.GetStringWithDefault(cfg.EndpointType, config.Default.Endpoint.Type)
-	
+	// 自动推断端点类型
+	endpointType := inferEndpointType(cfg)
+
 	return &Endpoint{
 		ID:                generateID(cfg.Name),
 		Name:              cfg.Name,
-		URL:               cfg.URL,
+		URLAnthropic:      cfg.URLAnthropic, // Anthropic格式URL
+		URLOpenAI:         cfg.URLOpenAI,    // OpenAI格式URL
 		EndpointType:      endpointType,
-		PathPrefix:        cfg.PathPrefix,  // 新增：复制PathPrefix
 		AuthType:          cfg.AuthType,
 		AuthValue:         cfg.AuthValue,
 		Enabled:           config.GetBoolWithDefault(cfg.Enabled, true, config.Default.Endpoint.Enabled),
 		Priority:          config.GetIntWithDefault(cfg.Priority, config.Default.Endpoint.Priority),
-		Tags:              cfg.Tags,       // 新增：从配置中复制tags
-		ModelRewrite:      cfg.ModelRewrite, // 新增：从配置中复制模型重写配置
-		Proxy:             cfg.Proxy,      // 新增：从配置中复制代理配置
-		OAuthConfig:       cfg.OAuthConfig, // 新增：从配置中复制OAuth配置
-		HeaderOverrides:     cfg.HeaderOverrides,     // 新增：从配置中复制HTTP Header覆盖配置
-		ParameterOverrides:  cfg.ParameterOverrides,  // 新增：从配置中复制Request Parameters覆盖配置
-		MaxTokensFieldName:  cfg.MaxTokensFieldName,  // 新增：从配置中复制max_tokens参数名转换选项
-		RateLimitReset:      cfg.RateLimitReset,      // 新增：从配置加载rate limit reset状态
-		RateLimitStatus:     cfg.RateLimitStatus,     // 新增：从配置加载rate limit status状态
-		EnhancedProtection:  cfg.EnhancedProtection,  // 新增：从配置加载官方帐号增强保护设置
-		SSEConfig:         cfg.SSEConfig,         // 新增：从配置加载SSE行为配置
+		Tags:              cfg.Tags,
+		ModelRewrite:      cfg.ModelRewrite,
+		Proxy:             cfg.Proxy,
+		OAuthConfig:       cfg.OAuthConfig,
+		HeaderOverrides:     cfg.HeaderOverrides,
+		ParameterOverrides:  cfg.ParameterOverrides,
+		MaxTokensFieldName:  cfg.MaxTokensFieldName,
+		RateLimitReset:      cfg.RateLimitReset,
+		RateLimitStatus:     cfg.RateLimitStatus,
+		EnhancedProtection:  cfg.EnhancedProtection,
+		SSEConfig:         cfg.SSEConfig,
+		OpenAIPreference:   cfg.OpenAIPreference,
 		Status:            StatusActive,
 		LastCheck:         time.Now(),
-		RequestHistory:    utils.NewCircularBuffer(100, 140*time.Second), // 100个记录，140秒窗口
+		RequestHistory:    utils.NewCircularBuffer(100, 140*time.Second),
 	}
+}
+
+// inferEndpointType 自动推断端点类型
+func inferEndpointType(cfg config.EndpointConfig) string {
+	// 根据配置的URL推断端点类型
+	if cfg.URLAnthropic != "" && cfg.URLOpenAI == "" {
+		// 只有Anthropic URL
+		return "anthropic"
+	}
+	if cfg.URLOpenAI != "" && cfg.URLAnthropic == "" {
+		// 只有OpenAI URL
+		return "openai"
+	}
+	if cfg.URLAnthropic != "" && cfg.URLOpenAI != "" {
+		// 两个URL都有，优先使用anthropic（因为可以自动转换到任何格式）
+		return "anthropic"
+	}
+
+	// 默认值（不应该到达这里，因为配置验证会确保至少有一个URL）
+	return "anthropic"
 }
 
 // 实现 EndpointSorter 接口
@@ -155,6 +184,9 @@ func (e *Endpoint) GetAuthHeader() (string, error) {
 		}
 		
 		return oauth.GetAuthorizationHeader(e.OAuthConfig), nil
+	case "auto":
+		// auto 类型默认使用 Bearer 格式（与 proxy_logic.go 中的期望一致）
+		return "Bearer " + e.AuthValue, nil
 	default:
 		return e.AuthValue, nil
 	}
@@ -208,46 +240,100 @@ func (e *Endpoint) GetParameterOverrides() map[string]string {
 func (e *Endpoint) ToTaggedEndpoint() interfaces.TaggedEndpoint {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	
+
 	tags := make([]string, len(e.Tags))
 	copy(tags, e.Tags)
-	
+
+	// 优先使用Anthropic URL，如果为空则使用OpenAI URL
+	url := e.URLAnthropic
+	if url == "" {
+		url = e.URLOpenAI
+	}
+
 	return interfaces.TaggedEndpoint{
 		Name:     e.Name,
-		URL:      e.URL,
+		URL:      url,
 		Tags:     tags,
 		Priority: e.Priority,
 		Enabled:  e.Enabled,
 	}
 }
 
-func (e *Endpoint) GetFullURL(path string) string {
+// GetEffectiveURL 根据请求格式返回对应的URL
+// requestFormat: "anthropic" | "openai"
+func (e *Endpoint) GetEffectiveURL(requestFormat string) string {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	
-	// 直接使用端点的URL作为基础URL
-	baseURL := e.URL
-	
-	// 根据端点类型自动添加正确的路径前缀
-	switch e.EndpointType {
-	case "anthropic":
-		// Anthropic 端点需要添加 /v1 前缀，因为路由组已经消费了 /v1
-		return baseURL + "/v1" + path
-    case "openai":
-        // OpenAI 端点：PathPrefix 作为前缀 + 实际请求路径
-        // 注意：不在此处进行 /responses -> /chat/completions 的路径重写，
-        // 是否切换路径由上层代理逻辑根据是否执行了 Codex->OpenAI 转换来决定。
-        fullURL := ""
-        if e.PathPrefix == "" {
-            fullURL = baseURL + path
-        } else {
-            fullURL = baseURL + e.PathPrefix + path
-        }
 
-        return fullURL
-	default:
-		// 向后兼容：默认使用 anthropic 格式，需要添加 /v1 前缀
-		return baseURL + "/v1" + path
+	// 根据请求格式选择合适的URL
+	if requestFormat == "anthropic" && e.URLAnthropic != "" {
+		return e.URLAnthropic
+	}
+	if requestFormat == "openai" && e.URLOpenAI != "" {
+		return e.URLOpenAI
+	}
+
+	// 默认策略：优先使用Anthropic URL，其次OpenAI URL
+	if e.URLAnthropic != "" {
+		return e.URLAnthropic
+	}
+	return e.URLOpenAI
+}
+
+func (e *Endpoint) GetFullURL(path string) string {
+	return e.GetFullURLWithFormat(path, "")
+}
+
+// GetFullURLWithFormat 根据请求格式构建完整URL
+func (e *Endpoint) GetFullURLWithFormat(path string, requestFormat string) string {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	// 获取对应格式的URL
+	baseURL := ""
+
+	if requestFormat == "anthropic" && e.URLAnthropic != "" {
+		baseURL = e.URLAnthropic
+	} else if requestFormat == "openai" && e.URLOpenAI != "" {
+		baseURL = e.URLOpenAI
+	} else if e.URLAnthropic != "" {
+		// 默认策略：优先Anthropic
+		baseURL = e.URLAnthropic
+	} else {
+		baseURL = e.URLOpenAI
+	}
+
+	// 智能添加/v1前缀（如果用户没有配置）
+	// Anthropic端点通常需要/v1，OpenAI端点通常已经包含/v1
+	if !strings.HasSuffix(baseURL, "/") && !strings.Contains(path, "/v1/") {
+		// 检查是否需要添加/v1
+		needsV1 := false
+		
+		// Anthropic格式请求到Anthropic端点，且baseURL不包含/v1
+		if requestFormat == "anthropic" && strings.Contains(baseURL, "api.anthropic.com") {
+			needsV1 = true
+		}
+		// 其他Anthropic兼容端点，根据path判断
+		if requestFormat == "anthropic" && (strings.Contains(path, "/messages") || strings.Contains(path, "/complete")) {
+			needsV1 = !strings.Contains(baseURL, "/v1")
+		}
+		// OpenAI格式请求，如果baseURL没有/v1且path是标准OpenAI路径
+		if requestFormat == "openai" && (strings.Contains(path, "/chat/completions") || strings.Contains(path, "/completions")) {
+			needsV1 = !strings.Contains(baseURL, "/v1")
+		}
+		
+		if needsV1 {
+			baseURL = baseURL + "/v1"
+		}
+	}
+
+	// 确保URL和path正确拼接
+	if strings.HasSuffix(baseURL, "/") && strings.HasPrefix(path, "/") {
+		return baseURL + path[1:] // 避免双斜杠
+	} else if !strings.HasSuffix(baseURL, "/") && !strings.HasPrefix(path, "/") {
+		return baseURL + "/" + path // 确保有斜杠分隔
+	} else {
+		return baseURL + path
 	}
 }
 
@@ -585,7 +671,11 @@ func (e *Endpoint) GetRateLimitState() (*int64, *string) {
 func (e *Endpoint) IsAnthropicEndpoint() bool {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	return strings.Contains(strings.ToLower(e.URL), "api.anthropic.com")
+	// 检查Anthropic URL是否包含官方域名
+	if e.URLAnthropic != "" {
+		return strings.Contains(strings.ToLower(e.URLAnthropic), "api.anthropic.com")
+	}
+	return false
 }
 
 // ShouldMonitorRateLimit 检查是否应该监控此端点的rate limit
@@ -597,9 +687,9 @@ func (e *Endpoint) ShouldMonitorRateLimit() bool {
 func (e *Endpoint) ShouldSkipHealthCheckUntilReset() bool {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	
+
 	// 1. 必须是Anthropic官方端点
-	if !strings.Contains(strings.ToLower(e.URL), "api.anthropic.com") {
+	if e.URLAnthropic == "" || !strings.Contains(strings.ToLower(e.URLAnthropic), "api.anthropic.com") {
 		return false
 	}
 	
@@ -658,9 +748,9 @@ func (e *Endpoint) ShouldDisableOnAllowedWarning() bool {
 	if !e.EnhancedProtection {
 		return false
 	}
-	
+
 	// 必须是Anthropic官方端点
-	if !strings.Contains(strings.ToLower(e.URL), "api.anthropic.com") {
+	if e.URLAnthropic == "" || !strings.Contains(strings.ToLower(e.URLAnthropic), "api.anthropic.com") {
 		return false
 	}
 	
@@ -717,8 +807,43 @@ func (e *Endpoint) IsParamUnsupported(param string) bool {
 func (e *Endpoint) GetLearnedUnsupportedParams() []string {
 	e.learnedParamsMutex.RLock()
 	defer e.learnedParamsMutex.RUnlock()
-	
+
 	result := make([]string, len(e.LearnedUnsupportedParams))
 	copy(result, e.LearnedUnsupportedParams)
 	return result
+}
+
+// GetURL 获取主URL用于日志记录等场景 (优先Anthropic URL)
+// GetURL 返回端点的基础URL（用于日志记录和显示）
+// 优先返回 URLAnthropic,因为它通常是主URL
+// 如果只有 URLOpenAI,则返回它
+func (e *Endpoint) GetURL() string {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	// 优先返回主URL(通常是Anthropic)
+	if e.URLAnthropic != "" {
+		return e.URLAnthropic
+	}
+	return e.URLOpenAI
+}
+
+// GetURLForFormat 根据请求格式返回对应的URL
+// 用于日志记录实际使用的URL
+func (e *Endpoint) GetURLForFormat(requestFormat string) string {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	if requestFormat == "openai" && e.URLOpenAI != "" {
+		return e.URLOpenAI
+	}
+	if requestFormat == "anthropic" && e.URLAnthropic != "" {
+		return e.URLAnthropic
+	}
+
+	// 回退到默认逻辑
+	if e.URLAnthropic != "" {
+		return e.URLAnthropic
+	}
+	return e.URLOpenAI
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 
 	"claude-code-codex-companion/internal/config"
 
@@ -46,10 +48,14 @@ func (s *AdminServer) handleToggleEndpoint(c *gin.Context) {
 		return
 	}
 
-	// 使用热更新机制
-	if err := s.hotUpdateEndpoints(currentEndpoints); err != nil {
+	// 使用热更新机制，增加重试逻辑
+	if err := s.hotUpdateEndpointsWithRetry(currentEndpoints, 3); err != nil {
+		// 提供更详细的错误信息
+		errorMsg := fmt.Sprintf("Failed to toggle endpoint '%s': %v", endpointName, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to toggle endpoint: " + err.Error(),
+			"error": errorMsg,
+			"endpoint": endpointName,
+			"requested_state": request.Enabled,
 		})
 		return
 	}
@@ -61,6 +67,8 @@ func (s *AdminServer) handleToggleEndpoint(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": fmt.Sprintf("Endpoint '%s' has been %s successfully", endpointName, actionText),
+		"endpoint": endpointName,
+		"enabled": request.Enabled,
 	})
 }
 
@@ -104,9 +112,8 @@ func (s *AdminServer) handleCopyEndpoint(c *gin.Context) {
 	// 创建新端点（复制所有属性，除了名称和优先级）
 	newEndpoint := config.EndpointConfig{
 		Name:              newName,
-		URL:               sourceEndpoint.URL,
-		EndpointType:      sourceEndpoint.EndpointType,
-		PathPrefix:        sourceEndpoint.PathPrefix,
+		URLAnthropic:      sourceEndpoint.URLAnthropic,
+		URLOpenAI:         sourceEndpoint.URLOpenAI,
 		AuthType:          sourceEndpoint.AuthType,
 		AuthValue:         sourceEndpoint.AuthValue,
 		Enabled:           sourceEndpoint.Enabled,
@@ -162,6 +169,12 @@ func (s *AdminServer) handleResetEndpointStatus(c *gin.Context) {
 		return
 	}
 
+	// 验证端点名称
+	if endpointName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Endpoint name cannot be empty"})
+		return
+	}
+
 	// 查找端点
 	var endpoint *config.EndpointConfig
 	for _, ep := range s.config.Endpoints {
@@ -172,20 +185,62 @@ func (s *AdminServer) handleResetEndpointStatus(c *gin.Context) {
 	}
 
 	if endpoint == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Endpoint not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Endpoint '%s' not found", endpointName)})
 		return
 	}
 
-	// 重置端点状态
-	if err := s.endpointManager.ResetEndpointStatus(endpointName); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to reset endpoint status: " + err.Error(),
-		})
-		return
+	// 重置端点状态，增加重试机制
+	maxRetries := 3
+	var lastErr error
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if err := s.endpointManager.ResetEndpointStatus(endpointName); err != nil {
+			lastErr = err
+			if attempt < maxRetries-1 {
+				time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+				continue
+			}
+		} else {
+			// 成功重置
+			c.JSON(http.StatusOK, gin.H{
+				"message": fmt.Sprintf("Endpoint '%s' status has been reset to normal", endpointName),
+				"endpoint": endpointName,
+				"timestamp": time.Now().Unix(),
+			})
+			return
+		}
+	}
+
+	// 所有重试都失败了
+	fmt.Printf("Failed to reset endpoint '%s' after %d attempts: %v\n", 
+		endpointName, maxRetries, lastErr)
+	
+	c.JSON(http.StatusInternalServerError, gin.H{
+		"error": "Failed to reset endpoint status: " + lastErr.Error(),
+		"endpoint": endpointName,
+		"attempts": maxRetries,
+	})
+}
+
+// handleResetAllEndpointsStatus 重置所有端点状态为正常
+func (s *AdminServer) handleResetAllEndpointsStatus(c *gin.Context) {
+	// 获取所有端点
+	endpoints := s.endpointManager.GetAllEndpoints()
+
+	// 重置所有端点状态
+	resetCount := 0
+	for _, ep := range endpoints {
+		if err := s.endpointManager.ResetEndpointStatus(ep.Name); err != nil {
+			// 记录错误但继续重置其他端点
+			fmt.Printf("Failed to reset endpoint %s: %v\n", ep.Name, err)
+		} else {
+			resetCount++
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Endpoint '%s' status has been reset to normal", endpointName),
+		"message": fmt.Sprintf("Successfully reset %d endpoint(s)", resetCount),
+		"reset_count": resetCount,
 	})
 }
 
@@ -202,7 +257,7 @@ func (s *AdminServer) handleReorderEndpoints(c *gin.Context) {
 
 	// 获取当前所有端点
 	currentEndpoints := s.config.Endpoints
-	
+
 	// 创建按名称索引的map
 	endpointMap := make(map[string]config.EndpointConfig)
 	for _, ep := range currentEndpoints {
@@ -233,4 +288,31 @@ func (s *AdminServer) handleReorderEndpoints(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Endpoints reordered successfully"})
+}
+
+// hotUpdateEndpointsWithRetry 带重试机制的热更新
+func (s *AdminServer) hotUpdateEndpointsWithRetry(endpoints []config.EndpointConfig, maxRetries int) error {
+	var lastErr error
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := s.hotUpdateEndpoints(endpoints)
+		if err == nil {
+			return nil // 成功
+		}
+		
+		lastErr = err
+		
+		// 如果不是数据库相关错误，不重试
+		if !strings.Contains(err.Error(), "database") && 
+		   !strings.Contains(err.Error(), "locked") &&
+		   !strings.Contains(err.Error(), "timeout") {
+			break
+		}
+		
+		// 等待一段时间后重试
+		time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+		fmt.Printf("Endpoint update retry %d/%d: %v\n", attempt+1, maxRetries, err)
+	}
+	
+	return lastErr
 }

@@ -267,9 +267,15 @@ func (m *Manager) runHealthCheck(endpoint *Endpoint, ticker *time.Ticker) {
 
 // initializeEndpointStatistics initializes or inherits statistics for an endpoint
 func initializeEndpointStatistics(endpoint *Endpoint, statisticsManager statistics.StatisticsManager) error {
+	// 获取主URL用于统计 (优先Anthropic URL)
+	url := endpoint.URLAnthropic
+	if url == "" {
+		url = endpoint.URLOpenAI
+	}
+
 	// Initialize statistics in database and inherit existing data if available
 	dbStats, err := statisticsManager.InitializeEndpointStatistics(
-		endpoint.Name, endpoint.URL, endpoint.EndpointType, endpoint.AuthType)
+		endpoint.Name, url, endpoint.EndpointType, endpoint.AuthType)
 	if err != nil {
 		return err
 	}
@@ -307,12 +313,18 @@ func (m *Manager) updateExistingEndpoint(existingEndpoint *Endpoint, newConfig c
 	newEndpoint.mutex.Unlock()
 	existingEndpoint.mutex.RUnlock()
 
+	// 获取主URL用于统计 (优先Anthropic URL)
+	url := newEndpoint.URLAnthropic
+	if url == "" {
+		url = newEndpoint.URLOpenAI
+	}
+
 	// Update database metadata if statistics manager is available
 	if m.statisticsManager != nil {
 		if err := m.statisticsManager.UpdateEndpointMetadata(
-			newEndpoint.ID, newEndpoint.Name, newEndpoint.URL, 
+			newEndpoint.ID, newEndpoint.Name, url,
 			newEndpoint.EndpointType, newEndpoint.AuthType); err != nil {
-			log.Printf("WARNING: Failed to update metadata for endpoint %s: %v", 
+			log.Printf("WARNING: Failed to update metadata for endpoint %s: %v",
 				newEndpoint.Name, err)
 		}
 	}

@@ -16,26 +16,20 @@ func (s *AdminServer) saveEndpointsToConfig(endpointConfigs []config.EndpointCon
 }
 
 // createEndpointConfigFromRequest 从请求创建端点配置，自动设置优先级
-func createEndpointConfigFromRequest(name, url, endpointType, pathPrefix, authType, authValue string, enabled bool, priority int, tags []string, proxy *config.ProxyConfig, oauthConfig *config.OAuthConfig, headerOverrides map[string]string, parameterOverrides map[string]string) config.EndpointConfig {
-	// 如果没有指定endpoint_type，默认为anthropic（向后兼容）
-	if endpointType == "" {
-		endpointType = "anthropic"
-	}
-
+func createEndpointConfigFromRequest(name, urlAnthropic, urlOpenAI, authType, authValue string, enabled bool, priority int, tags []string, proxy *config.ProxyConfig, oauthConfig *config.OAuthConfig, headerOverrides map[string]string, parameterOverrides map[string]string) config.EndpointConfig {
 	return config.EndpointConfig{
 		Name:              name,
-		URL:               url,
-		EndpointType:      endpointType,
-		PathPrefix:        pathPrefix, // 新增：支持路径前缀
+		URLAnthropic:      urlAnthropic,
+		URLOpenAI:         urlOpenAI,
 		AuthType:          authType,
 		AuthValue:         authValue,
 		Enabled:           enabled,
 		Priority:          priority,
 		Tags:              tags,
-		Proxy:             proxy, // 新增：支持代理配置
-		OAuthConfig:        oauthConfig, // 新增：支持OAuth配置
-		HeaderOverrides:    headerOverrides, // 新增：支持HTTP Header覆盖配置
-		ParameterOverrides: parameterOverrides, // 新增：支持Request Parameter覆盖配置
+		Proxy:             proxy,
+		OAuthConfig:        oauthConfig,
+		HeaderOverrides:    headerOverrides,
+		ParameterOverrides: parameterOverrides,
 	}
 }
 

@@ -30,7 +30,7 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 		return nil, nil, NewConversionError("parse_error", "Failed to parse Anthropic request", err)
 	}
 
-	// 创建转换上下文 
+	// 创建转换上下文
 	ctx := &ConversionContext{
 		ToolCallIDMap:  make(map[string]string),
 		IsStreaming:    anthReq.Stream != nil && *anthReq.Stream,
@@ -46,7 +46,7 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 	// 温控映射
 	out.Temperature = anthReq.Temperature
 	out.TopP = anthReq.TopP
-	
+
 	// 根据端点配置处理 max_tokens 字段名转换
 	if endpointInfo != nil && endpointInfo.MaxTokensFieldName != "" {
 		// 根据配置的字段名设置对应字段
@@ -60,8 +60,12 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 			out.MaxTokens = anthReq.MaxTokens
 		}
 	} else {
-		// 没有配置时使用默认行为：保持原始字段名
-		out.MaxTokens = anthReq.MaxTokens
+		// 没有配置时根据端点类型选择最常用的字段名
+		if endpointInfo != nil && strings.ToLower(endpointInfo.Type) == "openai" {
+			out.MaxCompletionTokens = anthReq.MaxTokens
+		} else {
+			out.MaxTokens = anthReq.MaxTokens
+		}
 	}
 	out.Stream = anthReq.Stream
 	out.Stop = anthReq.StopSequences
@@ -133,7 +137,7 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 			// 用户消息可以包含 text / image / tool_result
 			// 其中 tool_result 需转成 role:"tool"
 			// 其他（text/image）转为 role:"user"
-			// 
+			//
 			// 重要：为了确保相同 ID 的 assistant 和 tool 消息紧挨着，
 			// 我们需要先输出所有 tool_result，然后再输出 user 消息
 			// 使用新的 GetContentBlocks 方法获取内容块
@@ -147,7 +151,7 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 					userBlocks = append(userBlocks, bl)
 				}
 			}
-			
+
 			// 先处理 tool_result -> role:"tool"
 			// 这样确保 assistant 和 tool 消息紧挨着
 			for _, tr := range toolResults {
@@ -157,7 +161,7 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 					// 因上下文不可靠，这里严格要求 tool_use_id 存在：
 					return nil, nil, errors.New("user.tool_result is missing tool_use_id")
 				}
-				
+
 				// 提取 tool_result 的内容
 				var content string
 				switch v := tr.Content.(type) {
@@ -189,14 +193,14 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 				default:
 					content = ""
 				}
-				
+
 				out.Messages = append(out.Messages, OpenAIMessage{
 					Role:       "tool",
 					ToolCallID: tr.ToolUseID,
 					Content:    strings.TrimSpace(content),
 				})
 			}
-			
+
 			// 然后处理 user 内容（text/image）
 			if len(userBlocks) > 0 {
 				om := OpenAIMessage{Role: "user"}
@@ -302,7 +306,7 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 		// 根据 budget_tokens 映射推理强度
 		if anthReq.Thinking.BudgetTokens > 0 {
 			out.MaxReasoningTokens = &anthReq.Thinking.BudgetTokens
-			
+
 			// 根据 budget_tokens 的大小设置推理强度
 			if anthReq.Thinking.BudgetTokens <= 5000 {
 				out.ReasoningEffort = stringPtr("low")
@@ -315,10 +319,10 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 			// 如果没有指定 budget_tokens，使用默认的 medium 强度
 			out.ReasoningEffort = stringPtr("medium")
 		}
-		
+
 		if c.logger != nil {
 			c.logger.Debug("Converted thinking mode to OpenAI reasoning mode", map[string]interface{}{
-				"budget_tokens": anthReq.Thinking.BudgetTokens,
+				"budget_tokens":    anthReq.Thinking.BudgetTokens,
 				"reasoning_effort": *out.ReasoningEffort,
 			})
 		}

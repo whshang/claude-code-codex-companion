@@ -59,9 +59,31 @@ func isCountTokensEndpoint(path string) bool {
 }
 
 func (v *ResponseValidator) ValidateStandardResponse(body []byte, endpointType string) error {
+	// 首先检查空响应体
+	if len(body) == 0 {
+		return NewBusinessError("endpoint returned empty response body", nil)
+	}
+
 	var response map[string]interface{}
 	if err := json.Unmarshal(body, &response); err != nil {
-		return fmt.Errorf("invalid JSON response: %v", err)
+		// JSON解析失败，可能是HTML错误页面或其他格式
+		bodyPreview := string(body)
+		if len(bodyPreview) > 200 {
+			bodyPreview = bodyPreview[:200] + "..."
+		}
+		return NewBusinessError(fmt.Sprintf("invalid JSON response: %v (preview: %s)", err, bodyPreview), err)
+	}
+
+	// 首先检查是否包含error字段（业务错误）
+	if errorField, hasError := response["error"]; hasError {
+		// 这是一个业务错误响应，不应触发端点黑名单
+		errorMsg := "API returned error response"
+		if errorMap, ok := errorField.(map[string]interface{}); ok {
+			if msg, ok := errorMap["message"].(string); ok {
+				errorMsg = msg
+			}
+		}
+		return NewBusinessError(errorMsg, nil)
 	}
 
 	// 严格模式已永久启用
@@ -69,52 +91,47 @@ func (v *ResponseValidator) ValidateStandardResponse(body []byte, endpointType s
 		requiredFields := []string{"id", "type", "content", "model"}
 		for _, field := range requiredFields {
 			if _, exists := response[field]; !exists {
-				return fmt.Errorf("missing required field: %s", field)
+				return NewFormatError(fmt.Sprintf("missing required field: %s", field), nil)
 			}
 		}
 
 		if msgType, ok := response["type"].(string); !ok || msgType != "message" {
-			return fmt.Errorf("invalid message type: expected 'message', got '%v'", response["type"])
+			return NewFormatError(fmt.Sprintf("invalid message type: expected 'message', got '%v'", response["type"]), nil)
 		}
 
 		if role, exists := response["role"]; exists {
 			if roleStr, ok := role.(string); !ok || roleStr != "assistant" {
-				return fmt.Errorf("invalid role: expected 'assistant', got '%v'", role)
+				return NewFormatError(fmt.Sprintf("invalid role: expected 'assistant', got '%v'", role), nil)
 			}
 		}
 	} else if endpointType == "openai" {
 		// OpenAI格式验证：检查基本结构
 		// 注意：某些OpenAI兼容API（如Kimi）可能不返回id字段，所以只检查model字段
 		if _, hasModel := response["model"]; !hasModel {
-			return fmt.Errorf("missing required field for OpenAI format: model")
+			return NewFormatError("missing required field for OpenAI format: model", nil)
 		}
 
-		// 验证是否有choices或error字段
-		_, hasChoices := response["choices"]
-		_, hasError := response["error"]
-		if !hasChoices && !hasError {
-			return fmt.Errorf("OpenAI response missing both 'choices' and 'error' fields")
+		// 验证是否有choices字段（已经在前面检查过error了）
+		if _, hasChoices := response["choices"]; !hasChoices {
+			return NewFormatError("OpenAI response missing 'choices' field", nil)
 		}
 
 		// 如果有object字段，验证其值（可选）
 		if objectType, ok := response["object"].(string); ok {
 			if objectType != "chat.completion" && objectType != "chat.completion.chunk" {
-				return fmt.Errorf("invalid object type for OpenAI: expected 'chat.completion' or 'chat.completion.chunk', got '%v'", objectType)
+				return NewFormatError(fmt.Sprintf("invalid object type for OpenAI: expected 'chat.completion' or 'chat.completion.chunk', got '%v'", objectType), nil)
 			}
 		}
 	} else {
-		// 非严格模式：只要是有效JSON且包含content或error字段之一即可
+		// 非严格模式：只要是有效JSON且包含content或choices字段即可（error已在前面检查）
 		if _, hasContent := response["content"]; hasContent {
-			return nil
-		}
-		if _, hasError := response["error"]; hasError {
 			return nil
 		}
 		if _, hasChoices := response["choices"]; hasChoices {
 			return nil // OpenAI格式通常有choices字段
 		}
-		// 如果既没有content也没有error也没有choices，认为是无效响应
-		return fmt.Errorf("response missing both 'content', 'error' and 'choices' fields")
+		// 如果既没有content也没有choices，认为是无效响应
+		return NewFormatError("response missing both 'content' and 'choices' fields", nil)
 	}
 
 	return nil

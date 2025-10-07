@@ -83,29 +83,73 @@ func (s *AdminServer) handleGetLogs(c *gin.Context) {
 	failedOnlyStr := c.DefaultQuery("failed_only", "false")
 	requestIDStr := c.DefaultQuery("request_id", "")
 
-	limit, _ := strconv.Atoi(limitStr)
-	offset, _ := strconv.Atoi(offsetStr)
-	failedOnly, _ := strconv.ParseBool(failedOnlyStr)
+	// 参数验证
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 0 || limit > 1000 {
+		limit = 100 // 默认值
+	}
+	
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+	
+	failedOnly, err := strconv.ParseBool(failedOnlyStr)
+	if err != nil {
+		failedOnly = false
+	}
 
 	if requestIDStr != "" {
 		// 如果指定了request_id，返回该请求的所有尝试记录
-		allLogs, _ := s.logger.GetAllLogsByRequestID(requestIDStr)
+		allLogs, err := s.logger.GetAllLogsByRequestID(requestIDStr)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to retrieve logs by request ID: " + err.Error(),
+				"request_id": requestIDStr,
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"logs":  allLogs,
 			"total": len(allLogs),
+			"request_id": requestIDStr,
 		})
 		return
 	}
 
-	logs, total, err := s.logger.GetLogs(limit, offset, failedOnly)
+	// 增加重试机制获取日志
+	var logs []*logger.RequestLog
+	var total int
+	maxRetries := 3
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		logs, total, err = s.logger.GetLogs(limit, offset, failedOnly)
+		if err == nil {
+			break
+		}
+		
+		if attempt < maxRetries-1 {
+			time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
+		}
+	}
+	
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve logs"})
+		fmt.Printf("Failed to retrieve logs after %d attempts: %v\n", maxRetries, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to retrieve logs: " + err.Error(),
+			"limit": limit,
+			"offset": offset,
+			"failed_only": failedOnly,
+		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"logs":  logs,
 		"total": total,
+		"limit": limit,
+		"offset": offset,
+		"failed_only": failedOnly,
 	})
 }
 
@@ -134,10 +178,32 @@ func (s *AdminServer) handleCleanupLogs(c *gin.Context) {
 		return
 	}
 
-	// 执行清理
-	deletedCount, err := s.logger.CleanupLogsByDays(days)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cleanup logs: " + err.Error()})
+	// 执行清理，增加重试机制
+	maxRetries := 3
+	var deletedCount int64
+	var lastErr error
+	var err error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		deletedCount, err = s.logger.CleanupLogsByDays(days)
+		if err == nil {
+			break // 成功清理
+		}
+		
+		lastErr = err
+		if attempt < maxRetries-1 {
+			time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+			fmt.Printf("Log cleanup retry %d/%d: %v\n", attempt+1, maxRetries, err)
+		}
+	}
+
+	if lastErr != nil {
+		fmt.Printf("Failed to cleanup logs after %d attempts: %v\n", maxRetries, lastErr)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to cleanup logs: " + lastErr.Error(),
+			"days": days,
+			"attempts": maxRetries,
+		})
 		return
 	}
 
@@ -151,6 +217,8 @@ func (s *AdminServer) handleCleanupLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":       message,
 		"deleted_count": deletedCount,
+		"days": days,
+		"timestamp": time.Now().Unix(),
 	})
 }
 

@@ -207,12 +207,20 @@ function truncateDomain(domain, maxLength = 25) {
     return domain.substring(0, maxLength) + '...';
 }
 
-// Format URL display: show domain only with full URL in title, truncate if over 25 chars
+// Format URL display: show full URL, truncate if over 60 chars
 function formatUrlDisplay(url) {
-    const domainOnly = extractDomain(url);
-    const truncatedDomain = truncateDomain(domainOnly, 25);
+    const maxLength = 60;
+    let displayUrl = url;
+
+    // If URL is too long, truncate middle part
+    if (url && url.length > maxLength) {
+        const start = url.substring(0, Math.floor(maxLength * 0.4));
+        const end = url.substring(url.length - Math.floor(maxLength * 0.6));
+        displayUrl = start + '...' + end;
+    }
+
     return {
-        display: truncatedDomain,
+        display: displayUrl,
         title: url
     };
 }

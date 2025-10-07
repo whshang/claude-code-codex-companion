@@ -218,7 +218,7 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 
 // logBlacklistedEndpointRequest 记录对被拉黑端点的请求日志
 func (s *Server) logBlacklistedEndpointRequest(requestID string, ep *endpoint.Endpoint, path string, requestBody []byte, c *gin.Context, duration time.Duration, errorMsg string, causingRequestIDs []string, attemptNumber int, taggedRequest *tagging.TaggedRequest) {
-	requestLog := s.logger.CreateRequestLog(requestID, ep.URL, c.Request.Method, path)
+	requestLog := s.logger.CreateRequestLog(requestID, ep.GetURL(), c.Request.Method, path)
 	requestLog.RequestBodySize = len(requestBody)
 	requestLog.AttemptNumber = attemptNumber
 	requestLog.DurationMs = duration.Nanoseconds() / 1000000

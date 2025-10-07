@@ -17,6 +17,7 @@ import (
 	"claude-code-codex-companion/internal/endpoint"
 	"claude-code-codex-companion/internal/tagging"
 	"claude-code-codex-companion/internal/utils"
+	"claude-code-codex-companion/internal/validator"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,12 +38,27 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		c.Set("last_status_code", http.StatusNotFound)
 		return false, true // 立即尝试下一个端点
 	}
-    // 为这个端点记录独立的开始时间
-    endpointStartTime := time.Now()
-    // 记录入站原始路径，与实际请求路径区分
-    inboundPath := path
-    effectivePath := path
-    targetURL := ep.GetFullURL(effectivePath)
+	// 为这个端点记录独立的开始时间
+	endpointStartTime := time.Now()
+	// 记录入站原始路径，与实际请求路径区分
+	inboundPath := path
+	effectivePath := path
+
+	// 获取请求格式以选择对应的URL
+	var formatDetection *utils.FormatDetectionResult
+	if detection, exists := c.Get("format_detection"); exists {
+		if det, ok := detection.(*utils.FormatDetectionResult); ok {
+			formatDetection = det
+		}
+	}
+
+	clientRequestFormat := ""
+	if formatDetection != nil {
+		clientRequestFormat = string(formatDetection.Format)
+	}
+	endpointRequestFormat := clientRequestFormat
+
+	targetURL := ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
 
 	// Extract tags from taggedRequest
 	var tags []string
@@ -57,7 +73,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		// 记录创建请求失败的日志
 		duration := time.Since(endpointStartTime)
 		createRequestError := fmt.Sprintf("Failed to create request: %v", err)
-		s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, requestBody, c, nil, nil, nil, duration, fmt.Errorf(createRequestError), false, tags, "", "", "", attemptNumber)
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, requestBody, c, nil, nil, nil, duration, fmt.Errorf(createRequestError), false, tags, "", "", "", attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(createRequestError))
 		c.Set("last_status_code", 0)
@@ -78,7 +94,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		s.logger.Error("Model rewrite failed", err)
 		// 记录模型重写失败的日志
 		duration := time.Since(endpointStartTime)
-		s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, requestBody, c, nil, nil, nil, duration, err, false, tags, "", "", "", attemptNumber)
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, requestBody, c, nil, nil, nil, duration, err, false, tags, "", "", "", attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", err)
 		c.Set("last_status_code", 0)
@@ -92,7 +108,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		if err != nil {
 			s.logger.Error("Failed to read rewritten request body", err)
 			duration := time.Since(endpointStartTime)
-			s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
+			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
 			// 设置错误信息到context中
 			c.Set("last_error", err)
 			c.Set("last_status_code", 0)
@@ -105,66 +121,139 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	// 格式转换（在模型重写之后）
 	// 关键修复：只有当请求格式与端点格式不匹配时才需要转换
 	var conversionContext *conversion.ConversionContext
-	var formatDetection *utils.FormatDetectionResult
-
-	// 从 context 获取格式检测结果
-	if detection, exists := c.Get("format_detection"); exists {
-		if det, ok := detection.(*utils.FormatDetectionResult); ok {
-			formatDetection = det
-		}
-	}
-
 	// 判断是否需要格式转换
+	// 关键修复：根据实际使用的URL来判断端点格式，而不是endpoint_type
 	needsConversion := false
-	if formatDetection != nil && formatDetection.Format != utils.FormatUnknown {
-		// 有明确的格式检测结果
-		requestIsAnthropic := (formatDetection.Format == utils.FormatAnthropic)
-		endpointIsOpenAI := (ep.EndpointType == "openai")
+	actualEndpointFormat := ""
 
-		// Anthropic格式请求 + OpenAI端点 = 需要转换
-		// OpenAI格式请求 + OpenAI端点 = 不需要转换（直接透传）
-		// Anthropic格式请求 + Anthropic端点 = 不需要转换（直接透传）
-		needsConversion = requestIsAnthropic && endpointIsOpenAI
+	// 用于决定响应是否需要转换回客户端格式
+	shouldConvertAnthropicResponseToOpenAI := false
+
+	if formatDetection != nil && formatDetection.Format != utils.FormatUnknown {
+		// 确定实际使用的URL类型
+		// 更准确的URL类型判断逻辑
+		if clientRequestFormat == "anthropic" && ep.URLAnthropic != "" {
+			// Anthropic请求且有Anthropic URL → 使用Anthropic格式
+			actualEndpointFormat = "anthropic"
+		} else if clientRequestFormat == "openai" && ep.URLOpenAI != "" {
+			// OpenAI请求且有OpenAI URL → 使用OpenAI格式
+			actualEndpointFormat = "openai"
+		} else if ep.URLAnthropic != "" {
+			// 优先使用Anthropic URL
+			actualEndpointFormat = "anthropic"
+		} else if ep.URLOpenAI != "" {
+			// 使用OpenAI URL
+			actualEndpointFormat = "openai"
+		} else {
+			// 不应该到达这里，作为保险
+			actualEndpointFormat = "openai"
+		}
+
+		// 判断是否需要格式转换
+		requestIsAnthropic := (formatDetection.Format == utils.FormatAnthropic)
+		requestIsOpenAI := (formatDetection.Format == utils.FormatOpenAI)
+		endpointIsOpenAI := (actualEndpointFormat == "openai")
+
+		// Anthropic格式请求 + OpenAI URL = 需要转换
+		if requestIsAnthropic && endpointIsOpenAI {
+			needsConversion = true
+			endpointRequestFormat = "openai"
+		}
+
+		// OpenAI格式请求 + Anthropic URL = 需要转换（用于仅配置 Anthropic URL 时兼容 OpenAI 客户端）
+		if requestIsOpenAI && actualEndpointFormat == "anthropic" {
+			needsConversion = true
+			shouldConvertAnthropicResponseToOpenAI = true
+			endpointRequestFormat = "anthropic"
+		}
 
 		s.logger.Debug("Format conversion decision", map[string]interface{}{
-			"request_format":    formatDetection.Format,
-			"endpoint_type":     ep.EndpointType,
-			"needs_conversion":  needsConversion,
-			"detection_confidence": formatDetection.Confidence,
+			"request_format":         formatDetection.Format,
+			"actual_endpoint_format": actualEndpointFormat,
+			"needs_conversion":       needsConversion,
+			"detection_confidence":   formatDetection.Confidence,
 		})
 	} else {
-		// 没有格式检测结果，使用旧逻辑（向后兼容）
-		needsConversion = s.converter.ShouldConvert(ep.EndpointType)
+		// 没有格式检测结果，使用默认逻辑
+		needsConversion = (ep.EndpointType == "openai")
 	}
+
+	actuallyUsingOpenAIURL := (actualEndpointFormat == "openai")
 
 	if needsConversion {
 		s.logger.Info(fmt.Sprintf("Starting request conversion for endpoint type: %s", ep.EndpointType))
 
-		// 创建端点信息
-		endpointInfo := &conversion.EndpointInfo{
-			Type:               ep.EndpointType,
-			MaxTokensFieldName: ep.MaxTokensFieldName,
+		var convertedBody []byte
+		var ctx *conversion.ConversionContext
+		var err error
+
+		if shouldConvertAnthropicResponseToOpenAI {
+			// OpenAI → Anthropic 请求转换
+			convertedBody, err = conversion.ConvertOpenAIRequestJSONToAnthropic(finalRequestBody)
+			if err != nil {
+				s.logger.Error("OpenAI to Anthropic conversion failed", err)
+				duration := time.Since(endpointStartTime)
+				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Request format conversion failed", "details": err.Error()})
+				c.Set("last_error", err)
+				c.Set("last_status_code", http.StatusBadRequest)
+				return false, false
+			}
+			conversionContext = nil // 响应由自定义路径转换
+		} else {
+			// Anthropic → OpenAI 请求转换
+			reqConverter := conversion.NewRequestConverter(s.logger)
+			endpointInfo := &conversion.EndpointInfo{
+				Type:               ep.EndpointType,
+				MaxTokensFieldName: ep.MaxTokensFieldName,
+			}
+
+			convertedBody, ctx, err = reqConverter.Convert(finalRequestBody, endpointInfo)
+			if err != nil {
+				s.logger.Error("Request format conversion failed", err)
+				duration := time.Since(endpointStartTime)
+				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Request format conversion failed", "details": err.Error()})
+				c.Set("last_error", err)
+				c.Set("last_status_code", http.StatusBadRequest)
+				return false, false
+			}
+			conversionContext = ctx
 		}
 
-		convertedBody, ctx, err := s.converter.ConvertRequest(finalRequestBody, endpointInfo)
-		if err != nil {
-			s.logger.Error("Request format conversion failed", err)
-			duration := time.Since(endpointStartTime)
-			s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
-			// Request转换失败是请求格式问题，不应该重试其他端点，直接返回错误
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Request format conversion failed", "details": err.Error()})
-			// 设置错误信息到context中
-			c.Set("last_error", err)
-			c.Set("last_status_code", http.StatusBadRequest)
-			return false, false // 不重试，直接返回
-		}
 		finalRequestBody = convertedBody
-		conversionContext = ctx
+
+		// 如果进行了格式转换，也需要转换路径
+		if clientRequestFormat == "anthropic" && actualEndpointFormat == "openai" {
+			// Anthropic → OpenAI: /v1/messages → /v1/chat/completions
+			if effectivePath == "/v1/messages" {
+				effectivePath = "/v1/chat/completions"
+				s.logger.Debug("Path converted for format conversion", map[string]interface{}{
+					"original_path":  "/v1/messages",
+					"converted_path": "/v1/chat/completions",
+					"conversion":     "anthropic_to_openai",
+				})
+			}
+		} else if shouldConvertAnthropicResponseToOpenAI {
+			// OpenAI → Anthropic: /v1/chat/completions → /v1/messages
+			if effectivePath == "/v1/chat/completions" {
+				effectivePath = "/v1/messages"
+				s.logger.Debug("Path converted for format conversion", map[string]interface{}{
+					"original_path":  "/v1/chat/completions",
+					"converted_path": "/v1/messages",
+					"conversion":     "openai_to_anthropic",
+				})
+			}
+		}
+
 		s.logger.Debug("Request format converted successfully", map[string]interface{}{
 			"endpoint_type":  ep.EndpointType,
 			"original_size":  len(requestBody),
 			"converted_size": len(convertedBody),
 		})
+
+		// 重新构建targetURL，因为路径可能已经改变
+		targetURL = ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
 	} else {
 		s.logger.Debug("Skipping format conversion (not needed)", map[string]interface{}{
 			"request_format": func() string {
@@ -177,43 +266,102 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		})
 	}
 
+	if shouldConvertAnthropicResponseToOpenAI {
+		actuallyUsingOpenAIURL = true
+	}
+
 	// Codex /responses 格式转换为 OpenAI /chat/completions 格式
-	// 自动探测逻辑：
-	// - NativeCodexFormat == nil: 未探测，首次请求使用原生格式，收到400后自动重试
-	// - NativeCodexFormat == true: 端点支持原生 Codex 格式，跳过转换
-	// - NativeCodexFormat == false: 端点需要 OpenAI 格式，执行转换
-	
+	// 智能自适应逻辑：
+	// 1. 如果配置了 openai_preference：
+	//    - "responses": 优先尝试原生 /responses，失败后转换 /chat/completions
+	//    - "chat_completions": 直接使用 /chat/completions
+	//    - "auto": 自动探测（默认行为）
+	// 2. 自动探测逻辑：
+	//    - NativeCodexFormat == nil: 未探测，首次请求使用原生格式，收到400后自动重试
+	//    - NativeCodexFormat == true: 端点支持原生 Codex 格式，跳过转换
+	//    - NativeCodexFormat == false: 端点需要 OpenAI 格式，执行转换
+
 	codexNeedsConversion := false
-    if ep.EndpointType == "openai" && inboundPath == "/responses" {
-		if ep.NativeCodexFormat == nil {
-			// 首次请求，使用原生格式尝试（收到400后会自动转换并重试）
-			s.logger.Info("First /responses request to endpoint, trying native Codex format", map[string]interface{}{
-				"endpoint": ep.Name,
-			})
-			codexNeedsConversion = false
-		} else if *ep.NativeCodexFormat {
-			// 已探测：支持原生 Codex 格式
-			s.logger.Debug("Using native Codex format (previously detected)", map[string]interface{}{
-				"endpoint": ep.Name,
-			})
-			codexNeedsConversion = false
-		} else {
-			// 已探测：需要转换为 OpenAI 格式
-			s.logger.Debug("Converting to OpenAI format (previously detected)", map[string]interface{}{
-				"endpoint": ep.Name,
+	// 关键修复：检查实际使用的URL类型，而不是endpoint_type
+	// 当请求格式是openai且路径是/responses时，需要考虑Codex转换
+	if actuallyUsingOpenAIURL && inboundPath == "/responses" {
+		// 优先使用配置的偏好设置
+		preference := ep.OpenAIPreference
+		if preference == "" {
+			preference = "auto" // 默认为自动探测
+		}
+
+		switch preference {
+		case "chat_completions":
+			// 直接使用 /chat/completions 格式
+			s.logger.Debug("Using chat_completions format (configured preference)", map[string]interface{}{
+				"endpoint":   ep.Name,
+				"preference": preference,
 			})
 			codexNeedsConversion = true
+
+		case "responses":
+			// 优先尝试原生 /responses 格式
+			if ep.NativeCodexFormat == nil || *ep.NativeCodexFormat {
+				s.logger.Debug("Trying native /responses format (configured preference)", map[string]interface{}{
+					"endpoint":   ep.Name,
+					"preference": preference,
+				})
+				codexNeedsConversion = false
+			} else {
+				s.logger.Debug("Converting to /chat/completions (preference=responses but native format failed)", map[string]interface{}{
+					"endpoint":   ep.Name,
+					"preference": preference,
+				})
+				codexNeedsConversion = true
+			}
+
+		case "auto":
+			// 自动探测逻辑（原有逻辑）
+			if ep.NativeCodexFormat == nil {
+				// 首次请求，使用原生格式尝试（收到400后会自动转换并重试）
+				s.logger.Info("First /responses request to endpoint, trying native Codex format (auto)", map[string]interface{}{
+					"endpoint": ep.Name,
+				})
+				codexNeedsConversion = false
+			} else if *ep.NativeCodexFormat {
+				// 已探测：支持原生 Codex 格式
+				s.logger.Debug("Using native Codex format (auto detected)", map[string]interface{}{
+					"endpoint": ep.Name,
+				})
+				codexNeedsConversion = false
+			} else {
+				// 已探测：需要转换为 OpenAI 格式
+				s.logger.Debug("Converting to OpenAI format (auto detected)", map[string]interface{}{
+					"endpoint": ep.Name,
+				})
+				codexNeedsConversion = true
+			}
+
+		default:
+			// 未知配置，使用自动探测
+			s.logger.Info("Unknown openai_preference, using auto detection", map[string]interface{}{
+				"endpoint":   ep.Name,
+				"preference": preference,
+			})
+			if ep.NativeCodexFormat == nil {
+				codexNeedsConversion = false
+			} else if *ep.NativeCodexFormat {
+				codexNeedsConversion = false
+			} else {
+				codexNeedsConversion = true
+			}
 		}
 	}
-	
-    	if codexNeedsConversion {
-        	// 将 Codex 格式转换为 OpenAI Chat Completions，并切换路径到 /chat/completions
-        	// 大多数 OpenAI 兼容端点（包括 88code）不支持 /responses
-        	if inboundPath == "/responses" {
-        		effectivePath = "/chat/completions"
-        		targetURL = ep.GetFullURL(effectivePath)
-        	}
-        	convertedBody, err := s.convertCodexToOpenAI(finalRequestBody)
+
+	if codexNeedsConversion {
+		// 将 Codex 格式转换为 OpenAI Chat Completions，并切换路径到 /chat/completions
+		// 大多数 OpenAI 兼容端点（包括 88code）不支持 /responses
+		if inboundPath == "/responses" {
+			effectivePath = "/chat/completions"
+			targetURL = ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
+		}
+		convertedBody, err := s.convertCodexToOpenAI(finalRequestBody)
 		if err != nil {
 			s.logger.Debug("Failed to convert Codex format to OpenAI", map[string]interface{}{
 				"error": err.Error(),
@@ -221,9 +369,9 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			// 不返回错误，继续使用原始请求体
 		} else if convertedBody != nil {
 			finalRequestBody = convertedBody
-                s.logger.Info("Codex format converted to OpenAI format", map[string]interface{}{
-                    "path": effectivePath,
-                })
+			s.logger.Info("Codex format converted to OpenAI format", map[string]interface{}{
+				"path": effectivePath,
+			})
 
 			// 调试：输出转换后的请求体（截断到前500字符）
 			bodyPreview := string(convertedBody)
@@ -315,7 +463,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		// 记录创建请求失败的日志
 		duration := time.Since(endpointStartTime)
 		createRequestError := fmt.Sprintf("Failed to create final request: %v", err)
-		s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, fmt.Errorf(createRequestError), false, tags, "", originalModel, rewrittenModel, attemptNumber)
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, fmt.Errorf(createRequestError), false, tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(createRequestError))
 		c.Set("last_status_code", 0)
@@ -326,20 +474,68 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		if key == "Authorization" {
 			continue
 		}
+		// 如果已经转换 /responses -> /chat/completions，移除 responses 特有的请求头
+		if codexNeedsConversion && inboundPath == "/responses" && effectivePath == "/chat/completions" {
+			if key == "Openai-Beta" || key == "openai-beta" {
+				s.logger.Debug("Removing /responses-specific header when converting to /chat/completions", map[string]interface{}{
+					"header": key,
+				})
+				continue
+			}
+		}
 		for _, value := range values {
 			req.Header.Add(key, value)
 		}
 	}
 
-	// 根据认证类型设置不同的认证头部
-	if ep.AuthType == "api_key" {
-		req.Header.Set("x-api-key", ep.AuthValue)
-	} else {
+	// 智能认证头设置：支持自动检测和配置两种方式
+	authHeaderType := ep.AuthType
+
+	// 如果已经通过运行时检测到有效的认证方式，优先使用
+	ep.AuthHeaderMutex.RLock()
+	detectedAuthHeader := ep.DetectedAuthHeader
+	ep.AuthHeaderMutex.RUnlock()
+
+	if detectedAuthHeader != "" {
+		// 使用已检测到的有效认证方式
+		authHeaderType = detectedAuthHeader
+	}
+
+	// 根据认证类型设置认证头部
+	// 支持: api_key (x-api-key), auth_token/bearer/其他 (Authorization), auto (自动尝试)
+	trimmedAuthValue := strings.TrimSpace(ep.AuthValue)
+	bearerValue := ""
+	if trimmedAuthValue != "" {
+		bearerValue = "Bearer " + trimmedAuthValue
+	}
+
+	if authHeaderType == "api_key" || authHeaderType == "x-api-key" {
+		if ep.AuthValue != "" {
+			req.Header.Set("x-api-key", ep.AuthValue)
+		}
+		// 同步设置 Authorization，部分第三方兼容端要求同时存在
+		if req.Header.Get("Authorization") == "" && bearerValue != "" {
+			req.Header.Set("Authorization", bearerValue)
+		}
+	} else if authHeaderType == "auto" || authHeaderType == "" {
+		// 自动模式：先尝试 Authorization Bearer (更常用)
 		authHeader, err := ep.GetAuthHeaderWithRefreshCallback(s.config.Timeouts.ToProxyTimeoutConfig(), s.createOAuthTokenRefreshCallback())
 		if err != nil {
 			s.logger.Error(fmt.Sprintf("Failed to get auth header: %v", err), err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication failed"})
-			// 设置错误信息到context中
+			c.Set("last_error", err)
+			c.Set("last_status_code", http.StatusUnauthorized)
+			return false, false
+		}
+		req.Header.Set("Authorization", authHeader)
+		// 标记：首次尝试使用 Authorization
+		c.Set("auth_method_tried", "Authorization")
+	} else {
+		// auth_token, bearer, 或其他 -> 使用 Authorization
+		authHeader, err := ep.GetAuthHeaderWithRefreshCallback(s.config.Timeouts.ToProxyTimeoutConfig(), s.createOAuthTokenRefreshCallback())
+		if err != nil {
+			s.logger.Error(fmt.Sprintf("Failed to get auth header: %v", err), err)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication failed"})
 			c.Set("last_error", err)
 			c.Set("last_status_code", http.StatusUnauthorized)
 			return false, false
@@ -348,13 +544,43 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	}
 
 	// Special OAuth header hack for api.anthropic.com with OAuth tokens
-	if strings.Contains(ep.URL, "api.anthropic.com") && ep.AuthType == "auth_token" && strings.HasPrefix(ep.AuthValue, "sk-ant-oat01") {
+	if strings.Contains(ep.GetURLForFormat(endpointRequestFormat), "api.anthropic.com") && ep.AuthType == "auth_token" && strings.HasPrefix(ep.AuthValue, "sk-ant-oat01") {
 		if existingBeta := req.Header.Get("Anthropic-Beta"); existingBeta != "" {
 			// Prepend oauth-2025-04-20 to existing Anthropic-Beta header
 			req.Header.Set("Anthropic-Beta", "oauth-2025-04-20,"+existingBeta)
 		} else {
 			// Set oauth-2025-04-20 as the only value if no existing header
 			req.Header.Set("Anthropic-Beta", "oauth-2025-04-20")
+		}
+	}
+
+	// 根据格式补全必需的头信息
+	if endpointRequestFormat == "anthropic" {
+		if req.Header.Get("Content-Type") == "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if req.Header.Get("anthropic-version") == "" {
+			req.Header.Set("anthropic-version", "2023-06-01")
+		}
+		if ep.AuthValue != "" {
+			req.Header.Set("x-api-key", ep.AuthValue)
+		}
+		if bearerValue != "" {
+			req.Header.Set("Authorization", bearerValue)
+		}
+	} else if endpointRequestFormat == "openai" {
+		if req.Header.Get("Content-Type") == "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if req.Header.Get("Authorization") == "" {
+			if authHeader, err := ep.GetAuthHeaderWithRefreshCallback(s.config.Timeouts.ToProxyTimeoutConfig(), s.createOAuthTokenRefreshCallback()); err == nil && authHeader != "" {
+				if !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+					authHeader = "Bearer " + strings.TrimSpace(authHeader)
+				}
+				req.Header.Set("Authorization", authHeader)
+			} else if err == nil && bearerValue != "" {
+				req.Header.Set("Authorization", bearerValue)
+			}
 		}
 	}
 
@@ -382,38 +608,77 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	if err != nil {
 		s.logger.Error("Failed to create proxy client for endpoint", err)
 		duration := time.Since(endpointStartTime)
-		s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, nil, nil, duration, err, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, nil, nil, duration, err, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", err)
 		c.Set("last_status_code", 0)
 		return false, true
 	}
 
-        resp, err := client.Do(req)
-        if err != nil {
-            // 如果是首次对 OpenAI 端点的 /responses 请求发生网络级错误（如 EOF），视作不支持 responses，转换并改用 /chat/completions 重试
-            if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil {
-                s.logger.Info("Network error on first /responses request - converting to OpenAI format and retrying /chat/completions", map[string]interface{}{
-                    "endpoint": ep.Name,
-                    "error":    err.Error(),
-                })
-                falseValue := false
-                ep.NativeCodexFormat = &falseValue
-                if convertedBody, convertErr := s.convertCodexToOpenAI(requestBody); convertErr == nil && convertedBody != nil {
-                    // 递归重试到 /chat/completions
-                    return s.proxyToEndpoint(c, ep, "/chat/completions", convertedBody, requestID, startTime, taggedRequest, attemptNumber)
-                }
-                // 转换失败则继续按原逻辑记录并交给上层重试其他端点
-            }
+	resp, err := client.Do(req)
+	if err != nil {
+		// 如果是首次对 OpenAI 端点的 /responses 请求发生网络级错误（如 EOF），视作不支持 responses，转换并改用 /chat/completions 重试
+		if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil {
+			s.logger.Info("Network error on first /responses request - converting to OpenAI format and retrying /chat/completions", map[string]interface{}{
+				"endpoint": ep.Name,
+				"error":    err.Error(),
+			})
+			falseValue := false
+			ep.NativeCodexFormat = &falseValue
+			if convertedBody, convertErr := s.convertCodexToOpenAI(requestBody); convertErr == nil && convertedBody != nil {
+				// 递归重试到 /chat/completions
+				return s.proxyToEndpoint(c, ep, "/chat/completions", convertedBody, requestID, startTime, taggedRequest, attemptNumber)
+			}
+			// 转换失败则继续按原逻辑记录并交给上层重试其他端点
+		}
 
-            duration := time.Since(endpointStartTime)
-            s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, nil, nil, duration, err, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
-            // 设置错误信息到context中，供重试逻辑使用
-            c.Set("last_error", err)
-            c.Set("last_status_code", 0) // 网络错误，没有状态码
-            return false, true
-        }
+		duration := time.Since(endpointStartTime)
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, nil, nil, duration, err, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+		// 设置错误信息到context中，供重试逻辑使用
+		c.Set("last_error", err)
+		c.Set("last_status_code", 0) // 网络错误，没有状态码
+		return false, true
+	}
 	defer resp.Body.Close()
+
+	// 🔐 智能认证头检测与切换
+	// 如果是认证失败(401/403)且auth_type为空或auto，标记切换认证方式后重试
+	if (resp.StatusCode == 401 || resp.StatusCode == 403) &&
+		(ep.AuthType == "" || ep.AuthType == "auto") {
+
+		authRetryKey := fmt.Sprintf("auth_retry_attempted_%s", ep.ID)
+		authMethodTried, _ := c.Get("auth_method_tried")
+
+		if _, alreadyRetried := c.Get(authRetryKey); !alreadyRetried && authMethodTried == "Authorization" {
+			s.logger.Info(fmt.Sprintf("Authentication failed with Authorization header for endpoint %s, will retry with x-api-key", ep.Name))
+
+			// 标记已尝试切换认证方式，下次重试将使用x-api-key
+			c.Set(authRetryKey, true)
+
+			// 记住使用 x-api-key (下次proxyToEndpoint调用时生效)
+			ep.AuthHeaderMutex.Lock()
+			ep.DetectedAuthHeader = "api_key"
+			ep.AuthHeaderMutex.Unlock()
+			
+			// 🎓 持久化学习结果：保存切换后的认证方式
+			// 注意：这里只是标记，实际持久化会在重试成功后进行
+			s.logger.Debug(fmt.Sprintf("Marked endpoint %s to use x-api-key, will persist if retry succeeds", ep.Name))
+
+			// 返回失败但需要重试，让endpoint_management.go的重试逻辑处理
+			duration := time.Since(endpointStartTime)
+			body, _ := io.ReadAll(resp.Body)
+			contentEncoding := resp.Header.Get("Content-Encoding")
+			decompressedBody, err := s.validator.GetDecompressedBody(body, contentEncoding)
+			if err != nil {
+				decompressedBody = body
+			}
+
+			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+			c.Set("last_error", fmt.Errorf("authentication failed, switching to x-api-key"))
+			c.Set("last_status_code", resp.StatusCode)
+			return false, true // 失败，但请重试同一端点
+		}
+	}
 
 	// 检查认证失败情况，如果是OAuth端点且有refresh_token，先尝试刷新token
 	if (resp.StatusCode == 401 || resp.StatusCode == 403) &&
@@ -442,7 +707,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 					decompressedBody = body // 如果解压失败，使用原始数据
 				}
 
-				s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 				// 设置错误信息到context中
 				c.Set("last_error", fmt.Errorf("OAuth token refresh failed: %v", refreshErr))
 				c.Set("last_status_code", resp.StatusCode)
@@ -473,6 +738,80 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			decompressedBody = body // 如果解压失败，使用原始数据
 		}
 
+		// 🔍 优先级1: Codex 格式自动探测
+		// 如果是首个 /responses 请求且返回 4xx/5xx（排除 401/403 认证类），
+		// 视为端点不支持原生 Codex /responses：转换为 OpenAI 格式并改走 /chat/completions 重试
+		// 关键：此逻辑必须在业务错误检测之前，因为404等错误也可能返回{"error":{...}}格式
+		if (resp.StatusCode >= 400 && resp.StatusCode < 600 && resp.StatusCode != 401 && resp.StatusCode != 403) &&
+			actuallyUsingOpenAIURL &&
+			inboundPath == "/responses" &&
+			ep.NativeCodexFormat == nil {
+
+			s.logger.Info("Received error on first /responses request - endpoint requires OpenAI format", map[string]interface{}{
+				"endpoint":    ep.Name,
+				"status_code": resp.StatusCode,
+			})
+
+			// 标记此次尝试应跳过健康统计（这是正常的探测行为，不应该导致端点被拉黑）
+			c.Set("skip_health_record", true)
+
+			// 标记该端点不支持原生 Codex 格式，需要转换
+			falseValue := false
+			ep.NativeCodexFormat = &falseValue
+			
+			// 🎓 持久化学习结果：标记端点需要使用 chat_completions 格式
+			if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
+				ep.OpenAIPreference = "chat_completions"
+				s.logger.Debug(fmt.Sprintf("Marked endpoint %s to use chat_completions format, will persist if retry succeeds", ep.Name))
+			}
+
+			// 转换 Codex 格式到 OpenAI 格式
+			convertedBody, convertErr := s.convertCodexToOpenAI(requestBody)
+			if convertErr != nil {
+				s.logger.Error("Failed to convert Codex format to OpenAI for retry", convertErr)
+				// 转换失败，记录日志并尝试下一个端点
+				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+				c.Set("last_error", fmt.Errorf("format conversion failed: %v", convertErr))
+				c.Set("last_status_code", resp.StatusCode)
+				return false, true
+			}
+
+			s.logger.Info("Auto-converted to OpenAI format, retrying request", map[string]interface{}{
+				"endpoint": ep.Name,
+			})
+
+			// 关闭原响应
+			resp.Body.Close()
+
+			// 用转换后的请求体重试（递归调用，会使用新的 NativeCodexFormat 配置）
+			// 同时切换到 /chat/completions 路径
+			// 注意：持久化会在重试成功后的 success 分支执行
+			return s.proxyToEndpoint(c, ep, "/chat/completions", convertedBody, requestID, startTime, taggedRequest, attemptNumber)
+		}
+
+		// 优先级2: 检查是否为业务错误（端点正常返回了错误信息）
+		var jsonResp map[string]interface{}
+		if json.Unmarshal(decompressedBody, &jsonResp) == nil {
+			if _, hasError := jsonResp["error"]; hasError {
+				// 这是业务错误，根据配置决定是否触发端点黑名单
+				shouldSkip := s.config.Blacklist.BusinessErrorSafe
+				errorType := "business error"
+
+				s.logger.Info(fmt.Sprintf("Endpoint %s returned %s with status %d (blacklist_safe=%v)", ep.Name, errorType, resp.StatusCode, shouldSkip))
+				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+
+				// 根据配置决定是否跳过健康统计
+				if shouldSkip {
+					c.Set("skip_health_record", true)
+				}
+
+				// 设置错误信息到context中
+				c.Set("last_error", fmt.Errorf("%s: status %d", errorType, resp.StatusCode))
+				c.Set("last_status_code", resp.StatusCode)
+				return false, true // 尝试下一个endpoint
+			}
+		}
+
 		// 🎓 自动学习不支持的参数 - 基于400错误分析并重试
 		if resp.StatusCode == 400 {
 			// 记录学习前的参数列表长度
@@ -485,7 +824,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			paramCountAfter := len(ep.GetLearnedUnsupportedParams())
 			if paramCountAfter > paramCountBefore {
 				s.logger.Info("Learned new unsupported parameters, retrying with clean request", map[string]interface{}{
-					"endpoint": ep.Name,
+					"endpoint":      ep.Name,
 					"learned_count": paramCountAfter - paramCountBefore,
 				})
 
@@ -499,46 +838,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			}
 		}
 
-            // 🔍 自动探测 Codex 格式支持
-            // 如果是首个 /responses 请求且返回 4xx/5xx（排除 401/403 认证类），
-            // 视为端点不支持原生 Codex /responses：转换为 OpenAI 格式并改走 /chat/completions 重试
-            if (resp.StatusCode >= 400 && resp.StatusCode < 600 && resp.StatusCode != 401 && resp.StatusCode != 403) &&
-               ep.EndpointType == "openai" &&
-               inboundPath == "/responses" &&
-               ep.NativeCodexFormat == nil {
-			
-			s.logger.Info("Received 400 on first /responses request - endpoint requires OpenAI format", map[string]interface{}{
-				"endpoint": ep.Name,
-			})
-			
-			// 标记该端点不支持原生 Codex 格式，需要转换
-			falseValue := false
-			ep.NativeCodexFormat = &falseValue
-			
-			// 转换 Codex 格式到 OpenAI 格式
-			convertedBody, convertErr := s.convertCodexToOpenAI(requestBody)
-			if convertErr != nil {
-				s.logger.Error("Failed to convert Codex format to OpenAI for retry", convertErr)
-				// 转换失败，记录日志并尝试下一个端点
-				s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
-				c.Set("last_error", fmt.Errorf("format conversion failed: %v", convertErr))
-				c.Set("last_status_code", resp.StatusCode)
-				return false, true
-			}
-			
-			s.logger.Info("Auto-converted to OpenAI format, retrying request", map[string]interface{}{
-				"endpoint": ep.Name,
-			})
-			
-			// 关闭原响应
-			resp.Body.Close()
-			
-                // 用转换后的请求体重试（递归调用，会使用新的 NativeCodexFormat 配置）
-                // 同时切换到 /chat/completions 路径
-                return s.proxyToEndpoint(c, ep, "/chat/completions", convertedBody, requestID, startTime, taggedRequest, attemptNumber)
-		}
-
-		s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 		s.logger.Debug(fmt.Sprintf("HTTP error %d from endpoint %s, trying next endpoint", resp.StatusCode, ep.Name))
 		// 设置状态码到context中，供重试逻辑使用
 		c.Set("last_error", nil)
@@ -552,7 +852,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		// 记录读取响应体失败的日志
 		duration := time.Since(endpointStartTime)
 		readError := fmt.Sprintf("Failed to read response body: %v", err)
-		s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, nil, duration, fmt.Errorf(readError), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, nil, duration, fmt.Errorf(readError), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(readError))
 		c.Set("last_status_code", resp.StatusCode)
@@ -567,12 +867,14 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		// 记录解压响应体失败的日志
 		duration := time.Since(endpointStartTime)
 		decompressError := fmt.Sprintf("Failed to decompress response body: %v", err)
-		s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, responseBody, duration, fmt.Errorf(decompressError), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, responseBody, duration, fmt.Errorf(decompressError), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(decompressError))
 		c.Set("last_status_code", resp.StatusCode)
 		return false, false
 	}
+
+	contentTypeOverrideFromConversion := ""
 
 	// 智能检测内容类型并自动覆盖
 	currentContentType := resp.Header.Get("Content-Type")
@@ -583,6 +885,9 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	if newContentType != "" {
 		finalContentType = newContentType
 		s.logger.Info(fmt.Sprintf("Auto-detected content type mismatch for endpoint %s: %s", ep.Name, overrideInfo))
+	}
+	if contentTypeOverrideFromConversion != "" {
+		finalContentType = contentTypeOverrideFromConversion
 	}
 
 	// 判断是否为流式响应（基于最终的Content-Type）
@@ -600,7 +905,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	// 复制响应头，但跳过可能需要重新计算的头部
 	for key, values := range resp.Header {
 		keyLower := strings.ToLower(key)
-		if keyLower == "content-type" && newContentType != "" {
+		if keyLower == "content-type" {
 			c.Header(key, finalContentType)
 		} else if keyLower == "content-length" || keyLower == "content-encoding" {
 			// 这些头部会在后面根据最终响应体重新设置
@@ -620,36 +925,71 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	}
 
 	// 严格 Anthropic 格式验证已永久启用
-	if err := s.validator.ValidateResponseWithPath(decompressedBody, isStreaming, ep.EndpointType, path, ep.URL); err != nil {
+	// 关键修复：使用actualEndpointFormat进行验证，而不是ep.EndpointType
+	validationEndpointType := ep.EndpointType
+	if actualEndpointFormat != "" {
+		validationEndpointType = actualEndpointFormat
+	}
+	if err := s.validator.ValidateResponseWithPath(decompressedBody, isStreaming, validationEndpointType, path, ep.GetURLForFormat(endpointRequestFormat)); err != nil {
+		// 检查是否为业务错误（根据配置决定是否触发端点黑名单）
+		if validator.IsBusinessError(err) {
+			shouldSkip := s.config.Blacklist.BusinessErrorSafe
+			errorType := "business error"
+
+			s.logger.Info(fmt.Sprintf("Endpoint %s returned %s (not endpoint failure): %v (blacklist_safe=%v)", ep.Name, errorType, err, shouldSkip))
+			duration := time.Since(endpointStartTime)
+			errorLog := fmt.Sprintf("%s: %v", errorType, err)
+			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, fmt.Errorf(errorLog), isStreaming, tags, "", originalModel, rewrittenModel, attemptNumber)
+
+			// 根据配置决定是否跳过健康统计
+			if shouldSkip {
+				c.Set("skip_health_record", true)
+			}
+
+			// 设置错误信息到context中
+			c.Set("last_error", fmt.Errorf(errorLog))
+			c.Set("last_status_code", resp.StatusCode)
+			return false, true // 尝试下一个endpoint
+		}
+
 		// 如果是usage统计验证失败，尝试下一个endpoint
 		if strings.Contains(err.Error(), "invalid usage stats") {
 			s.logger.Info(fmt.Sprintf("Usage validation failed for endpoint %s: %v", ep.Name, err))
 			duration := time.Since(endpointStartTime)
 			errorLog := fmt.Sprintf("Usage validation failed: %v", err)
-			s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, append(decompressedBody, []byte(errorLog)...), duration, fmt.Errorf(errorLog), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, append(decompressedBody, []byte(errorLog)...), duration, fmt.Errorf(errorLog), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 			// 设置错误信息到context中
 			c.Set("last_error", fmt.Errorf(errorLog))
 			c.Set("last_status_code", resp.StatusCode)
 			return false, true // 验证失败，尝试下一个endpoint
 		}
 
-		// 如果是SSE流不完整的验证失败，尝试下一个endpoint
+		// 如果是SSE流不完整的验证失败，检查配置决定是否触发端点黑名单
 		if strings.Contains(err.Error(), "incomplete SSE stream") || strings.Contains(err.Error(), "missing message_stop") || strings.Contains(err.Error(), "missing [DONE]") || strings.Contains(err.Error(), "missing finish_reason") {
-			s.logger.Info(fmt.Sprintf("Incomplete SSE stream detected for endpoint %s: %v", ep.Name, err))
+			shouldSkip := s.config.Blacklist.SSEValidationSafe
+			errorType := "SSE validation error"
+
+			s.logger.Info(fmt.Sprintf("Endpoint %s returned %s: %v (blacklist_safe=%v)", ep.Name, errorType, err, shouldSkip))
 			duration := time.Since(endpointStartTime)
-			errorLog := fmt.Sprintf("SSE validation failed: %v", err)
-			s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, append(decompressedBody, []byte(errorLog)...), duration, fmt.Errorf(errorLog), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+			errorLog := fmt.Sprintf("%s: %v", errorType, err)
+			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, append(decompressedBody, []byte(errorLog)...), duration, fmt.Errorf(errorLog), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+
+			// 根据配置决定是否跳过健康统计
+			if shouldSkip {
+				c.Set("skip_health_record", true)
+			}
+
 			// 设置错误信息到context中
 			c.Set("last_error", fmt.Errorf(errorLog))
 			c.Set("last_status_code", resp.StatusCode)
 			return false, true // 验证失败，尝试下一个endpoint
 		}
-			
+
 		// 验证失败，尝试下一个端点
 		s.logger.Info(fmt.Sprintf("Response validation failed for endpoint %s, trying next endpoint: %v", ep.Name, err))
 		duration := time.Since(endpointStartTime)
 		validationError := fmt.Sprintf("Response validation failed: %v", err)
-		s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, fmt.Errorf(validationError), isStreaming, tags, "", originalModel, rewrittenModel, attemptNumber)
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, fmt.Errorf(validationError), isStreaming, tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(validationError))
 		c.Set("last_status_code", resp.StatusCode)
@@ -659,28 +999,44 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	c.Status(resp.StatusCode)
 
 	// 格式转换（在模型重写之前）
+	// 注意：conversionContext 仅在 Anthropic → OpenAI 请求转换时设置
+	// 此时不需要 OpenAI → Anthropic 响应转换，因为已经有专门的转换逻辑
 	convertedResponseBody := decompressedBody
 	if conversionContext != nil {
-		s.logger.Info(fmt.Sprintf("Starting response conversion. Streaming: %v, OriginalSize: %d", isStreaming, len(decompressedBody)))
-		convertedResp, err := s.converter.ConvertResponse(decompressedBody, conversionContext, isStreaming)
-		if err != nil {
-			s.logger.Error("Response format conversion failed", err)
-			// Response转换失败，记录错误并尝试下一个端点
-			duration := time.Since(endpointStartTime)
-			conversionError := fmt.Sprintf("Response format conversion failed: %v", err)
-			s.logSimpleRequest(requestID, ep.URL, c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, fmt.Errorf(conversionError), isStreaming, tags, "", originalModel, rewrittenModel, attemptNumber)
-			// 设置错误信息到context中
-			c.Set("last_error", fmt.Errorf(conversionError))
-			c.Set("last_status_code", resp.StatusCode)
-			return false, true // Response转换失败，尝试下一个端点
+		s.logger.Info("conversionContext is set but OpenAI to Anthropic response conversion is deprecated")
+		// 在新架构中，这个分支不应该被执行
+		// 如果执行到这里，说明代码逻辑可能有问题
+	}
+
+	if shouldConvertAnthropicResponseToOpenAI && len(decompressedBody) > 0 {
+		var converted []byte
+		var err error
+
+		if isStreaming {
+			converted, err = conversion.ConvertAnthropicSSEToOpenAI(decompressedBody)
 		} else {
-			convertedResponseBody = convertedResp
-			s.logger.Info(fmt.Sprintf("Response conversion successful! Original: %d bytes -> Converted: %d bytes", len(decompressedBody), len(convertedResp)))
-			s.logger.Debug("Response format converted successfully", map[string]interface{}{
-				"endpoint_type":  conversionContext.EndpointType,
-				"original_size":  len(decompressedBody),
-				"converted_size": len(convertedResp),
-			})
+			converted, err = conversion.ConvertAnthropicResponseJSONToOpenAI(decompressedBody)
+		}
+
+		if err != nil {
+			s.logger.Error("Failed to convert Anthropic response to OpenAI format", err)
+		} else {
+			convertedResponseBody = converted
+			actuallyUsingOpenAIURL = true
+
+			// 确保响应头与新的数据格式匹配
+			c.Header("Content-Encoding", "")
+			if !isStreaming {
+				c.Header("Content-Length", fmt.Sprintf("%d", len(convertedResponseBody)))
+			} else {
+				c.Header("Content-Length", "")
+			}
+
+			if isStreaming {
+				contentTypeOverrideFromConversion = "text/event-stream; charset=utf-8"
+			} else {
+				contentTypeOverrideFromConversion = "application/json"
+			}
 		}
 	}
 
@@ -733,13 +1089,37 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			isCodexClient = (fd.ClientType == utils.ClientCodex)
 		}
 
-		if ep.EndpointType == "openai" && isCodexClient {
+		// 关键修复：检查actuallyUsingOpenAIURL而不是ep.EndpointType
+		if actuallyUsingOpenAIURL && isCodexClient {
 			s.logger.Info("Converting chat completions SSE to Responses API format for Codex", map[string]interface{}{
-				"endpoint_type": ep.EndpointType,
-				"client_type":   "codex",
-				"path":          path,
+				"actual_endpoint_format": actualEndpointFormat,
+				"client_type":            "codex",
+				"path":                   path,
 			})
 			finalResponseBody = s.convertChatCompletionsToResponsesSSE(finalResponseBody)
+		}
+	} else {
+		// 非流式响应的Codex格式转换
+		formatDetection, _ := c.Get("format_detection")
+		isCodexClient := false
+		if fd, ok := formatDetection.(*utils.FormatDetectionResult); ok {
+			isCodexClient = (fd.ClientType == utils.ClientCodex)
+		}
+
+		// 如果是Codex客户端且使用OpenAI URL，需要转换非流式响应
+		if actuallyUsingOpenAIURL && isCodexClient {
+			s.logger.Info("Converting chat completion to Responses API format for Codex", map[string]interface{}{
+				"actual_endpoint_format": actualEndpointFormat,
+				"client_type":            "codex",
+				"path":                   path,
+			})
+			if converted, err := s.convertChatCompletionToResponse(finalResponseBody); err == nil {
+				finalResponseBody = converted
+				// 更新Content-Length
+				c.Header("Content-Length", fmt.Sprintf("%d", len(finalResponseBody)))
+			} else {
+				s.logger.Error("Failed to convert response format for Codex", err)
+			}
 		}
 	}
 
@@ -752,7 +1132,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 
 	duration := time.Since(endpointStartTime)
 	// 创建日志条目，记录修改前后的完整数据
-	requestLog := s.logger.CreateRequestLog(requestID, ep.URL, c.Request.Method, path)
+	requestLog := s.logger.CreateRequestLog(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path)
 	requestLog.RequestBodySize = len(requestBody)
 	requestLog.Tags = tags
 	requestLog.ContentTypeOverride = overrideInfo
@@ -878,14 +1258,41 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	requestLog.IsStreaming = isStreaming
 	s.logger.LogRequest(requestLog)
 
-        // 🔍 自动探测成功：如果是首次 /responses 请求且成功，标记为支持原生 Codex 格式
-        if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil {
-            trueValue := true
-            ep.NativeCodexFormat = &trueValue
-            s.logger.Info("Auto-detected: endpoint natively supports Codex format", map[string]interface{}{
-                "endpoint": ep.Name,
-            })
-        }
+	// 🔍 自动探测成功：如果是首次 /responses 请求且成功，标记为支持原生 Codex 格式
+	if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil {
+		trueValue := true
+		ep.NativeCodexFormat = &trueValue
+		s.logger.Info("Auto-detected: endpoint natively supports Codex format", map[string]interface{}{
+			"endpoint": ep.Name,
+		})
+		
+		// 🎓 持久化学习结果：标记 OpenAI 格式偏好为 responses
+		if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
+			ep.OpenAIPreference = "responses"
+			s.PersistEndpointLearning(ep)
+		}
+	}
+
+	// 🔐 记录成功的认证方式（用于自动模式）
+	if ep.AuthType == "" || ep.AuthType == "auto" {
+		ep.AuthHeaderMutex.RLock()
+		currentDetected := ep.DetectedAuthHeader
+		ep.AuthHeaderMutex.RUnlock()
+
+		if currentDetected == "" {
+			// 第一次成功，记住使用的认证方式
+			authMethodTried, _ := c.Get("auth_method_tried")
+			if authMethodTried == "Authorization" {
+				ep.AuthHeaderMutex.Lock()
+				ep.DetectedAuthHeader = "auth_token"
+				ep.AuthHeaderMutex.Unlock()
+				s.logger.Info(fmt.Sprintf("Auto-detected: endpoint %s works with Authorization header", ep.Name))
+				
+				// 🎓 持久化学习结果：保存认证方式
+				s.PersistEndpointLearning(ep)
+			}
+		}
+	}
 
 	return true, false
 }
@@ -1270,8 +1677,8 @@ func (s *Server) convertChatCompletionsToResponsesSSE(body []byte) []byte {
 
 			if content, hasContent := delta["content"].(string); hasContent && content != "" {
 				event := map[string]interface{}{
-					"type":  "response.output_text.delta",
-					"delta": content,
+					"type":        "response.output_text.delta",
+					"delta":       content,
 					"response_id": responseID,
 				}
 				eventJSON, _ := json.Marshal(event)
@@ -1302,12 +1709,62 @@ func (s *Server) convertChatCompletionsToResponsesSSE(body []byte) []byte {
 	result := strings.Join(convertedLines, "\n")
 
 	s.logger.Debug("Converted chat completions SSE to Responses API format", map[string]interface{}{
-		"original_size": len(body),
+		"original_size":  len(body),
 		"converted_size": len(result),
-		"response_id": responseID,
+		"response_id":    responseID,
 	})
 
 	return []byte(result)
+}
+
+// convertChatCompletionToResponse 将 OpenAI /chat/completions 非流式响应转换为 Codex /responses 格式
+// OpenAI格式: {"id":"xxx","object":"chat.completion","created":123,"model":"xxx","choices":[{"index":0,"message":{"role":"assistant","content":"..."}}]}
+// Codex格式: {"type":"response","id":"xxx","object":"response","created":123,"model":"xxx","choices":[{"index":0,"message":{"role":"assistant","content":"..."}}]}
+func (s *Server) convertChatCompletionToResponse(body []byte) ([]byte, error) {
+	var completion map[string]interface{}
+	if err := json.Unmarshal(body, &completion); err != nil {
+		s.logger.Error("Failed to parse chat completion response", err)
+		return nil, err
+	}
+
+	// 检查是否是chat.completion对象
+	if obj, ok := completion["object"].(string); !ok || obj != "chat.completion" {
+		// 不是chat.completion，可能已经是正确格式或其他错误
+		return body, nil
+	}
+
+	// 转换为Codex response格式
+	response := map[string]interface{}{
+		"type":    "response", // Codex响应的type字段
+		"id":      completion["id"],
+		"object":  "response", // 改为response对象
+		"created": completion["created"],
+		"model":   completion["model"],
+		"choices": completion["choices"], // choices保持不变
+	}
+
+	// 可选字段
+	if usage, ok := completion["usage"]; ok {
+		response["usage"] = usage
+	}
+	if systemFingerprint, ok := completion["system_fingerprint"]; ok {
+		response["system_fingerprint"] = systemFingerprint
+	}
+
+	converted, err := json.Marshal(response)
+	if err != nil {
+		s.logger.Error("Failed to marshal Codex response", err)
+		return nil, err
+	}
+
+	s.logger.Debug("Converted chat completion to Responses API format", map[string]interface{}{
+		"original_object":  "chat.completion",
+		"converted_object": "response",
+		"original_size":    len(body),
+		"converted_size":   len(converted),
+	})
+
+	return converted, nil
 }
 
 // convertCodexToOpenAI 将 Codex /responses 格式转换为 OpenAI /chat/completions 格式
@@ -1315,10 +1772,11 @@ func (s *Server) convertChatCompletionsToResponsesSSE(body []byte) []byte {
 //   - instructions: 系统提示（字符串）
 //   - input: 消息数组（结构与 OpenAI messages 不同）
 //   - include: 响应包含选项（Codex 特有）
+//
 // 转换策略：
-//   1. 从 input 数组提取内容，转换为标准 OpenAI messages 格式
-//   2. instructions 作为系统消息（如果存在）
-//   3. 删除 Codex 特有字段（input, include 等）
+//  1. 从 input 数组提取内容，转换为标准 OpenAI messages 格式
+//  2. instructions 作为系统消息（如果存在）
+//  3. 删除 Codex 特有字段（input, include 等）
 func (s *Server) convertCodexToOpenAI(requestBody []byte) ([]byte, error) {
 	// 解析请求体
 	var requestData map[string]interface{}
@@ -1399,13 +1857,13 @@ func (s *Server) convertCodexToOpenAI(requestBody []byte) ([]byte, error) {
 
 	// 删除其他 Codex 特有字段
 	delete(requestData, "include") // Codex 特有的响应选项
-	
+
 	// 保留以下字段（OpenAI 兼容）：
 	// - tools: 工具定义数组（OpenAI 标准）
 	// - tool_choice: 工具选择策略（OpenAI 标准）
 	// - stream: 流式响应标志（OpenAI 标准）
 	// - temperature, max_tokens 等参数（OpenAI 标准）
-	
+
 	// 注意：tools 字段在 Codex 和 OpenAI 中格式相同，可以直接保留
 	// 不需要特殊处理，只需确保不被删除
 
@@ -1415,7 +1873,7 @@ func (s *Server) convertCodexToOpenAI(requestBody []byte) ([]byte, error) {
 		s.logger.Error("Failed to marshal converted request body", err)
 		return nil, err
 	}
-	
+
 	s.logger.Debug("Codex to OpenAI conversion completed", map[string]interface{}{
 		"messages_count": len(messages),
 		"has_tools":      requestData["tools"] != nil,

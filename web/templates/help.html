@@ -11,418 +11,133 @@
     <link href="/static/help.css" rel="stylesheet">
 </head>
 <body>
-    <!-- Hero Section -->
-    <div class="hero-section">
+    <!-- Compact Hero Section -->
+    <div class="hero-section py-4" style="min-height: auto;">
         <div class="container">
             <div class="row align-items-center">
-                <div class="col-md-8">
-                    <h1 class="display-4 mb-3">
-                        <i class="fas fa-robot"></i> <span data-t="cccc_help">CCCC - 配置助手</span>
-                    </h1>
-                    <p class="lead mb-4">
-                        <span data-t="setup_guide_cccc">Claude Code and Codex Companion - 为两大 AI 编程助手提供统一的 API 转发</span>
+                <div class="col-md-9">
+                    <h2 class="mb-2">
+                        <i class="fas fa-robot text-primary"></i>
+                        <span data-t="cccc_help">CCCC 统一配置向导</span>
+                    </h2>
+                    <p class="mb-2 lead" style="font-size: 1.1rem;">
+                        <span data-t="setup_guide_cccc">30秒完成 Claude Code 和 Codex 配置</span>
                     </p>
-                    <div class="d-flex gap-3">
-                        <a href="/admin/" class="btn btn-light btn-lg">
-                            <i class="fas fa-cog"></i> <span data-t="admin_panel">管理面板</span>
+                    <div class="d-flex gap-2">
+                        <a href="/admin/" class="btn btn-sm btn-outline-light">
+                            <i class="fas fa-cog"></i> 管理面板
                         </a>
-                        <a href="#scripts" class="btn btn-outline-light btn-lg">
-                            <i class="fas fa-code"></i> <span data-t="script_guide">脚本指南</span>
+                        <a href="/admin/endpoints" class="btn btn-sm btn-outline-light">
+                            <i class="fas fa-server"></i> 端点配置
                         </a>
                     </div>
                 </div>
-                <div class="col-md-4 text-center">
-                    <i class="fas fa-terminal icon-hero"></i>
+                <div class="col-md-3 text-center">
+                    <i class="fas fa-terminal fa-2x icon-hero" style="font-size: 3rem;"></i>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="container">
-        <!-- Client Selection -->
-        <section id="client-selection" class="mb-5">
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="h4 mb-0">
-                        <i class="fas fa-terminal text-primary"></i> 
-                        <span data-t="select_client">选择你的客户端</span>
-                    </h2>
+        <!-- Quick Status Check -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="alert alert-info py-2 mb-0">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <span class="small">确保已安装 Claude Code 或 Codex，并拥有可用的 API 密钥</span>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <div class="card h-100 border-primary client-card" onclick="selectClient('claude-code')">
-                                <div class="card-body text-center">
-                                    <i class="fas fa-code fa-3x text-primary mb-3"></i>
-                                    <h4>Claude Code</h4>
-                                    <p class="text-muted">Anthropic 官方 AI 编程助手</p>
-                                    <button class="btn btn-primary">配置 Claude Code</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <div class="card h-100 border-success client-card" onclick="selectClient('codex')">
-                                <div class="card-body text-center">
-                                    <i class="fas fa-terminal fa-3x text-success mb-3"></i>
-                                    <h4>Codex</h4>
-                                    <p class="text-muted">OpenAI Codex CLI 工具</p>
-                                    <button class="btn btn-success">配置 Codex</button>
-                                </div>
-                            </div>
+            </div>
+        </div>
+
+        <!-- Quick Setup Section -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-success">
+                    <div class="card-header bg-success text-white py-3">
+                        <h5 class="mb-0">
+                            <i class="fas fa-bolt"></i>
+                            快速操作
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                            <a href="/admin/" class="btn btn-outline-primary flex-fill">
+                                <i class="fas fa-tachometer-alt"></i> 控制台
+                            </a>
+                            <a href="/admin/endpoints" class="btn btn-outline-info flex-fill">
+                                <i class="fas fa-list"></i> 端点列表
+                            </a>
+                            <a href="/admin/logs" class="btn btn-outline-warning flex-fill">
+                                <i class="fas fa-history"></i> 请求日志
+                            </a>
                         </div>
                     </div>
                 </div>
             </div>
-        </section>
-        
-        <!-- Prerequisites Section -->
-        <section id="prerequisites" class="mb-5">
-            <div class="alert alert-info">
-                <i class="fas fa-info-circle"></i>
-                <strong><span data-t="prerequisite_notice">前置要求</span>：</strong>
-                <span data-t="prerequisite_description">请先保证系统上已经安装了 <span id="selected-client-name">Claude Code 或 Codex</span></span>
-            </div>
-        </section>
+        </div>
 
-        <!-- Script Generation Section -->
-        <section id="scripts" class="mb-5">
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="h4 mb-0">
-                        <i class="fas fa-code text-success"></i> 
-                        <span data-t="generate_proxy_script">生成代理脚本</span>
-                    </h2>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted mb-4">
-                        <span data-t="generate_script_description">生成启动脚本来使用此代理服务器。脚本会自动设置必要的环境变量并启动 Claude Code。</span>
-                    </p>
-
-                    <!-- Script Type Selector -->
-                    <div class="mb-4">
-                        <h5 class="mb-3"><i class="fas fa-file-code"></i> 选择脚本类型</h5>
-                        <div class="btn-group w-100" role="group">
-                            <input type="radio" class="btn-check" name="scriptType" id="scriptSingle" autocomplete="off" checked>
-                            <label class="btn btn-outline-primary" for="scriptSingle">
-                                <i class="fas fa-user"></i> 单独配置
-                            </label>
-                            <input type="radio" class="btn-check" name="scriptType" id="scriptBoth" autocomplete="off">
-                            <label class="btn btn-outline-success" for="scriptBoth">
-                                <i class="fas fa-users"></i> 一键配置双客户端
-                            </label>
-                        </div>
+        <!-- Configuration Options -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-primary">
+                    <div class="card-header bg-primary text-white py-3">
+                        <h5 class="mb-0">
+                            <i class="fas fa-cogs"></i>
+                            一键配置选项
+                        </h5>
                     </div>
-
-                    <!-- Client Type Selector (Only for Single Configuration) -->
-                    <div id="clientSelectorSection" class="mb-3">
-                        <h6 class="mb-2"><i class="fas fa-robot"></i> 选择客户端</h6>
-                        <div class="btn-group" role="group" id="clientTypeSelector">
-                            <input type="radio" class="btn-check" name="clientType" id="clientClaudeCode" autocomplete="off" checked onchange="switchClient('claude-code')">
-                            <label class="btn btn-outline-primary" for="clientClaudeCode">
-                                <i class="fas fa-code"></i> Claude Code
-                            </label>
-                            <input type="radio" class="btn-check" name="clientType" id="clientCodex" autocomplete="off" onchange="switchClient('codex')">
-                            <label class="btn btn-outline-success" for="clientCodex">
-                                <i class="fas fa-terminal"></i> Codex
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Script Tabs -->
-                    <ul class="nav nav-tabs mb-4" id="scriptTabs" role="tablist">
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link active" id="windows-script-tab" data-bs-toggle="tab" data-bs-target="#windows-script" 
-                                    type="button" role="tab" aria-controls="windows-script" aria-selected="true">
-                                <i class="fab fa-windows"></i> Windows (.bat)
-                            </button>
-                        </li>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="macos-script-tab" data-bs-toggle="tab" data-bs-target="#macos-script" 
-                                    type="button" role="tab" aria-controls="macos-script" aria-selected="false">
-                                <i class="fab fa-apple"></i> macOS (.command)
-                            </button>
-                        </li>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="linux-script-tab" data-bs-toggle="tab" data-bs-target="#linux-script" 
-                                    type="button" role="tab" aria-controls="linux-script" aria-selected="false">
-                                <i class="fab fa-linux"></i> Linux (.sh)
-                            </button>
-                        </li>
-                    </ul>
-
-                    <!-- Script Content -->
-                    <div class="tab-content" id="scriptTabContent">
-                        <!-- Windows Script -->
-                        <div class="tab-pane fade show active" id="windows-script" role="tabpanel" aria-labelledby="windows-script-tab">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h5><span data-t="windows_script">Windows 脚本</span> <span id="windows-filename" class="text-muted">(cccc-claude.bat)</span></h5>
-                                <button class="btn btn-success" onclick="downloadScriptByType('windows')">
-                                    <i class="fas fa-download"></i> <span data-t="download_script">下载脚本</span>
-                                </button>
-                            </div>
-
-                            <div class="alert alert-info mb-3">
-                                <i class="fas fa-info-circle"></i>
-                                <strong><span data-t="enhanced_script_notice">增强脚本说明</span>：</strong>
-                                <span data-t="enhanced_script_description" id="script-description-claude-win">此脚本会自动检查并修改 Claude Code 设置文件（~/.claude/settings.json）以确保代理配置生效。如果设置文件存在冲突配置，会自动备份原文件。</span>
-                                <span data-t="enhanced_script_description_codex" id="script-description-codex-win" style="display: none;">此脚本会自动生成或修改 Codex 配置文件（~/.codex/config.toml 和 auth.json）。配置包括模型提供商、认证信息等，会自动备份已有配置。</span>
-                            </div>
-                            
-                            <div class="position-relative">
-                                <div class="code-block" id="windows-script-content">
-                                    @echo off<br>
-                                    REM Claude Code Companion - Windows Launcher<br>
-                                    echo Configuring Claude Code for proxy use...<br><br>
-                                    
-                                    REM Set environment variables first (fallback and primary method)<br>
-                                    set ANTHROPIC_BASE_URL={{.BaseURL}}<br>
-                                    set ANTHROPIC_AUTH_TOKEN=hello<br>
-                                    set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1<br>
-                                    set API_TIMEOUT_MS=600000<br><br>
-                                    
-                                    REM Use embedded Node.js to process settings.json if it exists<br>
-                                    node -e "const fs=require('fs');const path=require('path');const os=require('os');const claudeDir=path.join(os.homedir(),'.claude');const settingsFile=path.join(claudeDir,'settings.json');const targetEnv={'ANTHROPIC_BASE_URL':'{{.BaseURL}}','ANTHROPIC_AUTH_TOKEN':'hello','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC':'1','API_TIMEOUT_MS':'600000'};function processSettings(){if(!fs.existsSync(settingsFile)){console.log('Claude settings file not found, environment variables already set');return true;}try{const content=fs.readFileSync(settingsFile,'utf8');const settings=JSON.parse(content);if(!settings.env)settings.env={};let needsUpdate=false;let backupCreated=false;for(const[key,targetValue]of Object.entries(targetEnv)){const currentValue=settings.env[key];if(currentValue!==targetValue){if(!backupCreated){const timestamp=new Date().toISOString().replace(/[:.]/g,'-');const backupFile=settingsFile+'.backup-'+timestamp;fs.copyFileSync(settingsFile,backupFile);console.log('Backed up settings to: '+backupFile);backupCreated=true;}if(currentValue){console.log('Updating '+key+': '+currentValue+' -> '+targetValue);}else{console.log('Adding '+key+': '+targetValue);}settings.env[key]=targetValue;needsUpdate=true;}}if(needsUpdate){fs.writeFileSync(settingsFile,JSON.stringify(settings,null,2));console.log('Settings updated successfully');}else{console.log('Settings already configured correctly');}return true;}catch(error){console.error('Error processing settings:',error.message);console.log('Environment variables already set as fallback');return false;}}processSettings();" &gt;nul 2&gt;&amp;1<br><br>
-                                    
-                                    echo Starting Claude with proxy configuration...<br>
-                                    claude %*
-                                </div>
-                                <button class="btn btn-sm btn-outline-light copy-btn" onclick="copyToClipboard(this)">
-                                    <i class="fas fa-copy"></i>
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- macOS Script -->
-                        <div class="tab-pane fade" id="macos-script" role="tabpanel" aria-labelledby="macos-script-tab">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h5><span data-t="macos_script">macOS 脚本</span> <span id="macos-filename" class="text-muted">(cccc-claude.command)</span></h5>
-                                <button class="btn btn-success" onclick="downloadScriptByType('macos')">
-                                    <i class="fas fa-download"></i> <span data-t="download_script">下载脚本</span>
-                                </button>
-                            </div>
-
-                            <div class="alert alert-info mb-3">
-                                <i class="fas fa-info-circle"></i>
-                                <strong><span data-t="enhanced_script_notice">增强脚本说明</span>：</strong>
-                                <span data-t="enhanced_script_description" id="script-description-claude-mac">此脚本会自动检查并修改 Claude Code 设置文件（~/.claude/settings.json）以确保代理配置生效。如果设置文件存在冲突配置，会自动备份原文件。</span>
-                                <span data-t="enhanced_script_description_codex" id="script-description-codex-mac" style="display: none;">此脚本会自动生成或修改 Codex 配置文件（~/.codex/config.toml 和 auth.json）。配置包括模型提供商、认证信息等，会自动备份已有配置。</span>
-                            </div>
-                            
-                            <div class="position-relative">
-                                <div class="code-block" id="macos-script-content">
-                                    #!/bin/bash<br>
-                                    # Claude Code Companion - macOS Launcher<br>
-                                    echo "Configuring Claude Code for proxy use..."<br><br>
-                                    
-                                    # Set environment variables first (fallback and primary method)<br>
-                                    export ANTHROPIC_BASE_URL="{{.BaseURL}}"<br>
-                                    export ANTHROPIC_AUTH_TOKEN="hello"<br>
-                                    export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"<br>
-                                    export API_TIMEOUT_MS="600000"<br><br>
-                                    
-                                    # Use embedded Node.js to process settings.json if it exists<br>
-                                    node -e "const fs=require('fs');const path=require('path');const os=require('os');const claudeDir=path.join(os.homedir(),'.claude');const settingsFile=path.join(claudeDir,'settings.json');const targetEnv={'ANTHROPIC_BASE_URL':'{{.BaseURL}}','ANTHROPIC_AUTH_TOKEN':'hello','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC':'1','API_TIMEOUT_MS':'600000'};function processSettings(){if(!fs.existsSync(settingsFile)){console.log('Claude settings file not found, environment variables already set');return true;}try{const content=fs.readFileSync(settingsFile,'utf8');const settings=JSON.parse(content);if(!settings.env)settings.env={};let needsUpdate=false;let backupCreated=false;for(const[key,targetValue]of Object.entries(targetEnv)){const currentValue=settings.env[key];if(currentValue!==targetValue){if(!backupCreated){const timestamp=new Date().toISOString().replace(/[:.]/g,'-');const backupFile=settingsFile+'.backup-'+timestamp;fs.copyFileSync(settingsFile,backupFile);console.log('Backed up settings to: '+backupFile);backupCreated=true;}if(currentValue){console.log('Updating '+key+': '+currentValue+' -> '+targetValue);}else{console.log('Adding '+key+': '+targetValue);}settings.env[key]=targetValue;needsUpdate=true;}}if(needsUpdate){fs.writeFileSync(settingsFile,JSON.stringify(settings,null,2));console.log('Settings updated successfully');}else{console.log('Settings already configured correctly');}return true;}catch(error){console.error('Error processing settings:',error.message);console.log('Environment variables already set as fallback');return false;}}processSettings();" &gt;/dev/null 2&gt;&amp;1<br><br>
-                                    
-                                    echo "Starting Claude with proxy configuration..."<br>
-                                    exec claude "$@"
-                                </div>
-                                <button class="btn btn-sm btn-outline-light copy-btn" onclick="copyToClipboard(this)">
-                                    <i class="fas fa-copy"></i>
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Linux Script -->
-                        <div class="tab-pane fade" id="linux-script" role="tabpanel" aria-labelledby="linux-script-tab">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h5><span data-t="linux_script">Linux 脚本</span> <span id="linux-filename" class="text-muted">(cccc-claude.sh)</span></h5>
-                                <button class="btn btn-success" onclick="downloadScriptByType('linux')">
-                                    <i class="fas fa-download"></i> <span data-t="download_script">下载脚本</span>
-                                </button>
-                            </div>
-
-                            <div class="alert alert-info mb-3">
-                                <i class="fas fa-info-circle"></i>
-                                <strong><span data-t="enhanced_script_notice">增强脚本说明</span>：</strong>
-                                <span data-t="enhanced_script_description" id="script-description-claude-linux">此脚本会自动检查并修改 Claude Code 设置文件（~/.claude/settings.json）以确保代理配置生效。如果设置文件存在冲突配置，会自动备份原文件。</span>
-                                <span data-t="enhanced_script_description_codex" id="script-description-codex-linux" style="display: none;">此脚本会自动生成或修改 Codex 配置文件（~/.codex/config.toml 和 auth.json）。配置包括模型提供商、认证信息等，会自动备份已有配置。</span>
-                            </div>
-                            
-                            <div class="position-relative">
-                                <div class="code-block" id="linux-script-content">
-                                    #!/bin/bash<br>
-                                    # Claude Code Companion - Linux Launcher<br>
-                                    echo "Configuring Claude Code for proxy use..."<br><br>
-                                    
-                                    # Set environment variables first (fallback and primary method)<br>
-                                    export ANTHROPIC_BASE_URL="{{.BaseURL}}"<br>
-                                    export ANTHROPIC_AUTH_TOKEN="hello"<br>
-                                    export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"<br>
-                                    export API_TIMEOUT_MS="600000"<br><br>
-                                    
-                                    # Use embedded Node.js to process settings.json if it exists<br>
-                                    node -e "const fs=require('fs');const path=require('path');const os=require('os');const claudeDir=path.join(os.homedir(),'.claude');const settingsFile=path.join(claudeDir,'settings.json');const targetEnv={'ANTHROPIC_BASE_URL':'{{.BaseURL}}','ANTHROPIC_AUTH_TOKEN':'hello','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC':'1','API_TIMEOUT_MS':'600000'};function processSettings(){if(!fs.existsSync(settingsFile)){console.log('Claude settings file not found, environment variables already set');return true;}try{const content=fs.readFileSync(settingsFile,'utf8');const settings=JSON.parse(content);if(!settings.env)settings.env={};let needsUpdate=false;let backupCreated=false;for(const[key,targetValue]of Object.entries(targetEnv)){const currentValue=settings.env[key];if(currentValue!==targetValue){if(!backupCreated){const timestamp=new Date().toISOString().replace(/[:.]/g,'-');const backupFile=settingsFile+'.backup-'+timestamp;fs.copyFileSync(settingsFile,backupFile);console.log('Backed up settings to: '+backupFile);backupCreated=true;}if(currentValue){console.log('Updating '+key+': '+currentValue+' -> '+targetValue);}else{console.log('Adding '+key+': '+targetValue);}settings.env[key]=targetValue;needsUpdate=true;}}if(needsUpdate){fs.writeFileSync(settingsFile,JSON.stringify(settings,null,2));console.log('Settings updated successfully');}else{console.log('Settings already configured correctly');}return true;}catch(error){console.error('Error processing settings:',error.message);console.log('Environment variables already set as fallback');return false;}}processSettings();" &gt;/dev/null 2&gt;&amp;1<br><br>
-                                    
-                                    echo "Starting Claude with proxy configuration..."<br>
-                                    exec claude "$@"
-                                </div>
-                                <button class="btn btn-sm btn-outline-light copy-btn" onclick="copyToClipboard(this)">
-                                    <i class="fas fa-copy"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Usage Instructions -->
-        <section id="usage" class="mb-5">
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="h4 mb-0">
-                        <i class="fas fa-play text-info"></i> 
-                        <span data-t="usage_instructions">使用说明</span>
-                    </h2>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h5><span data-t="how_to_use">如何使用</span></h5>
-                            <ol>
-                                <li><span data-t="download_and_save_script">下载并保存上述脚本到您的系统</span></li>
-                                <li><span data-t="make_script_executable">使脚本可执行（Linux/macOS）：</span>
-                                    <div class="code-block mt-2">chmod +x ccc.sh  # <span data-t="or">或</span> chmod +x ccc.command</div>
-                                </li>
-                                <li><span data-t="use_script_instead_of_claude">使用脚本代替直接调用 claude：</span>
-                                    <div class="code-block mt-2">
-                                        # <span data-t="windows">Windows</span><br>
-                                        ccc.bat --help<br>
-                                        ccc.bat interactive<br><br>
-                                        # Linux/macOS<br>
-                                        ./ccc.sh --help<br>
-                                        ./ccc.command interactive
-                                    </div>
-                                </li>
-                            </ol>
-                            
-                            <div class="alert alert-success mt-3">
-                                <i class="fas fa-magic"></i>
-                                <strong><span data-t="smart_configuration">智能配置</span>：</strong>
-                                <span data-t="smart_configuration_desc">脚本会自动检测并处理 Claude Code 设置文件，确保代理配置始终生效。</span>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <h5><span data-t="enhanced_features">增强功能</span></h5>
-                            <ul>
-                                <li><i class="fas fa-check-circle text-success"></i> <span data-t="auto_settings_modification">自动修改配置文件</span></li>
-                                <li><i class="fas fa-check-circle text-success"></i> <span data-t="automatic_backup">冲突时自动备份原始配置</span></li>
-                                <li><i class="fas fa-check-circle text-success"></i> <span data-t="fallback_support">配置失败时提示手动处理</span></li>
-                                <li><i class="fas fa-check-circle text-success"></i> <span data-t="preserve_custom_settings">保留用户自定义设置</span></li>
-                            </ul>
-
-                            <!-- Claude Code 配置说明 -->
-                            <div id="claude-config-info">
-                                <h5 class="mt-4"><span data-t="claude_config_files">Claude Code 配置文件</span></h5>
-                                <ul>
-                                    <li><strong>~/.claude/settings.json:</strong> 主配置文件（自动创建和修改）</li>
-                                </ul>
-                                <h6 class="mt-3">环境变量说明</h6>
-                                <ul>
-                                    <li><strong>ANTHROPIC_BASE_URL:</strong> <span data-t="proxy_server_url">代理服务器 URL</span></li>
-                                    <li><strong>ANTHROPIC_AUTH_TOKEN:</strong> <span data-t="authentication_token">认证令牌（固定为 "hello"）</span></li>
-                                    <li><strong>CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:</strong> <span data-t="disable_non_essential_traffic">禁用非必要流量</span></li>
-                                    <li><strong>API_TIMEOUT_MS:</strong> <span data-t="api_timeout_milliseconds">API 超时时间（毫秒）</span></li>
-                                </ul>
-                            </div>
-
-                            <!-- Codex 配置说明 -->
-                            <div id="codex-config-info" style="display: none;">
-                                <h5 class="mt-4"><span data-t="codex_config_files">Codex 配置文件</span></h5>
-                                <ul>
-                                    <li><strong>~/.codex/config.toml:</strong> 主配置文件（TOML 格式）</li>
-                                    <li><strong>~/.codex/auth.json:</strong> 认证配置文件</li>
-                                </ul>
-                                <h6 class="mt-3">配置项说明</h6>
-                                <ul>
-                                    <li><strong>model_provider:</strong> 模型提供商（设为 "cccc"）</li>
-                                    <li><strong>model:</strong> 使用的模型（gpt-5）</li>
-                                    <li><strong>model_reasoning_effort:</strong> 推理强度（high）</li>
-                                    <li><strong>base_url:</strong> 代理服务器地址/v1</li>
-                                    <li><strong>wire_api:</strong> API 类型（responses）</li>
-                                    <li><strong>OPENAI_API_KEY:</strong> 认证密钥（固定为 "hello"）</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- 添加常见问题解答 -->
-                    <div class="row mt-5">
-                        <div class="col-12">
-                            <h5><span data-t="faq_title">常见问题</span></h5>
-                            <div class="accordion" id="faqAccordion">
-                                <div class="accordion-item">
-                                    <h6 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq1">
-                                            <span data-t="faq_script_safe">脚本修改我的设置文件安全吗？</span>
-                                        </button>
-                                    </h6>
-                                    <div id="faq1" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                                        <div class="accordion-body">
-                                            <span data-t="faq_script_safe_answer">完全安全。脚本在修改前会自动创建带时间戳的备份文件，您可以随时恢复。脚本只修改代理相关的环境变量，保留所有其他配置。</span>
+                    <div class="card-body">
+                        <div class="row g-4">
+                            <!-- Claude Code Only -->
+                            <div class="col-md-4">
+                                <div class="card h-100 border-primary">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-code fa-2x text-primary mb-3"></i>
+                                        <h5 class="card-title text-primary">Claude Code</h5>
+                                        <p class="card-text small">仅配置 Claude Code 客户端</p>
+                                        <div class="code-block small mb-3" style="font-size: 0.75rem; padding: 0.75rem; white-space: pre-wrap; overflow-x: auto;">
+./cccc-setup-claude-code.sh --url {{.BaseURL}} --key YOUR_API_KEY
                                         </div>
+                                        <button class="btn btn-primary btn-sm" onclick="downloadConfigScript('claude-code')">
+                                            <i class="fas fa-download"></i> 下载脚本
+                                        </button>
                                     </div>
                                 </div>
-                                
-                                <div class="accordion-item">
-                                    <h6 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq2">
-                                            <span data-t="faq_node_required">需要安装 Node.js 吗？</span>
-                                        </button>
-                                    </h6>
-                                    <div id="faq2" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                                        <div class="accordion-body">
-                                            <span data-t="faq_node_required_answer">不需要单独安装。Claude Code 本身基于 Node.js，所以脚本可以直接使用现有的 Node.js 环境。</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="accordion-item">
-                                    <h6 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq3">
-                                            <span data-t="faq_restore_settings">如何恢复原始设置？</span>
-                                        </button>
-                                    </h6>
-                                    <div id="faq3" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                                        <div class="accordion-body">
-                                            <span data-t="faq_restore_settings_answer">在 ~/.claude/ 或 ~/.codex/ 目录中找到备份文件（如 settings.json.backup-* 或 config.toml.backup-*），将其重命名为原文件名即可恢复。</span>
-                                        </div>
-                                    </div>
-                                </div>
+                            </div>
 
-                                <div class="accordion-item">
-                                    <h6 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq4">
-                                            <span data-t="faq_codex_model">Codex 可以切换其他模型吗？</span>
-                                        </button>
-                                    </h6>
-                                    <div id="faq4" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                                        <div class="accordion-body">
-                                            <span data-t="faq_codex_model_answer">可以。在脚本生成后，您可以手动编辑 ~/.codex/config.toml 文件，修改 model 字段为其他支持的模型名称（如 gpt-5-codex）。使用命令 codex -m MODEL_NAME 也可以临时切换模型。</span>
+                            <!-- Codex Only -->
+                            <div class="col-md-4">
+                                <div class="card h-100 border-success">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-terminal fa-2x text-success mb-3"></i>
+                                        <h5 class="card-title text-success">Codex</h5>
+                                        <p class="card-text small">仅配置 Codex 客户端</p>
+                                        <div class="code-block small mb-3" style="font-size: 0.75rem; padding: 0.75rem; white-space: pre-wrap; overflow-x: auto;">
+./cccc-setup-codex.sh --url {{.BaseURL}} --key YOUR_API_KEY
                                         </div>
+                                        <button class="btn btn-success btn-sm" onclick="downloadConfigScript('codex')">
+                                            <i class="fas fa-download"></i> 下载脚本
+                                        </button>
                                     </div>
                                 </div>
+                            </div>
 
-                                <div class="accordion-item">
-                                    <h6 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq5">
-                                            <span data-t="faq_config_difference">Claude Code 和 Codex 配置有什么区别？</span>
-                                        </button>
-                                    </h6>
-                                    <div id="faq5" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-                                        <div class="accordion-body">
-                                            <span data-t="faq_config_difference_answer">Claude Code 使用 JSON 格式的 settings.json 文件配置环境变量；Codex 使用 TOML 格式的 config.toml 配置模型提供商，并需要单独的 auth.json 存储认证信息。脚本会自动处理这些差异。</span>
+                            <!-- Both Together -->
+                            <div class="col-md-4">
+                                <div class="card h-100 border-info">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-sync-alt fa-2x text-info mb-3"></i>
+                                        <h5 class="card-title text-info">同时配置</h5>
+                                        <p class="card-text small">一次性配置 Claude Code 和 Codex</p>
+                                        <div class="code-block small mb-3" style="font-size: 0.75rem; padding: 0.75rem; white-space: pre-wrap; overflow-x: auto;">
+./cccc-setup.sh --url {{.BaseURL}} --key YOUR_API_KEY
                                         </div>
+                                        <button class="btn btn-info btn-sm" onclick="downloadConfigScript('unified')">
+                                            <i class="fas fa-download"></i> 下载脚本
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -430,14 +145,580 @@
                     </div>
                 </div>
             </div>
-        </section>
+        </div>
+
+        <!-- Endpoint Configuration -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-warning">
+                    <div class="card-header bg-warning text-dark py-3">
+                        <h5 class="mb-0">
+                            <i class="fas fa-server"></i>
+                            端点配置指南
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6><i class="fas fa-plug text-primary"></i> 端点配置说明</h6>
+                                <p class="small">端点配置允许您设置多个 API 提供商，系统会根据优先级自动选择可用的端点：</p>
+                                <ul class="small">
+                                    <li><strong>添加端点:</strong> 可添加多个同类型或不同类型 API 提供商</li>
+                                    <li><strong>优先级调整:</strong> 拖拽端点调整优先级顺序</li>
+                                    <li><strong>标签设置:</strong> 为端点设置标签以便识别</li>
+                                    <li><strong>健康检查:</strong> 系统自动检测端点可用性</li>
+                                </ul>
+
+                                <h6 class="mt-3"><i class="fas fa-cog text-success"></i> 参数含义</h6>
+                                <ul class="small">
+                                    <li><strong>URL:</strong> API 提供商的基础地址 (如 https://api.openai.com)</li>
+                                    <li><strong>路径:</strong> API 路径前缀 (如 /v1，/chat/completions)</li>
+                                    <li><strong>认证密钥:</strong> API 访问密钥</li>
+                                    <li><strong>优先级:</strong> 数字越小优先级越高</li>
+                                    <li><strong>标签:</strong> 自定义标签用于识别端点</li>
+                                    <li><strong>超时:</strong> 请求超时时间（毫秒）</li>
+                                </ul>
+                            </div>
+
+                            <div class="col-md-6">
+                                <h6><i class="fas fa-wand-magic-sparkles text-info"></i> 高级配置</h6>
+                                <ul class="small">
+                                    <li><strong>模型映射:</strong> 将请求模型名映射到实际模型名</li>
+                                    <li><strong>重写规则:</strong> 自定义请求/响应内容重写</li>
+                                    <li><strong>负载均衡:</strong> 多端点之间的负载分配策略</li>
+                                    <li><strong>故障转移:</strong> 主端点失败时自动切换策略</li>
+                                </ul>
+
+                                <div class="alert alert-info small mt-3">
+                                    <i class="fas fa-lightbulb"></i> <strong>提示:</strong> 建议配置 2-3 个端点以确保高可用性。在管理面板中可以随时调整端点配置。
+                                </div>
+
+                                <div class="text-center mt-3">
+                                    <a href="/admin/endpoints" class="btn btn-warning">
+                                        <i class="fas fa-cogs"></i> 配置端点
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manual Configuration (Expanded, not collapsible) -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-secondary">
+                    <div class="card-header bg-secondary text-white py-3">
+                        <h5 class="mb-0">
+                            <i class="fas fa-tools"></i>
+                            手动配置（高级用户）
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6 class="text-primary mb-3">
+                                    <i class="fas fa-code"></i> Claude Code 手动配置
+                                </h6>
+                                <p class="small mb-2">编辑 <code>~/.claude/settings.json</code> 文件：</p>
+                                <div class="code-block small mb-3" style="font-size: 0.75rem; padding: 0.75rem; white-space: pre-wrap; overflow-x: auto;">
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "{{.BaseURL}}",
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_API_KEY",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": 20000,
+    "DISABLE_TELEMETRY": 1,
+    "DISABLE_ERROR_REPORTING": 1,
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": 1,
+    "MAX_THINKING_TOKENS": 12000
+  },
+  "model": "sonnet"
+}
+                                </div>
+
+                                <h6 class="text-muted mt-4">配置参数说明</h6>
+                                <ul class="small">
+                                    <li><strong>ANTHROPIC_BASE_URL:</strong> 指向 CCCC 代理服务器地址</li>
+                                    <li><strong>ANTHROPIC_AUTH_TOKEN:</strong> API 认证令牌</li>
+                                    <li><strong>CLAUDE_CODE_MAX_OUTPUT_TOKENS:</strong> 最大输出 token 数量</li>
+                                    <li><strong>DISABLE_TELEMETRY:</strong> 禁用遥测数据</li>
+                                    <li><strong>CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:</strong> 禁用非必要流量</li>
+                                </ul>
+                            </div>
+
+                            <div class="col-md-6">
+                                <h6 class="text-success mb-3">
+                                    <i class="fas fa-terminal"></i> Codex 手动配置
+                                </h6>
+                                <p class="small mb-2">编辑 <code>~/.codex/config.toml</code> 文件：</p>
+                                <div class="code-block small mb-3" style="font-size: 0.75rem; padding: 0.75rem; white-space: pre-wrap; overflow-x: auto;">
+model_provider = "cccc"
+model = "gpt-5-codex"
+model_reasoning_effort = "high"
+
+[Model_providers.cccc]
+name = "cccc"
+base_url = "{{.BaseURL}}/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+                                </div>
+
+                                <p class="small mb-2">编辑 <code>~/.codex/auth.json</code> 文件：</p>
+                                <div class="code-block small mb-3" style="font-size: 0.75rem; padding: 0.75rem; white-space: pre-wrap; overflow-x: auto;">
+{
+  "OPENAI_API_KEY": "YOUR_API_KEY",
+  "CCCC_API_KEY": "YOUR_API_KEY"
+}
+                                </div>
+
+                                <h6 class="text-muted mt-4">配置参数说明</h6>
+                                <ul class="small">
+                                    <li><strong>model_provider:</strong> 模型提供商名称</li>
+                                    <li><strong>model:</strong> 使用的模型名称</li>
+                                    <li><strong>base_url:</strong> API 基础地址 (需添加 /v1 后缀)</li>
+                                    <li><strong>wire_api:</strong> API 类型 (responses 表示响应格式)</li>
+                                    <li><strong>env_key:</strong> 环境变量中使用的密钥名称</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
-    {{template "footer.html" .}}
+    <footer class="mt-5 py-3 bg-light border-top">
+        <div class="container text-center text-muted">
+            <a href="https://github.com/whshang/claude-code-codex-companion" target="_blank" class="text-decoration-none text-muted">
+                Claude Code Codex Companion
+            </a>
+        </div>
+    </footer>
 
     <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="/static/i18n.js"></script>
     <script src="/static/shared.js"></script>
-    <script src="/static/help.js"></script>
+    <script>
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            element.select();
+            element.setSelectionRange(0, 99999);
+            document.execCommand('copy');
+
+            // 显示复制成功提示
+            const button = element.nextElementSibling;
+            const originalHTML = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-check"></i> 已复制';
+            button.classList.remove('btn-outline-secondary');
+            button.classList.add('btn-success');
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML;
+                button.classList.remove('btn-success');
+                button.classList.add('btn-outline-secondary');
+            }, 2000);
+        }
+
+        // Download configuration scripts
+        function downloadConfigScript(type) {
+            const baseUrl = window.location.protocol + '//' + window.location.host;
+            let scriptContent, filename;
+
+            if (type === 'claude-code') {
+                filename = 'cccc-setup-claude-code.sh';
+                scriptContent = `#!/bin/bash
+
+# CCCC (Claude Code Codex Companion) Configuration Script for Claude Code
+# This script configures Claude Code to use your CCCC proxy instance
+
+set -e
+
+# Default values
+DEFAULT_BASE_URL="${baseUrl}"
+CLAUDE_CONFIG_DIR="$HOME/.claude"
+CLAUDE_SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
+
+# Function to create Claude Code settings
+create_settings() {
+    local base_url="$1"
+    local api_key="$2"
+
+    mkdir -p "$CLAUDE_CONFIG_DIR"
+
+    cat > "$CLAUDE_SETTINGS_FILE" << EOF
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "${base_url}",
+    "ANTHROPIC_AUTH_TOKEN": "$api_key",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": 20000,
+    "DISABLE_TELEMETRY": 1,
+    "DISABLE_ERROR_REPORTING": 1,
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": 1,
+    "MAX_THINKING_TOKENS": 12000
+  },
+  "model": "sonnet"
+}
+EOF
+
+    echo "Claude Code settings created successfully"
+}
+
+# Main function
+main() {
+    echo "CCCC (Claude Code Codex Companion) Configuration Script for Claude Code"
+    echo "======================================================="
+    echo
+
+    # Interactive mode
+    echo "交互式配置模式"
+    echo
+
+    # Get base URL
+    read -p "Enter CCCC proxy URL [${DEFAULT_BASE_URL}]: " base_url
+    base_url="${base_url:-$DEFAULT_BASE_URL}"
+
+    # Get API key
+    while [ -z "$api_key" ]; do
+        read -p "Enter your API key: " api_key
+        if [ -z "$api_key" ]; then
+            echo "API key is required"
+        fi
+    done
+
+    echo
+    echo "配置信息："
+    echo "  代理地址: $base_url"
+    echo "  API 密钥: ${api_key:0:8}...${api_key: -4}"
+    echo
+
+    # Create settings
+    create_settings "$base_url" "$api_key"
+
+    echo
+    echo "✅ Claude Code 配置完成！"
+    echo "配置文件位置: $CLAUDE_SETTINGS_FILE"
+}
+
+# Run main function
+main "$@"`;
+            } else if (type === 'codex') {
+                filename = 'cccc-setup-codex.sh';
+                scriptContent = `#!/bin/bash
+
+# CCCC (Claude Code Codex Companion) Configuration Script for Codex
+# This script configures Codex to use your CCCC proxy instance
+
+set -e
+
+# Default values
+DEFAULT_BASE_URL="${baseUrl}"
+
+# Function to create Codex configuration
+create_codex_config() {
+    local base_url="$1"
+    local api_key="$2"
+
+    # Create config directory if it doesn't exist
+    mkdir -p "$HOME/.codex"
+
+    # Create config.toml
+    cat > "$HOME/.codex/config.toml" << EOF
+model_provider = "cccc"
+model = "gpt-5-codex"
+model_reasoning_effort = "high"
+
+[Model_providers.cccc]
+name = "cccc"
+base_url = "${base_url}/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+EOF
+
+    # Create auth.json
+    cat > "$HOME/.codex/auth.json" << EOF
+{
+  "OPENAI_API_KEY": "$api_key",
+  "CCCC_API_KEY": "$api_key"
+}
+EOF
+
+    echo "Codex configuration created successfully"
+}
+
+# Main function
+main() {
+    echo "CCCC (Claude Code Codex Companion) Configuration Script for Codex"
+    echo "======================================="
+    echo
+
+    # Interactive mode
+    echo "交互式配置模式"
+    echo
+
+    # Get base URL
+    read -p "Enter CCCC proxy URL [${DEFAULT_BASE_URL}]: " base_url
+    base_url="${base_url:-$DEFAULT_BASE_URL}"
+
+    # Get API key
+    while [ -z "$api_key" ]; do
+        read -p "Enter your API key: " api_key
+        if [ -z "$api_key" ]; then
+            echo "API key is required"
+        fi
+    done
+
+    echo
+    echo "配置信息："
+    echo "  代理地址: $base_url"
+    echo "  API 密钥: ${api_key:0:8}...${api_key: -4}"
+    echo
+
+    # Create configuration
+    create_codex_config "$base_url" "$api_key"
+
+    echo
+    echo "✅ Codex 配置完成！"
+    echo "配置文件位置: $HOME/.codex/config.toml"
+}
+
+# Run main function
+main "$@"`;
+            } else {
+                // Unified script
+                filename = 'cccc-setup.sh';
+                scriptContent = `#!/bin/bash
+
+# CCCC (Claude Code Codex Companion) Unified Configuration Script
+# This script configures both Claude Code and Codex to use your CCCC proxy instance
+
+set -e
+
+# Default values
+DEFAULT_BASE_URL="${baseUrl}"
+
+# Function to create Claude Code settings
+create_claude_settings() {
+    local base_url="$1"
+    local api_key="$2"
+
+    mkdir -p "$HOME/.claude"
+
+    cat > "$HOME/.claude/settings.json" << EOF
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "$base_url",
+    "ANTHROPIC_AUTH_TOKEN": "$api_key",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": 20000,
+    "DISABLE_TELEMETRY": 1,
+    "DISABLE_ERROR_REPORTING": 1,
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": 1,
+    "MAX_THINKING_TOKENS": 12000
+  },
+  "model": "sonnet"
+}
+EOF
+
+    echo "Claude Code settings created successfully"
+}
+
+# Function to create Codex configuration
+create_codex_config() {
+    local base_url="$1"
+    local api_key="$2"
+
+    mkdir -p "$HOME/.codex"
+
+    # Create config.toml
+    cat > "$HOME/.codex/config.toml" << EOF
+model_provider = "cccc"
+model = "gpt-5-codex"
+model_reasoning_effort = "high"
+
+[Model_providers.cccc]
+name = "cccc"
+base_url = "${base_url}/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+EOF
+
+    # Create auth.json
+    cat > "$HOME/.codex/auth.json" << EOF
+{
+  "OPENAI_API_KEY": "$api_key",
+  "CCCC_API_KEY": "$api_key"
+}
+EOF
+
+    echo "Codex configuration created successfully"
+}
+
+# Main function
+main() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════════════╗"
+    echo "║                    CCCC  Unified Configuration                       ║"
+    echo "║              Claude Code & Codex Companion Setup                     ║"
+    echo "╚══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+
+    # Interactive mode
+    echo "交互式配置模式"
+    echo ""
+
+    # Get base URL
+    read -p "Enter CCCC proxy URL [${DEFAULT_BASE_URL}]: " base_url
+    base_url="${base_url:-$DEFAULT_BASE_URL}"
+
+    # Get API key
+    while [ -z "$api_key" ]; do
+        read -p "Enter your API key: " api_key
+        if [ -z "$api_key" ]; then
+            echo "API key is required"
+        fi
+    done
+
+    echo ""
+    echo "配置信息："
+    echo "  代理地址: $base_url"
+    echo "  API 密钥: ${api_key:0:8}...${api_key: -4}"
+    echo ""
+
+    # Configure both clients
+    echo "══════════════════════════════════════════════════════════════════════"
+    echo "                    配置 Claude Code"
+    echo "══════════════════════════════════════════════════════════════════════"
+    create_claude_settings "$base_url" "$api_key"
+
+    echo ""
+    echo "══════════════════════════════════════════════════════════════════════"
+    echo "                      配置 Codex"
+    echo "══════════════════════════════════════════════════════════════════════"
+    create_codex_config "$base_url" "$api_key"
+
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════════════╗"
+    echo "║                    ✅ 配置完成！                                     ║"
+    echo "╠══════════════════════════════════════════════════════════════════════╣"
+    echo "║  ✓ Claude Code 已配置完成                                            ║"
+    echo "║    使用命令: claude                                                  ║"
+    echo "║                                                                      ║"
+    echo "║  ✓ Codex 已配置完成                                                  ║"
+    echo "║    使用命令: codex                                                   ║"
+    echo "║                                                                      ║"
+    echo "║  🌐 代理地址: $base_url                                              ║"
+    echo "║                                                                      ║"
+    echo "║  💡 提示: 如需重新配置，可再次运行本脚本                             ║"
+    echo "╚══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+}
+
+# Run main function
+main "$@"`;
+            }
+
+            const blob = new Blob([scriptContent], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+    </script>
+
+    <style>
+        /* Compact styles for better presentation */
+        .hero-section {
+            padding: 2rem 0 !important;
+            min-height: auto !important;
+        }
+
+        .card-body {
+            padding: 1rem !important;
+        }
+
+        .card-header {
+            padding: 0.75rem 1rem !important;
+        }
+
+        .display-4 {
+            font-size: 2rem !important;
+            margin-bottom: 0.5rem !important;
+        }
+
+        .lead {
+            font-size: 1rem !important;
+            margin-bottom: 0.75rem !important;
+        }
+
+        .btn-lg {
+            padding: 0.5rem 1rem !important;
+            font-size: 1rem !important;
+        }
+
+        .fa-3x {
+            font-size: 2rem !important;
+        }
+
+        .fa-2x {
+            font-size: 1.5rem !important;
+        }
+
+        .mb-5 {
+            margin-bottom: 1.5rem !important;
+        }
+
+        .mb-4 {
+            margin-bottom: 1rem !important;
+        }
+
+        .mb-3 {
+            margin-bottom: 0.75rem !important;
+        }
+
+        .mb-2 {
+            margin-bottom: 0.5rem !important;
+        }
+
+        .py-3 {
+            padding-top: 0.75rem !important;
+            padding-bottom: 0.75rem !important;
+        }
+
+        .py-2 {
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+        }
+
+        .g-2 {
+            --bs-gutter-x: 0.5rem !important;
+            --bs-gutter-y: 0.5rem !important;
+        }
+
+        .code-block {
+            font-size: 0.8rem !important;
+            padding: 0.5rem !important;
+        }
+
+        .btn-sm {
+            padding: 0.25rem 0.5rem !important;
+            font-size: 0.875rem !important;
+        }
+
+        .alert {
+            margin-bottom: 0.75rem !important;
+            padding: 0.5rem 0.75rem !important;
+        }
+
+        hr {
+            margin: 0.5rem 0 !important;
+        }
+    </style>
 </body>
 </html>

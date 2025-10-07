@@ -72,7 +72,20 @@
                                     {{range .Endpoints}}
                                     <tr>
                                         <td>{{.Name}}</td>
-                                        <td class="url-cell" data-url="{{.URL}}">{{.URL}}</td>
+                                        <td class="url-cell">
+                                            {{if .URLAnthropic}}
+                                                {{if .URLOpenAI}}
+                                                    <div class="small"><span class="badge bg-primary me-1">Claude</span><code>{{.URLAnthropic}}</code></div>
+                                                    <div class="small mt-1"><span class="badge bg-warning me-1">Codex</span><code>{{.URLOpenAI}}</code></div>
+                                                {{else}}
+                                                    <span class="badge bg-primary me-1">Claude</span><code>{{.URLAnthropic}}</code>
+                                                {{end}}
+                                            {{else if .URLOpenAI}}
+                                                <span class="badge bg-warning me-1">Codex</span><code>{{.URLOpenAI}}</code>
+                                            {{else}}
+                                                <span class="text-muted">-</span>
+                                            {{end}}
+                                        </td>
                                         <td>
                                             {{if eq .Status "active"}}
                                                 <span class="badge bg-success" data-t="active">活跃</span>

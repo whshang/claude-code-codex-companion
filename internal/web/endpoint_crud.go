@@ -55,9 +55,8 @@ func (s *AdminServer) handleUpdateEndpoints(c *gin.Context) {
 func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 	var request struct {
 		Name              string               `json:"name" binding:"required"`
-		URL               string               `json:"url" binding:"required"`
-		EndpointType      string               `json:"endpoint_type"` // "anthropic" | "openai"
-		PathPrefix        string               `json:"path_prefix"`   // OpenAI 端点的路径前缀
+		URLAnthropic      string               `json:"url_anthropic"`
+		URLOpenAI         string               `json:"url_openai"`
 		AuthType          string               `json:"auth_type" binding:"required"`
 		AuthValue         string               `json:"auth_value"`    // OAuth时不需要
 		Enabled           bool                 `json:"enabled"`
@@ -79,9 +78,25 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 		return
 	}
 
-	if err := security.ValidateURL(request.URL); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": i18n.TCtx(c, "url_validation_failed", "URL验证失败: ") + err.Error()})
+	// 至少需要一个URL
+	if request.URLAnthropic == "" && request.URLOpenAI == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": i18n.TCtx(c, "at_least_one_url_required", "至少需要填写一个URL（Anthropic URL或OpenAI URL）")})
 		return
+	}
+
+	// 验证提供的URL
+	if request.URLAnthropic != "" {
+		if err := security.ValidateURL(request.URLAnthropic); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": i18n.TCtx(c, "anthropic_url_validation_failed", "Anthropic URL验证失败: ") + err.Error()})
+			return
+		}
+	}
+
+	if request.URLOpenAI != "" {
+		if err := security.ValidateURL(request.URLOpenAI); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": i18n.TCtx(c, "openai_url_validation_failed", "OpenAI URL验证失败: ") + err.Error()})
+			return
+		}
 	}
 
 	if err := security.ValidateTags(request.Tags); err != nil {
@@ -96,16 +111,9 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 		}
 	}
 
-	if request.PathPrefix != "" {
-		if err := security.ValidateGenericText(request.PathPrefix, 200, i18n.TCtx(c, "path_prefix", "路径前缀")); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
 	// 验证auth_type
-	if request.AuthType != "api_key" && request.AuthType != "auth_token" && request.AuthType != "oauth" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "auth_type must be 'api_key', 'auth_token', or 'oauth'"})
+	if request.AuthType != "api_key" && request.AuthType != "auth_token" && request.AuthType != "oauth" && request.AuthType != "auto" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "auth_type must be 'api_key', 'auth_token', 'oauth', or 'auto'"})
 		return
 	}
 	
@@ -151,7 +159,7 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 
 	// 创建新端点配置
 	newEndpoint := createEndpointConfigFromRequest(
-		request.Name, request.URL, request.EndpointType, request.PathPrefix,
+		request.Name, request.URLAnthropic, request.URLOpenAI,
 		request.AuthType, request.AuthValue,
 		request.Enabled, maxPriority+1, request.Tags, request.Proxy, request.OAuthConfig, request.HeaderOverrides, request.ParameterOverrides)
 	currentEndpoints = append(currentEndpoints, newEndpoint)
@@ -181,9 +189,8 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 
 	var request struct {
 		Name              string               `json:"name"`
-		URL               string               `json:"url"`
-		EndpointType      string               `json:"endpoint_type"`
-		PathPrefix        string               `json:"path_prefix"` // OpenAI 端点的路径前缀
+		URLAnthropic      string               `json:"url_anthropic"`
+		URLOpenAI         string               `json:"url_openai"`
 		AuthType          string               `json:"auth_type"`
 		AuthValue         string               `json:"auth_value"`
 		Enabled           bool                 `json:"enabled"`
@@ -192,6 +199,7 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 		OAuthConfig       *config.OAuthConfig  `json:"oauth_config,omitempty"` // 新增：OAuth配置
 		HeaderOverrides     map[string]string    `json:"header_overrides,omitempty"`   // 新增：HTTP Header覆盖配置
 		ParameterOverrides  map[string]string    `json:"parameter_overrides,omitempty"` // 新增：Request Parameter覆盖配置
+		ModelRewrite      *config.ModelRewriteConfig `json:"model_rewrite"` // 修改：移除omitempty，允许null值
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -207,9 +215,17 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 		}
 	}
 
-	if request.URL != "" {
-		if err := security.ValidateURL(request.URL); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": i18n.TCtx(c, "url_validation_failed", "URL验证失败: ") + err.Error()})
+	// 验证URL
+	if request.URLAnthropic != "" {
+		if err := security.ValidateURL(request.URLAnthropic); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": i18n.TCtx(c, "anthropic_url_validation_failed", "Anthropic URL验证失败: ") + err.Error()})
+			return
+		}
+	}
+
+	if request.URLOpenAI != "" {
+		if err := security.ValidateURL(request.URLOpenAI); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": i18n.TCtx(c, "openai_url_validation_failed", "OpenAI URL验证失败: ") + err.Error()})
 			return
 		}
 	}
@@ -224,13 +240,6 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 	if request.AuthValue != "" {
 		if err := security.ValidateAuthToken(request.AuthValue); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": i18n.TCtx(c, "auth_token_validation_failed", "认证令牌验证失败: ") + err.Error()})
-			return
-		}
-	}
-
-	if request.PathPrefix != "" {
-		if err := security.ValidateGenericText(request.PathPrefix, 200, i18n.TCtx(c, "path_prefix", "路径前缀")); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 	}
@@ -253,17 +262,15 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 			if request.Name != "" {
 				currentEndpoints[i].Name = request.Name
 			}
-			if request.URL != "" {
-				currentEndpoints[i].URL = request.URL
+			if request.URLAnthropic != "" {
+				currentEndpoints[i].URLAnthropic = request.URLAnthropic
 			}
-			if request.EndpointType != "" {
-				currentEndpoints[i].EndpointType = request.EndpointType
+			if request.URLOpenAI != "" {
+				currentEndpoints[i].URLOpenAI = request.URLOpenAI
 			}
-			// 处理 PathPrefix 字段，允许设置空值（对于 Anthropic 端点）
-			currentEndpoints[i].PathPrefix = request.PathPrefix
 			if request.AuthType != "" {
-				if request.AuthType != "api_key" && request.AuthType != "auth_token" && request.AuthType != "oauth" {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "auth_type must be 'api_key', 'auth_token', or 'oauth'"})
+				if request.AuthType != "api_key" && request.AuthType != "auth_token" && request.AuthType != "oauth" && request.AuthType != "auto" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "auth_type must be 'api_key', 'auth_token', 'oauth', or 'auto'"})
 					return
 				}
 				
@@ -322,6 +329,20 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 			
 			// 更新Request Parameter覆盖配置
 			currentEndpoints[i].ParameterOverrides = request.ParameterOverrides
+			
+			// 更新模型重写配置
+			// 前端现在始终发送配置对象（enabled=false或enabled=true+rules），不再发送null
+			// 因此简化逻辑：直接使用request中的配置，如果为nil则保持原值不变
+			if request.ModelRewrite != nil {
+				// 验证模型重写配置
+				if err := config.ValidateModelRewriteConfig(request.ModelRewrite, fmt.Sprintf("endpoint '%s'", endpointName)); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid model rewrite config: " + err.Error()})
+					return
+				}
+				// 始终保存配置对象，即使enabled=false（前端需要显示禁用状态）
+				currentEndpoints[i].ModelRewrite = request.ModelRewrite
+			}
+			// 如果没有model_rewrite字段，保持原有配置不变
 			
 			found = true
 			break

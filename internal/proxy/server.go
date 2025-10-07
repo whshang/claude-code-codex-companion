@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"claude-code-codex-companion/internal/config"
-	"claude-code-codex-companion/internal/conversion"
 	"claude-code-codex-companion/internal/endpoint"
 	"claude-code-codex-companion/internal/health"
 	"claude-code-codex-companion/internal/i18n"
@@ -28,7 +27,6 @@ type Server struct {
 	adminServer     *web.AdminServer
 	taggingManager  *tagging.Manager       // 新增：tagging系统管理器
 	modelRewriter   *modelrewrite.Rewriter // 新增：模型重写器
-	converter       conversion.Converter   // 新增：格式转换器
 	i18nManager     *i18n.Manager          // 新增：国际化管理器
 	router          *gin.Engine
 	configFilePath  string
@@ -64,11 +62,8 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 	// 初始化模型重写器
 	modelRewriter := modelrewrite.NewRewriter(*log)
 
-	// 初始化格式转换器
-	converter := conversion.NewConverter(log)
-
-	// 初始化健康检查器（需要在模型重写器和转换器之后）
-	healthChecker := health.NewChecker(cfg.Timeouts.ToHealthCheckTimeoutConfig(), modelRewriter, converter)
+	// 初始化健康检查器（需要在模型重写器之后）
+	healthChecker := health.NewChecker(cfg.Timeouts.ToHealthCheckTimeoutConfig(), modelRewriter)
 
 	// 初始化国际化管理器
 	i18nConfig := &i18n.Config{
@@ -98,10 +93,12 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 		adminServer:     adminServer,
 		taggingManager:  taggingManager, // 新增：设置tagging管理器
 		modelRewriter:   modelRewriter,  // 新增：设置模型重写器
-		converter:       converter,      // 新增：设置格式转换器
 		i18nManager:     i18nManager,    // 新增：设置国际化管理器
 		configFilePath:  configFilePath,
 	}
+	
+	// 设置持久化回调，让AdminServer可以被Server调用
+	adminServer.SetPersistenceCallbacks(server)
 
 	// 设置热更新处理器
 	adminServer.SetHotUpdateHandler(server)
@@ -296,5 +293,85 @@ func (s *Server) persistRateLimitState(endpointID string, reset *int64, status *
 		cfg.RateLimitStatus = status
 		return nil
 	})
+}
+
+// PersistEndpointLearning 持久化端点学习结果到配置文件
+// 这个方法会被 proxy_logic.go 在运行时学习成功后调用
+func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
+	if ep == nil {
+		return
+	}
+	
+	// 线程安全：获取端点当前的学习状态
+	ep.AuthHeaderMutex.RLock()
+	detectedAuthHeader := ep.DetectedAuthHeader
+	ep.AuthHeaderMutex.RUnlock()
+	
+	openAIPreference := ep.OpenAIPreference
+	
+	// 调用 AdminServer 的持久化方法
+	// 只有在学习到新信息时才持久化
+	needsPersist := false
+	
+	// 1. 检查认证方式是否需要持久化
+	if detectedAuthHeader != "" && (ep.AuthType == "" || ep.AuthType == "auto") {
+		// 从检测到的头部类型推断认证类型
+		var authType string
+		if detectedAuthHeader == "api_key" || detectedAuthHeader == "x-api-key" {
+			authType = "api_key"
+		} else {
+			authType = "auth_token"
+		}
+		
+		// 只有当配置中的认证类型与检测到的不同时才更新
+		if ep.AuthType != authType {
+			s.logger.Info(fmt.Sprintf("🔐 Learning: Detected auth type '%s' for endpoint '%s'", authType, ep.Name), nil)
+			
+			// 使用统一的配置更新机制持久化认证类型
+			if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
+				cfg.AuthType = authType
+				return nil
+			}); err != nil {
+				s.logger.Error(fmt.Sprintf("Failed to persist auth type for endpoint '%s'", ep.Name), err)
+			} else {
+				s.logger.Info(fmt.Sprintf("✓ Persisted auth type '%s' for endpoint '%s'", authType, ep.Name), nil)
+				needsPersist = true
+			}
+		}
+	}
+	
+	// 2. 检查 OpenAI 格式偏好是否需要持久化
+	if openAIPreference != "" && openAIPreference != "auto" {
+		// 检查配置中是否已经有这个偏好设置
+		s.configMutex.Lock()
+		configPreference := ""
+		for i := range s.config.Endpoints {
+			if s.config.Endpoints[i].Name == ep.Name {
+				configPreference = s.config.Endpoints[i].OpenAIPreference
+				break
+			}
+		}
+		s.configMutex.Unlock()
+		
+		// 只有当配置中的偏好与当前学习到的不同时才更新
+		if configPreference == "" || configPreference == "auto" || configPreference != openAIPreference {
+			s.logger.Info(fmt.Sprintf("🔍 Learning: Detected OpenAI format preference '%s' for endpoint '%s'", openAIPreference, ep.Name), nil)
+			
+			// 使用统一的配置更新机制持久化 OpenAI 格式偏好
+			if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
+				cfg.OpenAIPreference = openAIPreference
+				return nil
+			}); err != nil {
+				s.logger.Error(fmt.Sprintf("Failed to persist OpenAI preference for endpoint '%s'", ep.Name), err)
+			} else {
+				s.logger.Info(fmt.Sprintf("✓ Persisted OpenAI preference '%s' for endpoint '%s'", openAIPreference, ep.Name), nil)
+				needsPersist = true
+			}
+		}
+	}
+	
+	if needsPersist {
+		s.logger.Info(fmt.Sprintf("🎓 Successfully persisted learned configuration for endpoint '%s'", ep.Name), nil)
+	}
 }
 

@@ -48,8 +48,7 @@ func generateDefaultConfig(filename string) error {
 		Endpoints: []EndpointConfig{
 			{
 				Name:         "example-anthropic",
-				URL:          "https://api.anthropic.com",
-				EndpointType: "anthropic",
+				URLAnthropic: "https://api.anthropic.com",
 				AuthType:     "api_key",
 				AuthValue:    "YOUR_ANTHROPIC_API_KEY_HERE",
 				Enabled:      false, // 默认禁用，需要用户配置
@@ -58,9 +57,7 @@ func generateDefaultConfig(filename string) error {
 			},
 			{
 				Name:         "example-openai",
-				URL:          "https://api.openai.com",
-				EndpointType: "openai",
-				PathPrefix:   "/v1/chat/completions",
+				URLOpenAI:    "https://api.openai.com",
 				AuthType:     "auth_token",
 				AuthValue:    "YOUR_OPENAI_API_KEY_HERE",
 				Enabled:      false, // 默认禁用，需要用户配置
@@ -69,8 +66,7 @@ func generateDefaultConfig(filename string) error {
 			},
 			{
 				Name:         "example-anthropic-oauth",
-				URL:          "https://api.anthropic.com",
-				EndpointType: "anthropic",
+				URLAnthropic: "https://api.anthropic.com",
 				AuthType:     "oauth",
 				Enabled:      false, // 默认禁用，需要用户配置
 				Priority:     3,
@@ -104,6 +100,14 @@ func generateDefaultConfig(filename string) error {
 			IdleConnection:     "90s",
 			HealthCheckTimeout: "30s",
 			CheckInterval:      "30s",
+		},
+		Blacklist: BlacklistConfig{
+			Enabled:            true,
+			AutoBlacklist:      true,
+			BusinessErrorSafe:  true,
+			ConfigErrorSafe:    false,
+			ServerErrorSafe:    false,
+			SSEValidationSafe:  false,
 		},
 	}
 

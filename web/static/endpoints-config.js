@@ -86,72 +86,8 @@ function resetAuthVisibility() {
 
 // ===== Endpoint Type and Auth Type Functions =====
 
-function onEndpointTypeChange() {
-    togglePathPrefixField();
-    toggleAuthTypeForEndpointType();
-}
 
-function togglePathPrefixField() {
-    const endpointType = document.getElementById('endpoint-type').value;
-    const pathPrefixGroup = document.getElementById('path-prefix-group');
-    const pathPrefixInput = document.getElementById('endpoint-path-prefix');
 
-    if (endpointType === 'openai') {
-        StyleUtils.show(pathPrefixGroup);
-        // OpenAI端点的path_prefix允许为空（表示原生支持/responses）
-        pathPrefixInput.required = false;
-        if (!pathPrefixInput.value) {
-            pathPrefixInput.placeholder = '/v1/chat/completions (留空表示原生支持 /responses)';
-        }
-    } else {
-        StyleUtils.hide(pathPrefixGroup);
-        pathPrefixInput.required = false;
-        pathPrefixInput.value = ''; // Clear value
-    }
-}
-
-function toggleAuthTypeForEndpointType() {
-    const endpointType = document.getElementById('endpoint-type').value;
-    const authTypeSelect = document.getElementById('endpoint-auth-type');
-    const currentValue = authTypeSelect.value;
-    
-    // Clear existing options
-    authTypeSelect.innerHTML = '';
-    
-    if (endpointType === 'openai') {
-        // OpenAI compatible endpoints only support authtoken and oauth
-        authTypeSelect.innerHTML = `
-            <option value="auth_token">Auth Token (Authorization Bearer)</option>
-            <option value="oauth">OAuth 2.0</option>
-        `;
-        
-        // Set default or preserve current value if valid
-        if (currentValue === 'auth_token' || currentValue === 'oauth') {
-            authTypeSelect.value = currentValue;
-        } else {
-            authTypeSelect.value = 'auth_token'; // Default to auth_token
-        }
-    } else {
-        // Anthropic endpoints support all auth types
-        authTypeSelect.innerHTML = `
-            <option value="api_key">API Key (x-api-key)</option>
-            <option value="auth_token">Auth Token (Authorization Bearer)</option>
-            <option value="oauth">OAuth 2.0</option>
-        `;
-        
-        // Set default or preserve current value
-        if (currentValue && (currentValue === 'api_key' || currentValue === 'auth_token' || currentValue === 'oauth')) {
-            authTypeSelect.value = currentValue;
-        } else {
-            authTypeSelect.value = 'auth_token'; // Default to auth_token
-        }
-    }
-    
-    authTypeSelect.disabled = false;
-    
-    // Trigger auth type change to update the display
-    onAuthTypeChange();
-}
 
 function onAuthTypeChange() {
     const authType = document.getElementById('endpoint-auth-type').value;
@@ -187,7 +123,7 @@ function onAuthTypeChange() {
 // Add event delegation for endpoint modal
 document.addEventListener('click', function(e) {
     const action = e.target.dataset.action || e.target.closest('[data-action]')?.dataset.action;
-    
+
     switch (action) {
         case 'toggle-auth-visibility':
             toggleAuthVisibility();
@@ -204,6 +140,9 @@ document.addEventListener('click', function(e) {
         case 'save-endpoint':
             saveEndpoint();
             break;
+        case 'reset-all-endpoints':
+            resetAllEndpoints();
+            break;
     }
 });
 
@@ -212,8 +151,9 @@ document.addEventListener('change', function(e) {
     const changeType = e.target.dataset.change;
     
     switch (changeType) {
-        case 'endpoint-type':
-            onEndpointTypeChange();
+        case 'endpoint-url-anthropic':
+        case 'endpoint-url-openai':
+            updateRequiredMarkers();
             break;
         case 'auth-type':
             onAuthTypeChange();

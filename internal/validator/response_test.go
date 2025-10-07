@@ -50,7 +50,7 @@ func TestValidateCompleteSSEStream(t *testing.T) {
 
 	// 测试用例1: 完整的Anthropic SSE流应该通过
 	completeAnthropicSSE := []byte(`event: message_start
-data: {"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":100,"output_tokens":0}}
+data: {"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":100,"output_tokens":0}}}
 
 event: content_block_start
 data: {"type":"content_block_start","index":0}
@@ -72,7 +72,7 @@ data: {"type":"message_stop"}
 
 	// 测试用例2: 不完整的Anthropic SSE流（缺少message_stop）应该失败
 	incompleteAnthropicSSE := []byte(`event: message_start
-data: {"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":100,"output_tokens":0}}
+data: {"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":100,"output_tokens":0}}}
 
 event: content_block_start
 data: {"type":"content_block_start","index":0}
@@ -137,7 +137,7 @@ func TestValidateResponseWithPathStreamingIntegration(t *testing.T) {
 
 	// 测试用例1: 完整的Anthropic SSE流应该通过集成验证
 	completeAnthropicSSE := []byte(`event: message_start
-data: {"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":100,"output_tokens":0}}
+data: {"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":100,"output_tokens":0}}}
 
 event: content_block_start
 data: {"type":"content_block_start","index":0}
@@ -159,7 +159,7 @@ data: {"type":"message_stop"}
 
 	// 测试用例2: 不完整的Anthropic SSE流应该在集成验证中失败
 	incompleteAnthropicSSE := []byte(`event: message_start
-data: {"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":100,"output_tokens":0}}
+data: {"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":100,"output_tokens":0}}}
 
 event: content_block_start
 data: {"type":"content_block_start","index":0}
@@ -186,8 +186,8 @@ data: [DONE]`)
 	}
 
 	// 测试用例4: 不完整的OpenAI SSE流应该在集成验证中失败
-	incompleteOpenAISSE := []byte(`data: {"id":"chatcmpl-123","model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null]}
-data: {"id":"chatcmpl-123","model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{},"finish_reason":null]}`)
+	incompleteOpenAISSE := []byte(`data: {"id":"chatcmpl-123","model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+data: {"id":"chatcmpl-123","model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{},"finish_reason":null}]}`)
 
 	err = validator.ValidateResponseWithPath(incompleteOpenAISSE, true, "openai", "/v1/chat/completions", "https://api.openai.com")
 	if err == nil {
@@ -198,7 +198,7 @@ data: {"id":"chatcmpl-123","model":"gpt-3.5-turbo","choices":[{"index":0,"delta"
 	}
 
 	// 测试用例5: 有finish_reason的流应该通过集成验证（新宽松策略）
-	noDoneButFinishedOpenAISSE := []byte(`data: {"id":"chatcmpl-123","model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":"stop"}`)
+	noDoneButFinishedOpenAISSE := []byte(`data: {"id":"chatcmpl-123","model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":"stop"}]}`)
 	err = validator.ValidateResponseWithPath(noDoneButFinishedOpenAISSE, true, "openai", "/v1/chat/completions", "https://example.com")
 	if err != nil {
 		t.Errorf("Expected OpenAI SSE without [DONE] but with finish_reason to pass integrated validation, got: %v", err)

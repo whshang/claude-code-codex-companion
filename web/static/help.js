@@ -480,3 +480,29 @@ document.addEventListener('DOMContentLoaded', function() {
         selectClient('codex');
     }
 });
+
+// Copy setup command to clipboard
+function copySetupCommand(clientType) {
+    const baseUrl = window.location.protocol + '//' + window.location.host;
+    const command = clientType === 'claude-code'
+        ? `./cccc-setup-claude-code.sh --url ${baseUrl} --key YOUR_API_KEY`
+        : `./cccc-setup-codex.sh --url ${baseUrl} --key YOUR_API_KEY`;
+
+    navigator.clipboard.writeText(command).then(function() {
+        // Show success feedback
+        const button = event.target.closest('button');
+        const originalHTML = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-check"></i> 已复制';
+        button.classList.remove('btn-primary', 'btn-success');
+        button.classList.add('btn-success');
+
+        setTimeout(function() {
+            button.innerHTML = originalHTML;
+            button.classList.remove('btn-success');
+            button.classList.add(clientType === 'claude-code' ? 'btn-primary' : 'btn-success');
+        }, 2000);
+    }).catch(function(err) {
+        console.error('Failed to copy command: ', err);
+        alert('复制命令失败，请手动复制');
+    });
+}

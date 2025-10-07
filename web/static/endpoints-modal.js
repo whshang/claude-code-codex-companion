@@ -4,15 +4,18 @@ function showAddEndpointModal() {
     editingEndpointName = null;
     originalAuthValue = '';
     isAuthVisible = false;
-    
+
     document.getElementById('endpointModalTitle').textContent = T('add_endpoint', '添加端点');
     document.getElementById('endpointForm').reset();
     document.getElementById('endpoint-enabled').checked = true;
-    document.getElementById('endpoint-type').value = 'anthropic'; // Default to Anthropic
     document.getElementById('endpoint-tags').value = ''; // Clear tags field
 
-    // Set endpoint type and switch path prefix display
-    onEndpointTypeChange();
+    // 清空URL字段
+    document.getElementById('endpoint-url-anthropic').value = '';
+    document.getElementById('endpoint-url-openai').value = '';
+
+    // Reset auth visibility
+    resetAuthVisibility();
     
     // Reset auth visibility
     resetAuthVisibility();
@@ -20,9 +23,18 @@ function showAddEndpointModal() {
     // Clear proxy configuration
     loadProxyConfig(null);
     
-    // Clear model rewrite configuration
-    loadModelRewriteConfig(null);
-    
+    // Set default model rewrite configuration for new endpoints
+    const defaultModelRewriteConfig = {
+        enabled: true,
+        rules: [
+            { source_pattern: 'claude-*sonnet*', target_model: 'claude-sonnet-4-5-20250929' },
+            { source_pattern: 'claude-*haiku*', target_model: 'claude-3-5-haiku-20241022' },
+            { source_pattern: 'gpt-5-codex', target_model: 'gpt-5-codex' },
+            { source_pattern: 'gpt-5*', target_model: 'gpt-5' }
+        ]
+    };
+    loadModelRewriteConfig(defaultModelRewriteConfig);
+
     // Clear default model
     document.getElementById('endpoint-default-model').value = '';
     
@@ -63,13 +75,15 @@ function showEditEndpointModal(endpointName) {
     
     // Populate form
     document.getElementById('endpoint-name').value = endpoint.name;
-    document.getElementById('endpoint-url').value = endpoint.url;
-    document.getElementById('endpoint-type').value = endpoint.endpoint_type || 'anthropic';
-    document.getElementById('endpoint-path-prefix').value = endpoint.path_prefix || '';
+    // 向后兼容：如果有旧的单一URL字段，填充到Anthropic URL
+    if (endpoint.url && !endpoint.url_anthropic && !endpoint.url_openai) {
+        document.getElementById('endpoint-url-anthropic').value = endpoint.url;
+        document.getElementById('endpoint-url-openai').value = '';
+    } else {
+        document.getElementById('endpoint-url-anthropic').value = endpoint.url_anthropic || '';
+        document.getElementById('endpoint-url-openai').value = endpoint.url_openai || '';
+    }
     document.getElementById('endpoint-enabled').checked = endpoint.enabled;
-    
-    // Set endpoint type and switch path prefix display first
-    onEndpointTypeChange();
     
     // Then set the auth type after the options are populated
     document.getElementById('endpoint-auth-type').value = endpoint.auth_type;
@@ -157,6 +171,16 @@ function resetModalTabs() {
 
 function saveEndpoint() {
     const form = document.getElementById('endpointForm');
+
+    // 自定义URL验证：至少填写一个URL
+    const urlAnthropic = document.getElementById('endpoint-url-anthropic').value.trim();
+    const urlOpenAI = document.getElementById('endpoint-url-openai').value.trim();
+
+    if (!urlAnthropic && !urlOpenAI) {
+        showAlert(T('at_least_one_url_required', '至少需要填写一个URL（Anthropic URL或OpenAI URL）'), 'danger');
+        return;
+    }
+
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
@@ -201,9 +225,9 @@ function saveEndpoint() {
 
     const data = {
         name: document.getElementById('endpoint-name').value,
-        url: document.getElementById('endpoint-url').value,
-        endpoint_type: document.getElementById('endpoint-type').value,
-        path_prefix: document.getElementById('endpoint-path-prefix').value || '', // PathPrefix can be empty
+        url_anthropic: urlAnthropic || undefined, // Anthropic URL
+        url_openai: urlOpenAI || undefined,       // OpenAI URL
+        // endpoint_type 和 path_prefix 自动推断，不再需要提交
         auth_type: authType,
         auth_value: authValue,
         enabled: document.getElementById('endpoint-enabled').checked,
@@ -239,13 +263,12 @@ function saveEndpoint() {
         if (data.error) {
             showAlert(data.error, 'danger');
         } else {
-            // After successful save, if there's model rewrite configuration, save it too
+            // After successful save, always save model rewrite configuration (including disabled state)
             const modelRewriteConfig = collectModelRewriteData();
             const endpointName = document.getElementById('endpoint-name').value;
-            
-            const saveModelRewrite = modelRewriteConfig 
-                ? saveModelRewriteConfig(endpointName, modelRewriteConfig)
-                : Promise.resolve();
+
+            // 始终保存模型重写配置，即使是禁用状态或空规则
+            const saveModelRewrite = saveModelRewriteConfig(endpointName, modelRewriteConfig);
             
             saveModelRewrite
                 .then(() => {
@@ -351,10 +374,6 @@ function toggleEndpointEnabled(endpointName, currentEnabled) {
 }
 
 function resetEndpointStatus(endpointName) {
-    if (!confirm(T('confirm_reset_endpoint_status', '确认要重置端点 "{0}" 的状态吗？这将清除失败记录并将状态重置为正常。').replace('{0}', endpointName))) {
-        return;
-    }
-
     apiRequest(`/admin/api/endpoints/${encodeURIComponent(endpointName)}/reset-status`, {
         method: 'POST'
     })
@@ -371,6 +390,26 @@ function resetEndpointStatus(endpointName) {
     .catch(error => {
         console.error('Failed to reset endpoint status:', error);
         showAlert(T('reset_endpoint_status_failed', '重置端点状态失败'), 'danger');
+    });
+}
+
+function resetAllEndpoints() {
+    apiRequest('/admin/api/endpoints/reset-all-status', {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            showAlert(data.error, 'danger');
+        } else {
+            showAlert(T('all_endpoints_reset_success', '所有端点状态已重置'), 'success');
+            // 刷新端点状态显示
+            refreshEndpointStatus();
+        }
+    })
+    .catch(error => {
+        console.error('Failed to reset all endpoints:', error);
+        showAlert(T('reset_all_endpoints_failed', '重置所有端点失败'), 'danger');
     });
 }
 

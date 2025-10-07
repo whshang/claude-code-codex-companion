@@ -20,6 +20,12 @@ func (s *Server) handleProxy(c *gin.Context) {
 	// 如果 path 为空（直接路由如 /responses），使用实际请求路径
 	if path == "" {
 		path = c.Request.URL.Path
+	} else {
+		// 对于 /v1 路由组，path 参数不包含 /v1 前缀，需要手动添加
+		// 例如: 请求 /v1/messages，path 参数是 /messages，需要恢复为 /v1/messages
+		if !strings.HasPrefix(path, "/v1/") && !strings.HasPrefix(path, "/responses") && !strings.HasPrefix(path, "/chat/completions") {
+			path = "/v1" + path
+		}
 	}
 
 	// 读取请求体

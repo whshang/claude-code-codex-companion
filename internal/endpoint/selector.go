@@ -199,24 +199,24 @@ func (s *Selector) isEndpointCompatible(ep *Endpoint, requestFormat string) bool
 		return false
 	}
 
-	// 格式兼容性规则：
-	// 1. OpenAI 请求 → 只能选择 OpenAI 端点（不支持 OpenAI → Anthropic 转换）
-	// 2. Anthropic 请求 → 优先 Anthropic 端点，也可以选择 OpenAI 端点（支持 Anthropic → OpenAI 转换）
+	// 格式兼容性规则（支持格式转换）：
+	// 1. OpenAI 请求 → 可以使用有 url_openai 的端点（直接）或有 url_anthropic 的端点（转换）
+	// 2. Anthropic 请求 → 可以使用有 url_anthropic 的端点（直接）或有 url_openai 的端点（转换）
+	// 3. 如果端点同时配置了两个URL，则支持两种格式
+	// 4. 至少需要一个URL才能使用
 
 	if requestFormat == "openai" {
-		// OpenAI 请求只能发到 OpenAI 端点
-		return ep.EndpointType == "openai"
+		// OpenAI 请求可以使用有 url_openai 的端点（直接）或有 url_anthropic 的端点（转换）
+		return ep.URLOpenAI != "" || ep.URLAnthropic != ""
 	}
 
 	if requestFormat == "anthropic" {
-		// Anthropic 请求可以发到任何端点
-		// - 发到 Anthropic 端点：直接透传
-		// - 发到 OpenAI 端点：自动转换
-		return true
+		// Anthropic 请求可以使用有 url_anthropic 的端点（直接）或有 url_openai 的端点（转换）
+		return ep.URLAnthropic != "" || ep.URLOpenAI != ""
 	}
 
-	// 未知格式，保持向后兼容
-	return true
+	// 未知格式，保持向后兼容（如果有任意一个URL就可用）
+	return ep.URLAnthropic != "" || ep.URLOpenAI != ""
 }
 
 // isEndpointCompatibleWithClient 判断端点是否与客户端类型和请求格式兼容

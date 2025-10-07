@@ -216,15 +216,17 @@ function loadProxyConfig(config) {
 // Collect model rewrite configuration data
 function collectModelRewriteData() {
     const enabled = document.getElementById('model-rewrite-enabled').checked;
+
+    // 如果未勾选启用，返回明确的禁用配置（而不是null）
     if (!enabled) {
-        return null;
+        return { enabled: false, rules: [] };
     }
 
     const rules = [];
     document.querySelectorAll('.rewrite-rule').forEach(ruleDiv => {
         const sourcePattern = ruleDiv.querySelector('.source-pattern-input').value.trim();
         const targetModel = ruleDiv.querySelector('.target-model-input').value.trim();
-        
+
         if (sourcePattern && targetModel) {
             rules.push({
                 source_pattern: sourcePattern,
@@ -233,7 +235,8 @@ function collectModelRewriteData() {
         }
     });
 
-    return rules.length > 0 ? { enabled: true, rules: rules } : null;
+    // 始终返回配置对象，即使规则为空（允许清空所有规则）
+    return { enabled: true, rules: rules };
 }
 
 // Load model rewrite configuration to form

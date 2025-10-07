@@ -13,21 +13,15 @@
                     <!-- Tab Navigation -->
                     <ul class="nav nav-tabs mb-3" id="endpointModalTabs" role="tablist">
                         <li class="nav-item" role="presentation">
-                            <button class="nav-link active" id="basic-tab" data-bs-toggle="tab" data-bs-target="#basic-tab-pane" 
+                            <button class="nav-link active" id="basic-tab" data-bs-toggle="tab" data-bs-target="#basic-tab-pane"
                                     type="button" role="tab" aria-controls="basic-tab-pane" aria-selected="true">
                                 <i class="fas fa-cog"></i> <span data-t="basic_configuration">基本配置</span>
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced-tab-pane" 
+                            <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced-tab-pane"
                                     type="button" role="tab" aria-controls="advanced-tab-pane" aria-selected="false">
-                                <i class="fas fa-sliders-h"></i> <span data-t="advanced_configuration1">高级参数1</span>
-                            </button>
-                        </li>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="advanced2-tab" data-bs-toggle="tab" data-bs-target="#advanced2-tab-pane" 
-                                    type="button" role="tab" aria-controls="advanced2-tab-pane" aria-selected="false">
-                                <i class="fas fa-cogs"></i> <span data-t="advanced_configuration2">高级参数2</span>
+                                <i class="fas fa-sliders-h"></i> <span data-t="advanced_configuration">高级参数</span>
                             </button>
                         </li>
                     </ul>
@@ -70,56 +64,71 @@
                                 </div>
                             </div>
 
-                            <!-- 第二行：URL 和 Tags -->
+                            <!-- 第二行：双URL配置 和 Tags -->
                             <div class="row mb-3">
-                                <div class="col-8">
-                                    <label for="endpoint-url" class="form-label">
-                                        <i class="fas fa-link form-label-icon"></i><span data-t="url">URL</span> <span class="text-danger">*</span>
+                                <div class="col-4">
+                                    <label for="endpoint-url-anthropic" class="form-label">
+                                        <i class="fas fa-link form-label-icon"></i><span data-t="anthropic_url">Anthropic URL</span> <span class="text-danger" id="anthropic-required">*</span>
+                                        <i class="fas fa-question-circle text-muted ms-1"
+                                           data-t-title="anthropic_url_tooltip"
+                                           title="处理Anthropic格式请求(Claude Code)时使用"
+                                           data-bs-toggle="tooltip"></i>
                                     </label>
-                                    <input type="url" class="form-control" id="endpoint-url" required
-                                           placeholder="https://api.example.com">
+                                    <input type="url" class="form-control" id="endpoint-url-anthropic"
+                                           placeholder="https://api.anthropic.com">
+                                    <small class="form-text text-muted" data-t="anthropic_url_hint">用于Claude Code客户端</small>
+                                </div>
+                                <div class="col-4">
+                                    <label for="endpoint-url-openai" class="form-label">
+                                        <i class="fas fa-link form-label-icon"></i><span data-t="openai_url">OpenAI URL</span> <span class="text-danger" id="openai-required">*</span>
+                                        <i class="fas fa-question-circle text-muted ms-1"
+                                           data-t-title="openai_url_tooltip"
+                                           title="处理OpenAI格式请求(Codex)时使用"
+                                           data-bs-toggle="tooltip"></i>
+                                    </label>
+                                    <input type="url" class="form-control" id="endpoint-url-openai"
+                                           placeholder="https://api.openai.com">
+                                    <small class="form-text text-muted" data-t="openai_url_hint">用于Codex客户端</small>
                                 </div>
                                 <div class="col-4">
                                     <label for="endpoint-tags" class="form-label">
                                         <i class="fas fa-tags form-label-icon"></i><span data-t="tags">标签</span>
                                     </label>
-                                    <input type="text" class="form-control" id="endpoint-tags" 
+                                    <input type="text" class="form-control" id="endpoint-tags"
                                            data-t-placeholder="comma_separated" placeholder="用逗号分隔">
                                     <small class="form-text text-muted" data-t="empty_for_universal_endpoint">留空为通用端点</small>
                                 </div>
                             </div>
 
-                            <!-- 第三行：端点类型和路径前缀 -->
+                            <!-- URL验证提示 -->
                             <div class="row mb-3">
-                                <div class="col-6">
-                                    <label for="endpoint-type" class="form-label">
-                                        <i class="fas fa-cogs form-label-icon"></i><span data-t="endpoint_type">端点类型</span> <span class="text-danger">*</span>
-                                    </label>
-                                    <select class="form-select" id="endpoint-type" required data-change="endpoint-type">
-                                        <option value="anthropic">Anthropic (Claude)</option>
-                                        <option value="openai">OpenAI Compatible</option>
-                                    </select>
-                                    <small class="form-text text-muted" data-t="select_api_compatible_type">选择端点的API兼容类型</small>
-                                </div>
-                                <div class="col-6 d-none-custom" id="path-prefix-group">
-                                    <label for="endpoint-path-prefix" class="form-label">
-                                        <i class="fas fa-route form-label-icon"></i><span data-t="path_prefix">路径前缀</span>
-                                    </label>
-                                    <input type="text" class="form-control" id="endpoint-path-prefix"
-                                           placeholder="/v1/chat/completions (留空表示原生支持 /responses)">
-                                    <small class="form-text text-muted" data-t="openai_compatible_api_path">OpenAI兼容端点的API路径，留空表示原生支持 /responses</small>
+                                <div class="col-12">
+                                    <div class="alert alert-info p-2">
+                                        <small class="text-muted">
+                                            <i class="fas fa-info-circle"></i>
+                                            <strong data-t="url_config_note">配置说明：</strong>
+                                            <span data-t="at_least_one_url">至少填写一个URL（Anthropic或OpenAI）</span>
+                                            <br>
+                                            <span data-t="dual_url_benefit">• 填写两个URL可自动根据客户端类型选择最优路由</span>
+                                            <br>
+                                            <span data-t="single_url_fallback">• 只填一个URL时，所有请求都会自动转换为对应格式</span>
+                                            <br>
+                                            <span data-t="auto_type_detection">• 端点类型和路径前缀均自动推断，无需手动配置</span>
+                                        </small>
+                                    </div>
                                 </div>
                             </div>
 
-                            <!-- 第四行：认证方式和认证值 -->
+                            <!-- 第三行：认证方式和认证值 -->
                             <div class="row mb-3">
                                 <div class="col-4">
                                     <label for="endpoint-auth-type" class="form-label">
                                         <i class="fas fa-key form-label-icon"></i><span data-t="authentication_method">认证方式</span> <span class="text-danger">*</span>
                                     </label>
                                     <select class="form-select" id="endpoint-auth-type" required data-change="auth-type">
+                                        <option value="auto" selected data-t-option="auto_option">自动检测 (推荐)</option>
                                         <option value="api_key" data-t-option="api_key_option">API Key (x-api-key)</option>
-                                        <option value="auth_token" selected data-t-option="auth_token_option">Auth Token (Authorization Bearer)</option>
+                                        <option value="auth_token" data-t-option="auth_token_option">Auth Token (Authorization Bearer)</option>
                                         <option value="oauth" data-t-option="oauth_option">OAuth 2.0</option>
                                     </select>
                                 </div>
@@ -221,10 +230,118 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- 模型重写配置区域 (移到基本配置) -->
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-exchange-alt"></i> <span data-t="model_rewrite_configuration">模型重写配置</span>
+                                    </h6>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="model-rewrite-enabled" checked>
+                                        <label class="form-check-label" for="model-rewrite-enabled" data-t="enable_model_rewrite">启用模型重写</label>
+                                    </div>
+                                </div>
+
+                                <div id="model-rewrite-rules">
+                                    <small class="form-text text-muted mb-3 d-block" data-t="configure_rewrite_rules_description">配置规则将匹配的Claude模型重写为其他模型</small>
+
+                                    <div id="rewrite-rules-list">
+                                        <!-- 动态生成的规则列表 -->
+                                    </div>
+
+                                    <button type="button" class="btn btn-outline-primary btn-sm mb-3" data-action="add-rewrite-rule">
+                                        <i class="fas fa-plus"></i> <span data-t="add_rule">添加规则</span>
+                                    </button>
+
+                                    <div class="alert alert-info p-2">
+                                        <small class="text-muted">
+                                            <strong data-t="preset_model_patterns">预设模型模式：</strong><br>
+                                            <span data-t="haiku_series_pattern">• Haiku系列: claude-*haiku*</span><br>
+                                            <span data-t="sonnet_series_pattern">• Sonnet系列: claude-*sonnet*</span><br>
+                                            <span data-t="opus_series_pattern">• Opus系列: claude-*opus*</span><br>
+                                            <span data-t="all_claude_pattern">• 所有Claude: claude-*</span><br>
+                                            <span data-t="gpt5_pattern">• GPT-5: gpt-5</span><br>
+                                            <span data-t="gpt5_codex_pattern">• GPT-5 Codex: gpt-5-codex</span><br>
+                                            <span data-t="all_gpt_pattern">• 所有GPT: gpt-*</span>
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Advanced Configuration Tab -->
+                        <!-- Advanced Configuration Tab (合并高级参数1和2) -->
                         <div class="tab-pane fade" id="advanced-tab-pane" role="tabpanel" aria-labelledby="advanced-tab">
+                            <!-- HTTP Header 覆盖配置区域 -->
+                            <div class="mb-4">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-code"></i> <span data-t="header_override_configuration">Header 覆盖配置</span>
+                                    </h6>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="header-override-enabled">
+                                        <label class="form-check-label" for="header-override-enabled" data-t="enable_header_override">启用 Header 覆盖</label>
+                                    </div>
+                                </div>
+
+                                <div id="header-override-config" class="d-none-custom">
+                                    <small class="form-text text-muted mb-3 d-block" data-t="configure_header_overrides_description">配置在请求发出前要覆盖或删除的HTTP头部</small>
+
+                                    <div id="header-override-rules-list">
+                                        <!-- 动态生成的header覆盖规则列表 -->
+                                    </div>
+
+                                    <button type="button" class="btn btn-outline-primary btn-sm mb-3" data-action="add-header-override-rule">
+                                        <i class="fas fa-plus"></i> <span data-t="add_header_rule">添加Header规则</span>
+                                    </button>
+
+                                    <div class="alert alert-info p-2">
+                                        <small class="text-muted">
+                                            <strong data-t="description">说明：</strong><br>
+                                            <span data-t="header_override_replace_description">• 设置值将替换或添加对应的HTTP头部</span><br>
+                                            <span data-t="header_override_delete_description">• 留空值将删除对应的HTTP头部</span><br>
+                                            <span data-t="header_override_timing_description">• Header覆盖在认证头部设置后进行，优先级最高</span><br>
+                                            <span data-t="header_override_case_insensitive">• Header名称不区分大小写</span>
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Request Parameter 覆盖配置区域 -->
+                            <div class="mb-4">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-edit"></i> <span data-t="parameter_override_configuration">参数覆盖配置</span>
+                                    </h6>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="parameter-override-enabled">
+                                        <label class="form-check-label" for="parameter-override-enabled" data-t="enable_parameter_override">启用 Parameter 覆盖</label>
+                                    </div>
+                                </div>
+
+                                <div id="parameter-override-config" class="d-none-custom">
+                                    <small class="form-text text-muted mb-3 d-block" data-t="configure_parameter_overrides_description">配置在请求发出前要覆盖或删除的请求参数</small>
+
+                                    <div id="parameter-override-rules-list">
+                                        <!-- 动态生成的parameter覆盖规则列表 -->
+                                    </div>
+
+                                    <button type="button" class="btn btn-outline-primary btn-sm mb-3" data-action="add-parameter-override-rule">
+                                        <i class="fas fa-plus"></i> <span data-t="add_parameter_rule">添加Parameter规则</span>
+                                    </button>
+
+                                    <div class="alert alert-info p-2">
+                                        <small class="text-muted">
+                                            <strong data-t="description">说明：</strong><br>
+                                            <span data-t="parameter_override_replace_description">• 设置值将替换或添加对应的请求参数</span><br>
+                                            <span data-t="parameter_override_delete_description">• 留空值将删除对应的请求参数</span><br>
+                                            <span data-t="parameter_override_timing_description">• Parameter覆盖在模型重写后、格式转换前进行</span><br>
+                                            <span data-t="parameter_override_examples">• 常用参数: max_tokens, temperature, top_p</span>
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- 代理配置区域 -->
                             <div class="mb-4">
                                 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -282,44 +399,6 @@
                                 </div>
                             </div>
 
-                            <!-- 模型重写配置区域 -->
-                            <div class="mb-3">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="mb-0">
-                                        <i class="fas fa-exchange-alt"></i> <span data-t="model_rewrite_configuration">模型重写配置</span>
-                                    </h6>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="model-rewrite-enabled">
-                                        <label class="form-check-label" for="model-rewrite-enabled" data-t="enable_model_rewrite">启用模型重写</label>
-                                    </div>
-                                </div>
-                                
-                                <div id="model-rewrite-rules" class="d-none-custom">
-                                    <small class="form-text text-muted mb-3 d-block" data-t="configure_rewrite_rules_description">配置规则将匹配的Claude模型重写为其他模型</small>
-                                    
-                                    <div id="rewrite-rules-list">
-                                        <!-- 动态生成的规则列表 -->
-                                    </div>
-                                    
-                                    <button type="button" class="btn btn-outline-primary btn-sm mb-3" data-action="add-rewrite-rule">
-                                        <i class="fas fa-plus"></i> <span data-t="add_rule">添加规则</span>
-                                    </button>
-                                    
-                                    <div class="alert alert-info p-2">
-                                        <small class="text-muted">
-                                            <strong data-t="preset_model_patterns">预设模型模式：</strong><br>
-                                            <span data-t="haiku_series_pattern">• Haiku系列: claude-*haiku*</span><br>
-                                            <span data-t="sonnet_series_pattern">• Sonnet系列: claude-*sonnet*</span><br>
-                                            <span data-t="opus_series_pattern">• Opus系列: claude-*opus*</span><br>
-                                            <span data-t="all_claude_pattern">• 所有Claude: claude-*</span><br>
-                                            <span data-t="gpt5_pattern">• GPT-5: gpt-5</span><br>
-                                            <span data-t="gpt5_codex_pattern">• GPT-5 Codex: gpt-5-codex</span><br>
-                                            <span data-t="all_gpt_pattern">• 所有GPT: gpt-*</span>
-                                        </small>
-                                    </div>
-                                </div>
-                            </div>
-
                             <!-- Max Tokens 字段名配置区域 -->
                             <div class="mb-3">
                                 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -370,81 +449,6 @@
                                         <span data-t="enhanced_protection_disable_after_failure">• 禁用时仅在彻底失败后才禁用端点</span><br>
                                         <span data-t="enhanced_protection_account_protection">• 可有效保护官方帐号避免被限流</span>
                                     </small>
-                                </div>
-                            </div>
-
-
-                        </div>
-
-                        <!-- Advanced Configuration 2 Tab -->
-                        <div class="tab-pane fade" id="advanced2-tab-pane" role="tabpanel" aria-labelledby="advanced2-tab">
-                            <!-- HTTP Header 覆盖配置区域 -->
-                            <div class="mb-4">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="mb-0">
-                                        <i class="fas fa-code"></i> <span data-t="header_override_configuration">Header 覆盖配置</span>
-                                    </h6>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="header-override-enabled">
-                                        <label class="form-check-label" for="header-override-enabled" data-t="enable_header_override">启用 Header 覆盖</label>
-                                    </div>
-                                </div>
-                                
-                                <div id="header-override-config" class="d-none-custom">
-                                    <small class="form-text text-muted mb-3 d-block" data-t="configure_header_overrides_description">配置在请求发出前要覆盖或删除的HTTP头部</small>
-                                    
-                                    <div id="header-override-rules-list">
-                                        <!-- 动态生成的header覆盖规则列表 -->
-                                    </div>
-                                    
-                                    <button type="button" class="btn btn-outline-primary btn-sm mb-3" data-action="add-header-override-rule">
-                                        <i class="fas fa-plus"></i> <span data-t="add_header_rule">添加Header规则</span>
-                                    </button>
-                                    
-                                    <div class="alert alert-info p-2">
-                                        <small class="text-muted">
-                                            <strong data-t="description">说明：</strong><br>
-                                            <span data-t="header_override_replace_description">• 设置值将替换或添加对应的HTTP头部</span><br>
-                                            <span data-t="header_override_delete_description">• 留空值将删除对应的HTTP头部</span><br>
-                                            <span data-t="header_override_timing_description">• Header覆盖在认证头部设置后进行，优先级最高</span><br>
-                                            <span data-t="header_override_case_insensitive">• Header名称不区分大小写</span>
-                                        </small>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Request Parameter 覆盖配置区域 -->
-                            <div class="mb-3">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="mb-0">
-                                        <i class="fas fa-edit"></i> <span data-t="parameter_override_configuration">参数覆盖配置</span>
-                                    </h6>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="parameter-override-enabled">
-                                        <label class="form-check-label" for="parameter-override-enabled" data-t="enable_parameter_override">启用 Parameter 覆盖</label>
-                                    </div>
-                                </div>
-                                
-                                <div id="parameter-override-config" class="d-none-custom">
-                                    <small class="form-text text-muted mb-3 d-block" data-t="configure_parameter_overrides_description">配置在请求发出前要覆盖或删除的请求参数</small>
-                                    
-                                    <div id="parameter-override-rules-list">
-                                        <!-- 动态生成的parameter覆盖规则列表 -->
-                                    </div>
-                                    
-                                    <button type="button" class="btn btn-outline-primary btn-sm mb-3" data-action="add-parameter-override-rule">
-                                        <i class="fas fa-plus"></i> <span data-t="add_parameter_rule">添加Parameter规则</span>
-                                    </button>
-                                    
-                                    <div class="alert alert-info p-2">
-                                        <small class="text-muted">
-                                            <strong data-t="description">说明：</strong><br>
-                                            <span data-t="parameter_override_replace_description">• 设置值将替换或添加对应的请求参数</span><br>
-                                            <span data-t="parameter_override_delete_description">• 留空值将删除对应的请求参数</span><br>
-                                            <span data-t="parameter_override_timing_description">• Parameter覆盖在模型重写后、格式转换前进行</span><br>
-                                            <span data-t="parameter_override_examples">• 常用参数: max_tokens, temperature, top_p</span>
-                                        </small>
-                                    </div>
                                 </div>
                             </div>
                         </div>

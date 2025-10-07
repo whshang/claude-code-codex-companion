@@ -102,23 +102,31 @@
                                                 {{if .SessionID}}{{.SessionID}}{{else}}--{{end}}
                                             </span>
                                         </td>
-                                        <td class="endpoint-cell" data-endpoint="{{.Endpoint}}">
-                                            <div>{{.Endpoint}}</div>
+                                        <td class="endpoint-cell" data-endpoint="{{.Endpoint}}" style="max-width: 300px;">
+                                            {{if .FinalRequestURL}}
+                                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                    <code style="font-size: 0.85em;">{{.FinalRequestURL}}</code>
+                                                </div>
+                                            {{else}}
+                                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><strong>{{.Endpoint}}</strong></div>
+                                            {{end}}
                                             {{if or .Error .EndpointBlacklistReason}}
                                                 <small class="text-danger">
-                                                    {{$errorText := ""}}
                                                     {{if .EndpointBlacklistReason}}
-                                                        {{$errorText = .EndpointBlacklistReason}}
-                                                    {{else if .Error}}
-                                                        {{$errorText = .Error}}
-                                                    {{end}}
-                                                    {{if gt (len $errorText) 20}}
-                                                        <span data-bs-toggle="tooltip" data-bs-placement="top" title="{{$errorText}}">
-                                                            {{slice $errorText 0 20}}...
+                                                        <span data-bs-toggle="tooltip" data-bs-placement="top" title="{{.EndpointBlacklistReason}}" style="cursor: help;">
+                                                            {{if gt (len .EndpointBlacklistReason) 20}}
+                                                                {{slice .EndpointBlacklistReason 0 20}}...
+                                                            {{else}}
+                                                                {{.EndpointBlacklistReason}}
+                                                            {{end}}
                                                         </span>
-                                                    {{else}}
-                                                        <span data-bs-toggle="tooltip" data-bs-placement="top" title="{{$errorText}}">
-                                                            {{$errorText}}
+                                                    {{else if .Error}}
+                                                        <span data-bs-toggle="tooltip" data-bs-placement="top" title="{{.Error}}" style="cursor: help;">
+                                                            {{if gt (len .Error) 20}}
+                                                                {{slice .Error 0 20}}...
+                                                            {{else}}
+                                                                {{.Error}}
+                                                            {{end}}
                                                         </span>
                                                     {{end}}
                                                 </small>

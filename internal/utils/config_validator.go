@@ -30,8 +30,8 @@ func (v *EndpointConfigValidator) ValidateEndpoint(endpoint EndpointConfig, inde
 		return fmt.Errorf("endpoint %d: url cannot be empty", index)
 	}
 	
-	if endpoint.GetAuthType() != "api_key" && endpoint.GetAuthType() != "auth_token" && endpoint.GetAuthType() != "oauth" {
-		return fmt.Errorf("endpoint %d: invalid auth_type '%s', must be 'api_key', 'auth_token', or 'oauth'", index, endpoint.GetAuthType())
+	if endpoint.GetAuthType() != "" && endpoint.GetAuthType() != "api_key" && endpoint.GetAuthType() != "auth_token" && endpoint.GetAuthType() != "oauth" && endpoint.GetAuthType() != "auto" {
+		return fmt.Errorf("endpoint %d: invalid auth_type '%s', must be 'api_key', 'auth_token', 'oauth', 'auto', or empty", index, endpoint.GetAuthType())
 	}
 	
 	// OAuth 认证不需要 auth_value，其他认证类型需要

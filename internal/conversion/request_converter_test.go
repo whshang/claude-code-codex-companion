@@ -3,7 +3,24 @@ package conversion
 import (
 	"encoding/json"
 	"testing"
+
+	"claude-code-codex-companion/internal/logger"
 )
+
+// 辅助函数
+func intPtr(i int) *int {
+	return &i
+}
+
+func getTestLogger() *logger.Logger {
+	// Create a simple test logger
+	testLogger, _ := logger.NewLogger(logger.LogConfig{
+		Level:           "debug",
+		LogRequestTypes: "all",
+		LogDirectory:    "", // Empty to avoid file operations in tests
+	})
+	return testLogger
+}
 
 func TestConvertAnthropicRequestToOpenAI_SimpleText(t *testing.T) {
 	converter := NewRequestConverter(getTestLogger())

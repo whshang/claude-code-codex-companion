@@ -79,11 +79,15 @@ function initializeSortable() {
 }
 
 function loadEndpoints() {
+    console.log('Loading endpoints...');
     apiRequest('/admin/api/endpoints')
         .then(response => response.json())
         .then(data => {
+            console.log('Endpoints loaded:', data.endpoints.length);
             currentEndpoints = data.endpoints;
             rebuildTable(currentEndpoints);
+            // Trigger custom event after table is rebuilt
+            document.dispatchEvent(new CustomEvent('endpointsLoaded'));
         })
         .catch(error => {
             console.error('Failed to load endpoints:', error);
@@ -112,24 +116,36 @@ function refreshEndpointStatus() {
 }
 
 function updateEndpointRowStatus(row, endpoint) {
-    const statusCell = row.children[9]; // Adjust index: added proxy column, was 8, now 9
-    
+    // 使用data属性选择器,而不是依赖列的位置
+    const statusCell = row.querySelector('[data-cell-type="status"]');
+    const enabledCell = row.querySelector('[data-cell-type="enabled"]');
+
+    if (!statusCell) return; // 如果找不到状态单元格,直接返回
+
     // Update status - 三种状态：禁用（灰色）、正常（绿色）、不可用（红色）
     let statusBadge = '';
     if (!endpoint.enabled) {
         // 如果端点被禁用，显示灰色的"禁用"状态
-        statusBadge = '<span class="badge bg-secondary"><i class="fas fa-ban"></i> 禁用</span>';
+        statusBadge = '<span class="badge bg-secondary"><i class="fas fa-ban"></i> ' + T('disabled', '禁用') + '</span>';
     } else if (endpoint.status === 'active') {
         // 如果端点已启用且状态为活跃，显示绿色的"正常"状态
-        statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> 正常</span>';
+        statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> ' + T('normal', '正常') + '</span>';
     } else if (endpoint.status === 'inactive') {
         // 如果端点已启用但状态为不活跃，显示红色的"不可用"状态
-        statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> 不可用</span>';
+        statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> ' + T('unavailable', '不可用') + '</span>';
     } else {
         // 其他状态（如检测中）
-        statusBadge = '<span class="badge bg-warning"><i class="fas fa-clock"></i> 检测中</span>';
+        statusBadge = '<span class="badge bg-warning"><i class="fas fa-clock"></i> ' + T('detecting', '检测中') + '</span>';
     }
     statusCell.innerHTML = statusBadge;
+
+    // 同时更新启用状态列
+    if (enabledCell) {
+        const enabledBadge = endpoint.enabled
+            ? '<span class="badge bg-success"><i class="fas fa-toggle-on"></i> ' + T('enabled', '已启用') + '</span>'
+            : '<span class="badge bg-secondary"><i class="fas fa-toggle-off"></i> ' + T('disabled', '已禁用') + '</span>';
+        enabledCell.innerHTML = enabledBadge;
+    }
 }
 
 function refreshTable() {
