@@ -4,6 +4,32 @@
 
 // 测试结果缓存
 let testResultsCache = {};
+let batchTestButtonBound = false;
+let singleTestHandlerBound = false;
+
+function refreshTooltip(element) {
+    if (!element || !window.bootstrap || typeof bootstrap.Tooltip !== 'function') {
+        return;
+    }
+    const instance = bootstrap.Tooltip.getInstance(element);
+    if (instance) {
+        instance.dispose();
+    }
+    bootstrap.Tooltip.getOrCreateInstance(element);
+}
+
+function handleSingleTestButtonClick(e) {
+    const testBtn = e.target.closest('button[data-action="test-endpoint"]');
+    if (testBtn) {
+        const endpointName = testBtn.dataset.endpoint;
+        console.log('Test button clicked:', endpointName);
+        if (endpointName) {
+            testEndpoint(endpointName);
+        } else {
+            console.error('No endpoint name found in button data');
+        }
+    }
+}
 
 // 从localStorage加载测试结果缓存
 function loadTestResultsCache() {
@@ -52,13 +78,13 @@ function renderTestResult(result) {
                          result.response_time < 5000 ? 'text-warning' :
                          result.response_time < 10000 ? 'text-orange' : 'text-danger';
         const escapedUrl = escapeHtml(result.url || '');
-        return `<span class="${timeClass}" title="${result.format.toUpperCase()}: ${escapedUrl}">
+        return `<span class="${timeClass}" data-bs-toggle="tooltip" title="${result.format.toUpperCase()}: ${escapedUrl}">
             ${formatResponseTime(result.response_time)}
         </span>`;
     } else {
         const errorMsg = result.error || `HTTP ${result.status_code}`;
         const escapedError = escapeHtml(errorMsg);
-        return `<span class="text-danger" title="${result.format.toUpperCase()}: ${escapedError}">
+        return `<span class="text-danger" data-bs-toggle="tooltip" title="${result.format.toUpperCase()}: ${escapedError}">
             <i class="fas fa-exclamation-circle"></i> ${result.status_code || 'Error'}
         </span>`;
     }
@@ -67,47 +93,88 @@ function renderTestResult(result) {
 /**
  * 渲染端点的所有测试结果
  */
-function renderEndpointTestResults(endpointName) {
+function getEndpointTestResultsView(endpointName) {
     const results = testResultsCache[endpointName];
     if (!results) {
-        return '<span class="text-muted">-</span>';
+        return {
+            html: '<span class="text-muted">-</span>',
+            tooltip: 'No tests yet'
+        };
     }
 
-    // 兼容不同数据结构：results (数组) 或包含 results 字段的对象
     const testResults = Array.isArray(results) ? results : (results.results || results.Results || []);
     if (!testResults || testResults.length === 0) {
-        return '<span class="text-muted">-</span>';
+        return {
+            html: '<span class="text-muted">-</span>',
+            tooltip: 'No tests yet'
+        };
     }
 
-    const resultHtmls = testResults.map(result => {
+    const htmlParts = [];
+    const summaryParts = [];
+
+    testResults.forEach(result => {
         const formatLabel = result.format === 'anthropic' ? 'A' : 'O';
-        const formatBadge = result.format === 'anthropic' ? 'badge-primary' : 'badge-info';
+        const formatBadge = result.format === 'anthropic' ? 'bg-warning' : 'bg-primary';
+        const labelText = result.format === 'anthropic' ? 'Anthropic' : 'OpenAI';
 
         if (result.success) {
-            // 颜色分级：<2s绿色, 2-5s黄色, 5-10s橙色, >10s红色
             const timeClass = result.response_time < 2000 ? 'text-success' :
                              result.response_time < 5000 ? 'text-warning' :
                              result.response_time < 10000 ? 'text-orange' : 'text-danger';
             const escapedUrl = escapeHtml(result.url || '');
-            return `<div class="test-result-item" title="${result.format.toUpperCase()}: ${escapedUrl}&#10;响应时间: ${formatResponseTime(result.response_time)}">
+            const timeText = formatResponseTime(result.response_time);
+            htmlParts.push(`<div class="test-result-item" data-bs-toggle="tooltip" title="${labelText}: ${escapedUrl}&#10;Response time: ${timeText}">
                 <span class="badge ${formatBadge}">${formatLabel}</span>
-                <span class="${timeClass}">${formatResponseTime(result.response_time)}</span>
-            </div>`;
+                <span class="${timeClass}">${timeText}</span>
+            </div>`);
+            summaryParts.push(`${labelText}: ${timeText}`);
         } else {
-            const errorMsg = result.error || `HTTP ${result.status_code}`;
-            // 转义HTML以避免JSON中的引号破坏title属性
+            const errorMsg = result.error || `HTTP ${result.status_code || 'Error'}`;
             const escapedUrl = escapeHtml(result.url || '');
             const escapedError = escapeHtml(errorMsg);
-            return `<div class="test-result-item" title="${result.format.toUpperCase()}: ${escapedUrl}&#10;错误: ${escapedError}">
+            htmlParts.push(`<div class="test-result-item" data-bs-toggle="tooltip" title="${labelText}: ${escapedUrl}&#10;Error: ${escapedError}">
                 <span class="badge ${formatBadge}">${formatLabel}</span>
-                <span class="text-danger">
-                    <i class="fas fa-exclamation-circle"></i> ${result.status_code || 'Error'}
-                </span>
-            </div>`;
+                <span class="text-danger"><i class="fas fa-exclamation-circle"></i> ${result.status_code || 'Err'}</span>
+            </div>`);
+            summaryParts.push(`${labelText}: ${errorMsg}`);
         }
     });
 
-    return `<div class="test-results-container">${resultHtmls.join('')}</div>`;
+    return {
+        html: `<div class="test-results-container">${htmlParts.join('')}</div>`,
+        tooltip: summaryParts.join('\n')
+    };
+}
+
+function renderEndpointTestResults(endpointName) {
+    return getEndpointTestResultsView(endpointName).html;
+}
+
+function applyResponseCellContent(endpointName, responseCell) {
+    if (!responseCell) return;
+    const view = getEndpointTestResultsView(endpointName);
+    responseCell.innerHTML = view.html;
+    setupResponseCellTooltip(responseCell, view.tooltip);
+    if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
+        const tooltipEls = [].slice.call(responseCell.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipEls.forEach(refreshTooltip);
+    }
+}
+
+function setupResponseCellTooltip(element, text) {
+    if (!element) return;
+    element.setAttribute('data-bs-toggle', 'tooltip');
+    element.setAttribute('title', text || '');
+    element.setAttribute('data-bs-original-title', text || '');
+    refreshTooltip(element);
+}
+
+function setResponseCellError(responseCell, message) {
+    if (!responseCell) return;
+    const text = message || 'Test failed';
+    responseCell.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(text)}</span>`;
+    setupResponseCellTooltip(responseCell, text);
 }
 
 /**
@@ -120,12 +187,15 @@ async function testEndpoint(endpointName) {
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
         btn.title = '测试中...';
+        btn.setAttribute('data-bs-original-title', btn.title);
+        refreshTooltip(btn);
     }
 
     // 更新UI显示测试中状态
     const responseCell = document.querySelector(`tr[data-endpoint-name="${endpointName}"] .response-cell`);
     if (responseCell) {
         responseCell.innerHTML = '<span class="text-muted"><i class="fas fa-spinner fa-spin"></i> 测试中...</span>';
+        setupResponseCellTooltip(responseCell, 'Testing...');
     }
 
     try {
@@ -146,20 +216,22 @@ async function testEndpoint(endpointName) {
 
         // 更新UI显示测试结果
         if (responseCell) {
-            responseCell.innerHTML = renderEndpointTestResults(endpointName);
+            applyResponseCellContent(endpointName, responseCell);
         }
     } catch (error) {
-        console.error('Test endpoint error:', error);
+        console.warn('Test endpoint error:', error);
         if (responseCell) {
-            responseCell.innerHTML = '<span class="text-danger"><i class="fas fa-exclamation-circle"></i> 测试失败</span>';
+            setResponseCellError(responseCell, '测试失败');
         }
     } finally {
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-vial"></i>';
             btn.title = '测试端点';
+            btn.setAttribute('data-bs-original-title', btn.title);
+            refreshTooltip(btn);
         }
-    }
+}
 }
 
 /**
@@ -178,6 +250,7 @@ async function testAllEndpoints() {
         const responseCell = row.querySelector('.response-cell');
         if (responseCell) {
             responseCell.innerHTML = '<span class="text-muted"><i class="fas fa-spinner fa-spin"></i> 测试中...</span>';
+            setupResponseCellTooltip(responseCell, 'Testing...');
         }
     });
 
@@ -196,9 +269,9 @@ async function testAllEndpoints() {
 
                 // 实时更新UI
                 const responseCell = document.querySelector(`tr[data-endpoint-name="${result.endpoint_name}"] .response-cell`);
-                if (responseCell) {
-                    responseCell.innerHTML = renderEndpointTestResults(result.endpoint_name);
-                }
+            if (responseCell) {
+                applyResponseCellContent(result.endpoint_name, responseCell);
+            }
 
                 // 更新进度
                 completedCount++;
@@ -233,7 +306,7 @@ async function testAllEndpoints() {
             // 对所有仍在测试中的端点显示失败状态
             document.querySelectorAll('tr[data-endpoint-name] .response-cell').forEach(cell => {
                 if (cell.innerHTML.includes('fa-spinner')) {
-                    cell.innerHTML = '<span class="text-danger"><i class="fas fa-exclamation-circle"></i> 测试失败</span>';
+                    setResponseCellError(cell, '测试失败');
                 }
             });
 
@@ -250,7 +323,7 @@ async function testAllEndpoints() {
         // 对所有端点显示测试失败状态
         document.querySelectorAll('tr[data-endpoint-name] .response-cell').forEach(cell => {
             if (cell.innerHTML.includes('fa-spinner')) {
-                cell.innerHTML = '<span class="text-danger"><i class="fas fa-exclamation-circle"></i> 测试失败</span>';
+                setResponseCellError(cell, '测试失败');
             }
         });
 
@@ -270,7 +343,7 @@ function restoreCachedTestResults() {
         if (endpointName && testResultsCache[endpointName]) {
             const responseCell = row.querySelector('.response-cell');
             if (responseCell) {
-                responseCell.innerHTML = renderEndpointTestResults(endpointName);
+                applyResponseCellContent(endpointName, responseCell);
             }
         }
     });
@@ -280,23 +353,18 @@ function restoreCachedTestResults() {
  * 初始化测试功能
  */
 function initEndpointTesting() {
-    // 批量测试按钮
-    document.querySelector('button[data-action="test-all-endpoints"]')?.addEventListener('click', testAllEndpoints);
+    const batchBtn = document.querySelector('button[data-action="test-all-endpoints"]');
+    if (batchBtn && !batchBtn.dataset.testBound) {
+        batchBtn.addEventListener('click', testAllEndpoints);
+        batchBtn.dataset.testBound = 'true';
+    }
 
-    // 单个端点测试按钮（使用事件委托）
-    document.addEventListener('click', (e) => {
-        const testBtn = e.target.closest('button[data-action="test-endpoint"]');
-        if (testBtn) {
-            const endpointName = testBtn.dataset.endpoint;
-            console.log('Test button clicked:', endpointName);
-            if (endpointName) {
-                testEndpoint(endpointName);
-            } else {
-                console.error('No endpoint name found in button data');
-            }
-        }
-    });
+    if (!singleTestHandlerBound) {
+        document.addEventListener('click', handleSingleTestButtonClick);
+        singleTestHandlerBound = true;
+    }
 }
+
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
@@ -313,7 +381,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (endpointName && testResultsCache[endpointName]) {
             const responseCell = row.querySelector('.response-cell');
             if (responseCell) {
-                responseCell.innerHTML = renderEndpointTestResults(endpointName);
+                applyResponseCellContent(endpointName, responseCell);
             }
         }
     });
@@ -331,7 +399,7 @@ document.addEventListener('endpointsLoaded', () => {
         if (endpointName && testResultsCache[endpointName]) {
             const responseCell = row.querySelector('.response-cell');
             if (responseCell) {
-                responseCell.innerHTML = renderEndpointTestResults(endpointName);
+                applyResponseCellContent(endpointName, responseCell);
             }
         }
     });

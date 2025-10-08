@@ -38,6 +38,16 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		c.Set("last_status_code", http.StatusNotFound)
 		return false, true // 立即尝试下一个端点
 	}
+
+	if isCountTokensRequest && ep.ShouldSkipCountTokens() {
+		s.logger.Debug(fmt.Sprintf("Skipping count_tokens request on endpoint %s (previously detected unsupported)", ep.Name))
+		c.Set("skip_health_record", true)
+		c.Set("skip_logging", true)
+		c.Set("count_tokens_openai_skip", true)
+		c.Set("last_error", fmt.Errorf("count_tokens not supported on endpoint"))
+		c.Set("last_status_code", http.StatusNotFound)
+		return false, true
+	}
 	// 为这个端点记录独立的开始时间
 	endpointStartTime := time.Now()
 	// 记录入站原始路径，与实际请求路径区分
@@ -64,15 +74,25 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		if ep.OpenAIPreference == "chat_completions" {
 			effectivePath = "/chat/completions"
 			s.logger.Debug("Early path conversion for OpenAI endpoint with chat_completions preference", map[string]interface{}{
-				"endpoint":    ep.Name,
-				"inbound":     "/responses",
-				"effective":   "/chat/completions",
-				"preference":  ep.OpenAIPreference,
+				"endpoint":   ep.Name,
+				"inbound":    "/responses",
+				"effective":  "/chat/completions",
+				"preference": ep.OpenAIPreference,
 			})
 		}
 	}
 
 	targetURL := ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
+
+	// 记录工具增强默认上下文，便于日志输出
+	effectiveToolMode := strings.ToLower(ep.ToolEnhancementMode)
+	if effectiveToolMode == "" {
+		effectiveToolMode = "auto"
+	}
+	c.Set("tool_enhancement_mode_effective", effectiveToolMode)
+	if ep.NativeToolSupport != nil {
+		c.Set("tool_native_support_value", *ep.NativeToolSupport)
+	}
 
 	// Extract tags from taggedRequest
 	var tags []string
@@ -130,6 +150,56 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		}
 	} else {
 		finalRequestBody = requestBody // 使用原始请求体
+	}
+
+	// === Tool Calling: zero-config prompt injection (client format) ===
+	// 自动启用：当客户端请求包含 tools 时，为任何上游模型注入系统提示以获得工具调用能力
+	if s.toolEnhancer != nil && formatDetection != nil {
+		// 仅当请求中包含 tools 时才尝试增强
+		if tools := extractToolsFromClientRequest(requestBody); len(tools) > 0 {
+			// 决策：根据端点配置决定是否注入
+			// disable: 不注入；force: 一定注入；auto: 若明确支持原生工具则不注入，否则注入
+			injectAllowed := true
+			switch strings.ToLower(ep.ToolEnhancementMode) {
+			case "disable":
+				injectAllowed = false
+			case "force":
+				injectAllowed = true
+			default: // auto or empty
+				if ep.NativeToolSupport != nil && *ep.NativeToolSupport {
+					injectAllowed = false
+				}
+			}
+			if injectAllowed {
+				result, triggerSignal, err := s.toolEnhancer.EnhanceRequest(tools, nil)
+				if err == nil && result != nil && result.ShouldEnhance {
+					// 注入 system 提示到客户端格式（在格式转换之前）
+					updated, injErr := injectSystemPromptToClientRequest(finalRequestBody, string(formatDetection.Format), result.SystemPrompt)
+					if injErr == nil && len(updated) > 0 {
+						finalRequestBody = updated
+						c.Set("tool_trigger_signal", triggerSignal)
+						c.Set("tool_enhanced", true)
+						s.logger.Info("Tool calling: injected system prompt for request", map[string]interface{}{
+							"endpoint":      ep.Name,
+							"client_format": string(formatDetection.Format),
+						})
+					} else if injErr != nil {
+						s.logger.Debug("Tool calling: failed to inject system prompt", map[string]interface{}{"error": injErr.Error()})
+					}
+				} else {
+					s.logger.Debug("Tool calling: skip injection due to endpoint configuration", map[string]interface{}{
+						"endpoint": ep.Name,
+						"mode":     ep.ToolEnhancementMode,
+						"native_tool_support": func() interface{} {
+							if ep.NativeToolSupport == nil {
+								return nil
+							}
+							return *ep.NativeToolSupport
+						}(),
+					})
+				}
+			}
+		}
 	}
 
 	// 格式转换（在模型重写之后）
@@ -395,6 +465,37 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			s.logger.Debug("Converted Codex request body", map[string]interface{}{
 				"body": bodyPreview,
 			})
+
+			// After converting to OpenAI chat format, re-inject tool system prompt if tools present
+			if s.toolEnhancer != nil {
+				if tools := extractToolsFromClientRequest(requestBody); len(tools) > 0 {
+					injectAllowed := true
+					switch strings.ToLower(ep.ToolEnhancementMode) {
+					case "disable":
+						injectAllowed = false
+					case "force":
+						injectAllowed = true
+					default:
+						if ep.NativeToolSupport != nil && *ep.NativeToolSupport {
+							injectAllowed = false
+						}
+					}
+					if injectAllowed {
+						if result, triggerSignal, err := s.toolEnhancer.EnhanceRequest(tools, nil); err == nil && result != nil && result.ShouldEnhance {
+							if updated, injErr := injectSystemPromptToClientRequest(finalRequestBody, "openai", result.SystemPrompt); injErr == nil && len(updated) > 0 {
+								finalRequestBody = updated
+								c.Set("tool_trigger_signal", triggerSignal)
+								c.Set("tool_enhanced", true)
+								s.logger.Info("Tool calling: injected system prompt after Codex->OpenAI conversion")
+							} else if injErr != nil {
+								s.logger.Debug("Tool calling: failed to inject after Codex conversion", map[string]interface{}{"error": injErr.Error()})
+							}
+						}
+					} else {
+						s.logger.Debug("Tool calling: skip injection after Codex conversion due to endpoint configuration")
+					}
+				}
+			}
 		}
 	}
 
@@ -673,7 +774,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			ep.AuthHeaderMutex.Lock()
 			ep.DetectedAuthHeader = "api_key"
 			ep.AuthHeaderMutex.Unlock()
-			
+
 			// 🎓 持久化学习结果：保存切换后的认证方式
 			// 注意：这里只是标记，实际持久化会在重试成功后进行
 			s.logger.Debug(fmt.Sprintf("Marked endpoint %s to use x-api-key, will persist if retry succeeds", ep.Name))
@@ -772,7 +873,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			// 标记该端点不支持原生 Codex 格式，需要转换
 			falseValue := false
 			ep.NativeCodexFormat = &falseValue
-			
+
 			// 🎓 持久化学习结果：标记端点需要使用 chat_completions 格式
 			if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
 				ep.OpenAIPreference = "chat_completions"
@@ -811,6 +912,25 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				shouldSkip := s.config.Blacklist.BusinessErrorSafe
 				errorType := "business error"
 
+				if isCountTokensRequest {
+					if errorMessage := strings.ToLower(fmt.Sprintf("%v", jsonResp["error"])); strings.Contains(errorMessage, "invalid url") {
+						ep.MarkCountTokensSupport(false)
+						c.Set("count_tokens_openai_skip", true)
+						c.Set("skip_logging", true)
+						ep.CountTokensEnabled = false
+						s.PersistEndpointLearning(ep)
+						s.logger.Info("Detected endpoint without count_tokens support (invalid URL)", map[string]interface{}{
+							"endpoint": ep.Name,
+						})
+
+						// 设置错误信息后，直接尝试下一个端点且不记录日志
+						c.Set("skip_health_record", true)
+						c.Set("last_error", fmt.Errorf("%s: status %d", errorType, resp.StatusCode))
+						c.Set("last_status_code", resp.StatusCode)
+						return false, true
+					}
+				}
+
 				s.logger.Info(fmt.Sprintf("Endpoint %s returned %s with status %d (blacklist_safe=%v)", ep.Name, errorType, resp.StatusCode, shouldSkip))
 				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 
@@ -823,6 +943,17 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				c.Set("last_error", fmt.Errorf("%s: status %d", errorType, resp.StatusCode))
 				c.Set("last_status_code", resp.StatusCode)
 				return false, true // 尝试下一个endpoint
+			}
+		}
+
+		if isCountTokensRequest {
+			lowerBody := strings.ToLower(string(decompressedBody))
+			if strings.Contains(lowerBody, "invalid url") && strings.Contains(lowerBody, "count_tokens") {
+				ep.MarkCountTokensSupport(false)
+				c.Set("count_tokens_openai_skip", true)
+				s.logger.Info("Endpoint response indicates count_tokens unsupported", map[string]interface{}{
+					"endpoint": ep.Name,
+				})
 			}
 		}
 
@@ -938,12 +1069,65 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		}
 	}
 
-	// 严格 Anthropic 格式验证已永久启用
-	// 关键修复：使用actualEndpointFormat进行验证，而不是ep.EndpointType
+	// 在严格验证之前，尝试解析并改写为工具调用响应（非流式）
+	// 仅当本次请求已注入工具增强且检测到触发信号时执行
+	// 先确定用于解析的端点格式
 	validationEndpointType := ep.EndpointType
 	if actualEndpointFormat != "" {
 		validationEndpointType = actualEndpointFormat
 	}
+	if !isStreaming {
+		if trig, ok := c.Get("tool_trigger_signal"); ok {
+			if triggerSignal, _ := trig.(string); triggerSignal != "" {
+				// 提取用于工具检测的文本内容（按实际端点格式解析）
+				assistantText := extractAssistantTextForToolDetect(decompressedBody, validationEndpointType)
+				if assistantText != "" && strings.Contains(assistantText, triggerSignal) {
+					if parseResult, perr := s.toolEnhancer.ParseResponse(assistantText, triggerSignal); perr == nil && parseResult != nil && parseResult.IsToolCall && len(parseResult.ToolCalls) > 0 {
+						c.Set("tool_call_detected", true)
+						c.Set("tool_call_count", len(parseResult.ToolCalls))
+						// 根据客户端期望的格式（而非上游实际格式）构造工具调用响应
+						clientFormat := "openai"
+						if formatDetection != nil {
+							clientFormat = string(formatDetection.Format)
+						}
+						// 选择模型字段：优先取原响应中的 model，否则使用重写后的/原始模型
+						respModel := parseModelFromResponse(decompressedBody)
+						if respModel == "" {
+							if rewrittenModel != "" {
+								respModel = rewrittenModel
+							} else if originalModel != "" {
+								respModel = originalModel
+							} else {
+								respModel = "unknown-model"
+							}
+						}
+
+						var rewritten []byte
+						if clientFormat == "anthropic" {
+							rewritten = buildAnthropicToolCallResponse(respModel, parseResult.ToolCalls)
+							finalContentType = "application/json"
+						} else {
+							rewritten = buildOpenAIToolCallResponse(respModel, parseResult.ToolCalls)
+							finalContentType = "application/json"
+						}
+
+						// 使用改写后的响应体
+						decompressedBody = rewritten
+						c.Header("Content-Encoding", "")
+						c.Header("Content-Length", fmt.Sprintf("%d", len(rewritten)))
+						s.logger.Info("Tool calling: detected and mapped tool calls in response", map[string]interface{}{
+							"endpoint":      ep.Name,
+							"client_format": clientFormat,
+							"tool_calls":    len(parseResult.ToolCalls),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// 严格 Anthropic 格式验证已永久启用
+	// 关键修复：使用actualEndpointFormat进行验证，而不是ep.EndpointType
 	if err := s.validator.ValidateResponseWithPath(decompressedBody, isStreaming, validationEndpointType, path, ep.GetURLForFormat(endpointRequestFormat)); err != nil {
 		// 检查是否为业务错误（根据配置决定是否触发端点黑名单）
 		if validator.IsBusinessError(err) {
@@ -954,6 +1138,23 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			duration := time.Since(endpointStartTime)
 			errorLog := fmt.Sprintf("%s: %v", errorType, err)
 			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, fmt.Errorf(errorLog), isStreaming, tags, "", originalModel, rewrittenModel, attemptNumber)
+
+			// 工具调用错误监控：若请求包含 tools 参数且返回业务错误，则学习并强制启用增强，防止伪“支持”导致失败
+			var reqJSON map[string]interface{}
+			if json.Unmarshal(requestBody, &reqJSON) == nil {
+				if _, hasTools := reqJSON["tools"]; hasTools {
+					// 学习：关闭原生工具支持，强制注入增强
+					val := false
+					ep.NativeToolSupport = &val
+					ep.ToolEnhancementMode = "force"
+					c.Set("tool_native_support_value", false)
+					c.Set("tool_enhancement_mode_effective", "force")
+					s.PersistEndpointLearning(ep)
+					s.logger.Info("🧩 Tool support business error detected: forcing tool enhancement for this endpoint", map[string]interface{}{
+						"endpoint": ep.Name,
+					})
+				}
+			}
 
 			// 根据配置决定是否跳过健康统计
 			if shouldSkip {
@@ -1172,6 +1373,49 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		}
 	}
 
+	// 工具调用增强监控信息
+	if val, exists := c.Get("tool_enhanced"); exists {
+		if applied, ok := val.(bool); ok {
+			requestLog.ToolEnhancementApplied = applied
+		}
+	}
+	if val, exists := c.Get("tool_enhancement_mode_effective"); exists {
+		if mode, ok := val.(string); ok {
+			requestLog.ToolEnhancementMode = mode
+		}
+	}
+	if val, exists := c.Get("tool_call_count"); exists {
+		if count, ok := val.(int); ok {
+			requestLog.ToolCallCount = count
+			if count > 0 {
+				requestLog.ToolCallsDetected = true
+			}
+		}
+	}
+	if val, exists := c.Get("tool_call_detected"); exists {
+		if detected, ok := val.(bool); ok {
+			requestLog.ToolCallsDetected = detected || requestLog.ToolCallsDetected
+		}
+	}
+	if val, exists := c.Get("tool_native_support_value"); exists {
+		switch v := val.(type) {
+		case bool:
+			b := v
+			requestLog.ToolNativeSupport = &b
+		case *bool:
+			requestLog.ToolNativeSupport = v
+		}
+	} else if ep.NativeToolSupport != nil {
+		requestLog.ToolNativeSupport = ep.NativeToolSupport
+	}
+	if requestLog.ToolEnhancementMode == "" {
+		effectiveMode := ep.ToolEnhancementMode
+		if effectiveMode == "" {
+			effectiveMode = "auto"
+		}
+		requestLog.ToolEnhancementMode = effectiveMode
+	}
+
 	// 记录原始客户端请求数据
 	requestLog.OriginalRequestURL = c.Request.URL.String()
 	requestLog.OriginalRequestHeaders = utils.HeadersToMap(c.Request.Header)
@@ -1279,12 +1523,17 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		s.logger.Info("Auto-detected: endpoint natively supports Codex format", map[string]interface{}{
 			"endpoint": ep.Name,
 		})
-		
+
 		// 🎓 持久化学习结果：标记 OpenAI 格式偏好为 responses
 		if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
 			ep.OpenAIPreference = "responses"
 			s.PersistEndpointLearning(ep)
 		}
+	}
+
+	// count_tokens 请求成功后，标记端点支持
+	if isCountTokensRequest {
+		ep.MarkCountTokensSupport(true)
 	}
 
 	// 🔐 记录成功的认证方式（用于自动模式）
@@ -1301,7 +1550,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				ep.DetectedAuthHeader = "auth_token"
 				ep.AuthHeaderMutex.Unlock()
 				s.logger.Info(fmt.Sprintf("Auto-detected: endpoint %s works with Authorization header", ep.Name))
-				
+
 				// 🎓 持久化学习结果：保存认证方式
 				s.PersistEndpointLearning(ep)
 			}

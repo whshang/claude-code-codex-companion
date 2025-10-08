@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -17,8 +18,8 @@ import (
 type RetryBehavior int
 
 const (
-	RetryBehaviorReturnError  RetryBehavior = 0 // 立刻返回错误
-	RetryBehaviorRetryEndpoint RetryBehavior = 1 // 在当前端点重试
+	RetryBehaviorReturnError    RetryBehavior = 0 // 立刻返回错误
+	RetryBehaviorRetryEndpoint  RetryBehavior = 1 // 在当前端点重试
 	RetryBehaviorSwitchEndpoint RetryBehavior = 2 // 切换到下一个端点
 )
 
@@ -33,12 +34,12 @@ func (s *Server) shouldSkipHealthRecord(errorCategory ErrorCategory) bool {
 	if !s.config.Blacklist.Enabled {
 		return true
 	}
-	
+
 	// 如果自动拉黑被禁用，跳过所有健康统计
 	if !s.config.Blacklist.AutoBlacklist {
 		return true
 	}
-	
+
 	switch errorCategory {
 	case ErrorCategoryBusinessError:
 		return s.config.Blacklist.BusinessErrorSafe
@@ -59,18 +60,18 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 		blacklistReason := ep.GetBlacklistReason()
 		var errorMsg string
 		var causingRequestIDs []string
-		
+
 		if blacklistReason != nil {
 			causingRequestIDs = blacklistReason.CausingRequestIDs
-			errorMsg = fmt.Sprintf("Endpoint blacklisted due to previous failures. Causing request IDs: %v. Original error: %s", 
+			errorMsg = fmt.Sprintf("Endpoint blacklisted due to previous failures. Causing request IDs: %v. Original error: %s",
 				causingRequestIDs, blacklistReason.ErrorSummary)
 		} else {
 			errorMsg = "Endpoint is blacklisted (no detailed reason available)"
 		}
-		
+
 		// 记录被拉黑端点的虚拟请求日志
 		s.logBlacklistedEndpointRequest(requestID, ep, path, requestBody, c, duration, errorMsg, causingRequestIDs, globalAttemptNumber, taggedRequest)
-		
+
 		// 立即尝试下一个端点
 		s.logger.Debug(fmt.Sprintf("Endpoint %s is blacklisted, skipping to next endpoint", ep.Name))
 		return false, true
@@ -79,7 +80,7 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 	for endpointAttempt := 1; endpointAttempt <= MaxEndpointRetries; endpointAttempt++ {
 		currentGlobalAttempt := globalAttemptNumber + endpointAttempt - 1
 		s.logger.Debug(fmt.Sprintf("Trying endpoint %s (endpoint attempt %d/%d, global attempt %d)", ep.Name, endpointAttempt, MaxEndpointRetries, currentGlobalAttempt))
-		
+
 		success, shouldRetryAnywhere := s.proxyToEndpoint(c, ep, path, requestBody, requestID, startTime, taggedRequest, currentGlobalAttempt)
 		if success {
 			// 检查是否应该跳过健康统计记录
@@ -87,7 +88,7 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 			if skipHealthRecord != true {
 				s.endpointManager.RecordRequest(ep.ID, true, requestID)
 			}
-			
+
 			// 尝试提取基准信息用于健康检查
 			if len(requestBody) > 0 {
 				extracted := s.healthChecker.GetExtractor().ExtractFromRequest(requestBody, c.Request.Header)
@@ -95,15 +96,15 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 					s.logger.Info("Successfully updated health check baseline info from request")
 				}
 			}
-			
+
 			s.logger.Debug(fmt.Sprintf("Request succeeded on endpoint %s (endpoint attempt %d/%d)", ep.Name, endpointAttempt, MaxEndpointRetries))
 			return true, false
 		}
-		
+
 		// 记录失败，但检查是否为 count_tokens 请求，如果是则不计入健康统计
 		skipHealthRecord, _ := c.Get("skip_health_record")
 		isCountTokensRequest := strings.Contains(path, "/count_tokens")
-		
+
 		// 获取错误分类以决定是否跳过健康统计
 		var lastError error
 		var lastStatusCode int
@@ -119,29 +120,29 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 		}
 		errorCategory := s.categorizeError(lastError, lastStatusCode)
 		shouldSkipByConfig := s.shouldSkipHealthRecord(errorCategory)
-		
+
 		shouldSkip := (skipHealthRecord == true) || isCountTokensRequest || shouldSkipByConfig
 		if !shouldSkip {
 			s.endpointManager.RecordRequest(ep.ID, false, requestID)
 		}
-		
+
 		// 如果明确指示不应重试任何地方，直接返回
 		if !shouldRetryAnywhere {
 			s.logger.Debug(fmt.Sprintf("Endpoint %s indicated no retry should be attempted", ep.Name))
 			return false, false
 		}
-		
+
 		// 从context中获取最后一次的错误信息和状态码（如果有的话）
 		// 重用之前声明的 lastError 和 lastStatusCode 变量
-		
+
 		// 根据错误类型确定重试行为
 		retryBehavior := s.determineRetryBehaviorFromError(lastError, lastStatusCode, endpointAttempt)
-		
+
 		switch retryBehavior {
 		case RetryBehaviorReturnError:
 			s.logger.Debug(fmt.Sprintf("Endpoint %s: RetryBehaviorReturnError - stopping all retries", ep.Name))
 			return false, false
-			
+
 		case RetryBehaviorRetryEndpoint:
 			if endpointAttempt < MaxEndpointRetries {
 				s.logger.Debug(fmt.Sprintf("Endpoint %s: RetryBehaviorRetryEndpoint - retrying same endpoint (attempt %d/%d)", ep.Name, endpointAttempt+1, MaxEndpointRetries))
@@ -152,13 +153,13 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 				s.logger.Debug(fmt.Sprintf("Endpoint %s: Max retries reached, switching to next endpoint", ep.Name))
 				return false, true
 			}
-			
+
 		case RetryBehaviorSwitchEndpoint:
 			s.logger.Debug(fmt.Sprintf("Endpoint %s: RetryBehaviorSwitchEndpoint - switching to next endpoint", ep.Name))
 			return false, true
 		}
 	}
-	
+
 	// 如果所有重试都失败了，切换到下一个端点
 	s.logger.Debug(fmt.Sprintf("All %d attempts failed on endpoint %s, switching to next endpoint", MaxEndpointRetries, ep.Name))
 	return false, true
@@ -168,15 +169,15 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 type ErrorCategory int
 
 const (
-	ErrorCategoryClientError         ErrorCategory = 0 // 4xx错误，直接切换端点
-	ErrorCategoryServerError         ErrorCategory = 1 // 5xx错误，原地重试后切换端点
-	ErrorCategoryNetworkError        ErrorCategory = 2 // 网络错误，应该重试
+	ErrorCategoryClientError          ErrorCategory = 0 // 4xx错误，直接切换端点
+	ErrorCategoryServerError          ErrorCategory = 1 // 5xx错误，原地重试后切换端点
+	ErrorCategoryNetworkError         ErrorCategory = 2 // 网络错误，应该重试
 	ErrorCategoryUsageValidationError ErrorCategory = 3 // Usage验证错误，原地重试
-	ErrorCategorySSEValidationError  ErrorCategory = 4 // SSE流不完整验证错误，原地重试
+	ErrorCategorySSEValidationError   ErrorCategory = 4 // SSE流不完整验证错误，原地重试
 	ErrorCategoryOtherValidationError ErrorCategory = 5 // 其他验证错误，切换端点
 	ErrorCategoryResponseTimeoutError ErrorCategory = 6 // 响应超时错误，切换端点
-	ErrorCategoryBusinessError       ErrorCategory = 7 // 业务错误，根据配置决定
-	ErrorCategoryConfigError         ErrorCategory = 8 // 配置错误，根据配置决定
+	ErrorCategoryBusinessError        ErrorCategory = 7 // 业务错误，根据配置决定
+	ErrorCategoryConfigError          ErrorCategory = 8 // 配置错误，根据配置决定
 )
 
 // determineRetryBehaviorFromError 根据错误信息确定重试行为
@@ -187,49 +188,49 @@ func (s *Server) determineRetryBehaviorFromError(err error, statusCode int, curr
 	}
 
 	errorCategory := s.categorizeError(err, statusCode)
-	
+
 	switch errorCategory {
 	case ErrorCategoryClientError:
 		// 客户端错误（4xx状态码），直接尝试下一个端点
 		// 修改逻辑：4xx错误现在直接切换端点，避免因提供商不正确返回4xx导致停下
 		return RetryBehaviorSwitchEndpoint
-		
+
 	case ErrorCategoryNetworkError:
 		// 网络错误（连接失败、超时等），在同一端点重试
 		if currentAttempt < MaxEndpointRetries {
 			return RetryBehaviorRetryEndpoint
 		}
 		return RetryBehaviorSwitchEndpoint
-		
+
 	case ErrorCategoryServerError:
 		// 服务器错误（5xx状态码），在同一端点重试
 		if currentAttempt < MaxEndpointRetries {
 			return RetryBehaviorRetryEndpoint
 		}
 		return RetryBehaviorSwitchEndpoint
-		
+
 	case ErrorCategoryUsageValidationError:
 		// Usage验证失败，原地重试
 		if currentAttempt < MaxEndpointRetries {
 			return RetryBehaviorRetryEndpoint
 		}
 		return RetryBehaviorSwitchEndpoint
-		
+
 	case ErrorCategorySSEValidationError:
 		// SSE流不完整验证失败，原地重试
 		if currentAttempt < MaxEndpointRetries {
 			return RetryBehaviorRetryEndpoint
 		}
 		return RetryBehaviorSwitchEndpoint
-		
+
 	case ErrorCategoryOtherValidationError:
 		// 其他验证错误，切换端点
 		return RetryBehaviorSwitchEndpoint
-		
+
 	case ErrorCategoryResponseTimeoutError:
 		// 响应超时错误，切换端点
 		return RetryBehaviorSwitchEndpoint
-		
+
 	default:
 		// 未知错误，在同一端点重试
 		if currentAttempt < MaxEndpointRetries {
@@ -256,70 +257,70 @@ func (s *Server) categorizeError(err error, statusCode int) ErrorCategory {
 	// 🔍 优先检测服务端异常标志（即使返回 4xx 状态码）
 	// 常见的服务端内部错误特征：NPE、空指针、内部异常等
 	if strings.Contains(errStr, "is null") ||
-	   strings.Contains(errStr, "Cannot invoke") ||
-	   strings.Contains(errStr, "NullPointerException") ||
-	   strings.Contains(errStr, "null pointer") ||
-	   strings.Contains(errStr, "Internal Server Error") ||
-	   strings.Contains(errStr, "internal error") ||
-	   strings.Contains(errStr, "500") {
+		strings.Contains(errStr, "Cannot invoke") ||
+		strings.Contains(errStr, "NullPointerException") ||
+		strings.Contains(errStr, "null pointer") ||
+		strings.Contains(errStr, "Internal Server Error") ||
+		strings.Contains(errStr, "internal error") ||
+		strings.Contains(errStr, "500") {
 		return ErrorCategoryServerError
 	}
 
 	// 业务错误（根据配置决定是否拉黑）
 	if strings.Contains(errStr, "business error:") ||
-	   strings.Contains(errStr, "API error:") ||
-	   strings.Contains(errStr, "rate limit") ||
-	   strings.Contains(errStr, "quota exceeded") ||
-	   strings.Contains(errStr, "invalid request") {
+		strings.Contains(errStr, "API error:") ||
+		strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "quota exceeded") ||
+		strings.Contains(errStr, "invalid request") {
 		return ErrorCategoryBusinessError
 	}
 
 	// 配置错误（根据配置决定是否拉黑）
 	if strings.Contains(errStr, "Request format conversion failed") ||
-	   strings.Contains(errStr, "Authentication failed") ||
-	   strings.Contains(errStr, "Failed to create request") ||
-	   strings.Contains(errStr, "Failed to create final request") ||
-	   strings.Contains(errStr, "Failed to read rewritten request body") ||
-	   strings.Contains(errStr, "Failed to decompress response body") {
+		strings.Contains(errStr, "Authentication failed") ||
+		strings.Contains(errStr, "Failed to create request") ||
+		strings.Contains(errStr, "Failed to create final request") ||
+		strings.Contains(errStr, "Failed to read rewritten request body") ||
+		strings.Contains(errStr, "Failed to decompress response body") {
 		return ErrorCategoryConfigError
 	}
 
 	// Usage验证错误（原地重试）
 	if strings.Contains(errStr, "Usage validation failed") ||
-	   strings.Contains(errStr, "invalid usage stats") {
+		strings.Contains(errStr, "invalid usage stats") {
 		return ErrorCategoryUsageValidationError
 	}
 
 	// SSE流不完整验证错误（原地重试）
 	if strings.Contains(errStr, "Incomplete SSE stream") ||
-	   strings.Contains(errStr, "incomplete SSE stream") ||
-	   strings.Contains(errStr, "missing message_stop") ||
-	   strings.Contains(errStr, "missing [DONE]") ||
-	   strings.Contains(errStr, "missing finish_reason") {
+		strings.Contains(errStr, "incomplete SSE stream") ||
+		strings.Contains(errStr, "missing message_stop") ||
+		strings.Contains(errStr, "missing [DONE]") ||
+		strings.Contains(errStr, "missing finish_reason") {
 		return ErrorCategorySSEValidationError
 	}
 
 	// 其他验证错误（切换端点）
 	if strings.Contains(errStr, "validation failed") ||
-	   strings.Contains(errStr, "Response format conversion failed") {
+		strings.Contains(errStr, "Response format conversion failed") {
 		return ErrorCategoryOtherValidationError
 	}
-	
+
 	// 响应读取超时（切换端点）- 特殊处理
 	if strings.Contains(errStr, "Failed to read response body") {
 		return ErrorCategoryResponseTimeoutError
 	}
-	
+
 	// 网络错误（应该重试）
 	if strings.Contains(errStr, "connection") ||
-	   strings.Contains(errStr, "timeout") ||
-	   strings.Contains(errStr, "network") ||
-	   strings.Contains(errStr, "Failed to create proxy client") ||
-	   strings.Contains(errStr, "no such host") ||
-	   strings.Contains(errStr, "dial tcp") {
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "network") ||
+		strings.Contains(errStr, "Failed to create proxy client") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "dial tcp") {
 		return ErrorCategoryNetworkError
 	}
-	
+
 	// 默认为服务器错误（可以重试）
 	return ErrorCategoryServerError
 }
@@ -341,40 +342,40 @@ func (s *Server) tryProxyRequest(c *gin.Context, ep *endpoint.Endpoint, requestB
 // tryEndpointList 尝试端点列表，返回(成功, 尝试次数)
 func (s *Server) tryEndpointList(c *gin.Context, endpoints []utils.EndpointSorter, path string, requestBody []byte, requestID string, startTime time.Time, taggedRequest *tagging.TaggedRequest, phase string, startingAttemptNumber int) (bool, int) {
 	totalAttempts := 0
-	
+
 	for _, epInterface := range endpoints {
 		ep := epInterface.(*endpoint.Endpoint)
 		currentGlobalAttempt := startingAttemptNumber + totalAttempts
 		s.logger.Debug(fmt.Sprintf("%s: Attempting endpoint %s (starting from global attempt #%d)", phase, ep.Name, currentGlobalAttempt))
-		
+
 		success, shouldTryNextEndpoint := s.tryProxyRequestWithRetry(c, ep, requestBody, requestID, startTime, path, taggedRequest, currentGlobalAttempt)
-		
+
 		// 更新总尝试次数（包括该端点的所有重试）
 		totalAttempts += MaxEndpointRetries
-		
+
 		if success {
 			s.logger.Debug(fmt.Sprintf("%s: Request succeeded on endpoint %s", phase, ep.Name))
 			return true, totalAttempts
 		}
-		
+
 		if !shouldTryNextEndpoint {
 			s.logger.Debug("Endpoint indicated no retry should be attempted, stopping fallback")
 			break
 		}
-		
+
 		s.logger.Debug(fmt.Sprintf("%s: All attempts failed on endpoint %s, trying next endpoint", phase, ep.Name))
-		
+
 		// 重新构建请求体
 		s.rebuildRequestBody(c, requestBody)
 	}
-	
+
 	return false, totalAttempts
 }
 
 // filterAndSortEndpoints 过滤并排序端点（包括被拉黑端点，用于在实际轮到时记录虚拟日志）
 func (s *Server) filterAndSortEndpoints(allEndpoints []*endpoint.Endpoint, failedEndpoint *endpoint.Endpoint, filterFunc func(*endpoint.Endpoint) bool) []utils.EndpointSorter {
 	var filtered []*endpoint.Endpoint
-	
+
 	for _, ep := range allEndpoints {
 		// 跳过已失败的endpoint
 		if ep.ID == failedEndpoint.ID {
@@ -384,19 +385,19 @@ func (s *Server) filterAndSortEndpoints(allEndpoints []*endpoint.Endpoint, faile
 		if !ep.Enabled {
 			continue
 		}
-		
+
 		if filterFunc(ep) {
 			filtered = append(filtered, ep)
 		}
 	}
-	
+
 	// 转换为接口类型并排序
 	sorter := make([]utils.EndpointSorter, len(filtered))
 	for i, ep := range filtered {
 		sorter[i] = ep
 	}
 	utils.SortEndpointsByPriority(sorter)
-	
+
 	return sorter
 }
 
@@ -494,9 +495,9 @@ func (s *Server) fallbackToOtherEndpoints(c *gin.Context, path string, requestBo
 	if taggedRequest != nil {
 		requestTags = taggedRequest.Tags
 	}
-	
+
 	totalAttempted := MaxEndpointRetries // 包括最初失败的endpoint的所有重试
-	
+
 	if len(requestTags) > 0 {
 		// 有标签请求：分两阶段尝试（只尝试格式兼容的端点）
 		s.logger.Debug(fmt.Sprintf("Tagged request failed on %s, trying fallback with tags: %v and format: %s",
@@ -520,7 +521,7 @@ func (s *Server) fallbackToOtherEndpoints(c *gin.Context, path string, requestBo
 		universalEndpoints := s.filterAndSortEndpoints(compatibleEndpoints, failedEndpoint, func(ep *endpoint.Endpoint) bool {
 			return len(ep.Tags) == 0
 		})
-		
+
 		if len(universalEndpoints) > 0 {
 			s.logger.Debug(fmt.Sprintf("Phase 2: Trying %d universal endpoints", len(universalEndpoints)))
 			success, attemptedCount := s.tryEndpointList(c, universalEndpoints, path, requestBody, requestID, startTime, taggedRequest, "Phase 2", totalAttempted+1)
@@ -529,22 +530,21 @@ func (s *Server) fallbackToOtherEndpoints(c *gin.Context, path string, requestBo
 			}
 			totalAttempted += attemptedCount
 		}
-		
+
 		// 检查是否为 count_tokens 请求且所有失败都是因为 OpenAI 端点不支持
 		isCountTokensRequest := strings.Contains(path, "/count_tokens")
 		countTokensOpenAISkip, _ := c.Get("count_tokens_openai_skip")
-		
+
 		if isCountTokensRequest && countTokensOpenAISkip == true {
-			// 所有端点都因为不支持 count_tokens 而跳过，提供特殊错误消息
-			s.sendProxyError(c, http.StatusNotFound, "count_tokens_unsupported", 
-				fmt.Sprintf("request %s with tag (%s): count_tokens API is not supported by available endpoints. Please use Anthropic-type endpoints for token counting.", requestID, strings.Join(requestTags, ", ")), requestID)
+			// 所有端点都因为不支持 count_tokens 而跳过，提供估算结果
+			s.respondWithEstimatedTokens(c, requestBody, requestID, requestTags)
 			return
 		}
-		
+
 		// 所有endpoint都失败了，发送错误响应但不记录额外日志（每个endpoint的失败已经记录过了）
 		errorMsg := s.generateDetailedEndpointUnavailableMessage(requestID, requestTags)
 		s.sendProxyError(c, http.StatusBadGateway, "all_endpoints_failed", errorMsg, requestID)
-		
+
 	} else {
 		// 无标签请求：只尝试万用端点（格式兼容）
 		s.logger.Debug(fmt.Sprintf("Untagged request failed, trying universal endpoints only (format: %s)", requestFormat))
@@ -559,27 +559,54 @@ func (s *Server) fallbackToOtherEndpoints(c *gin.Context, path string, requestBo
 			s.sendProxyError(c, http.StatusBadGateway, "no_universal_endpoints", errorMsg, requestID)
 			return
 		}
-		
+
 		s.logger.Debug(fmt.Sprintf("Trying %d universal endpoints for untagged request", len(universalEndpoints)))
 		success, attemptedCount := s.tryEndpointList(c, universalEndpoints, path, requestBody, requestID, startTime, taggedRequest, "Universal", totalAttempted+1)
 		if success {
 			return
 		}
 		totalAttempted += attemptedCount
-		
+
 		// 检查是否为 count_tokens 请求且所有失败都是因为 OpenAI 端点不支持
 		isCountTokensRequest := strings.Contains(path, "/count_tokens")
 		countTokensOpenAISkip, _ := c.Get("count_tokens_openai_skip")
-		
+
 		if isCountTokensRequest && countTokensOpenAISkip == true {
-			// 所有端点都因为不支持 count_tokens 而跳过，提供特殊错误消息
-			s.sendProxyError(c, http.StatusNotFound, "count_tokens_unsupported", 
-				fmt.Sprintf("request %s: count_tokens API is not supported by available endpoints. Please use Anthropic-type endpoints for token counting.", requestID), requestID)
+			// 所有端点都因为不支持 count_tokens 而跳过，提供估算
+			s.respondWithEstimatedTokens(c, requestBody, requestID, nil)
 			return
 		}
-		
+
 		// 所有universal endpoint都失败了，发送错误响应但不记录额外日志（每个endpoint的失败已经记录过了）
 		errorMsg := s.generateDetailedEndpointUnavailableMessage(requestID, requestTags)
 		s.sendProxyError(c, http.StatusBadGateway, "all_universal_endpoints_failed", errorMsg, requestID)
 	}
+}
+
+func (s *Server) respondWithEstimatedTokens(c *gin.Context, requestBody []byte, requestID string, tags []string) {
+	estimate := utils.EstimateTokenCount(requestBody)
+	payload := map[string]interface{}{
+		"input_tokens":    estimate,
+		"proxy_estimated": true,
+		"detail":          "count_tokens handled locally because upstream endpoints do not support /count_tokens",
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		s.logger.Error("Failed to marshal fallback token count", err)
+		s.sendProxyError(c, http.StatusInternalServerError, "count_tokens_fallback_failed", "Failed to generate fallback token count", requestID)
+		return
+	}
+
+	s.logger.Info("Fallback count_tokens estimation", map[string]interface{}{
+		"request_id": requestID,
+		"estimate":   estimate,
+		"tags":       tags,
+	})
+
+	c.Data(http.StatusOK, "application/json", body)
+	c.Set("skip_health_record", true)
+	c.Set("skip_logging", true)
+	c.Set("last_error", nil)
+	c.Set("last_status_code", http.StatusOK)
 }

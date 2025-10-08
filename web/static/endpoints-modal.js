@@ -6,7 +6,7 @@ function showAddEndpointModal() {
     isAuthVisible = false;
 
     document.getElementById('endpointModalTitle').textContent = T('add_endpoint', '添加端点');
-    document.getElementById('endpointForm').reset();
+document.getElementById('endpointForm').reset();
     document.getElementById('endpoint-enabled').checked = true;
     document.getElementById('endpoint-tags').value = ''; // Clear tags field
 
@@ -47,6 +47,12 @@ function showAddEndpointModal() {
     
     // Clear max tokens field name configuration
     document.getElementById('max-tokens-field-name').value = '';
+    const nativeToolSelect = document.getElementById('native-tool-support');
+    if (nativeToolSelect) nativeToolSelect.value = '';
+    const toolEnhMode = document.getElementById('tool-enhancement-mode');
+    if (toolEnhMode) toolEnhMode.value = '';
+    const countTokensCheckbox = document.getElementById('count-tokens-enabled');
+    if (countTokensCheckbox) countTokensCheckbox.checked = true;
     
     // Clear enhanced protection configuration
     document.getElementById('enhanced-protection-enabled').checked = false;
@@ -128,6 +134,17 @@ function showEditEndpointModal(endpointName) {
     // Load max tokens field name configuration
     const maxTokensFieldName = endpoint.max_tokens_field_name || '';
     document.getElementById('max-tokens-field-name').value = maxTokensFieldName;
+    // Load tool settings
+	if (endpoint.native_tool_support !== undefined && endpoint.native_tool_support !== null) {
+		document.getElementById('native-tool-support').value = String(!!endpoint.native_tool_support);
+	} else {
+		document.getElementById('native-tool-support').value = '';
+	}
+	document.getElementById('tool-enhancement-mode').value = endpoint.tool_enhancement_mode || '';
+	const countTokensCheckbox = document.getElementById('count-tokens-enabled');
+	if (countTokensCheckbox) {
+		countTokensCheckbox.checked = endpoint.count_tokens_enabled !== false;
+	}
     
     // Load enhanced protection configuration
     const enhancedProtection = endpoint.enhanced_protection || false;
@@ -223,22 +240,23 @@ function saveEndpoint() {
     const tagsInput = document.getElementById('endpoint-tags').value.trim();
     const tags = tagsInput ? tagsInput.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
 
-    const data = {
-        name: document.getElementById('endpoint-name').value,
-        url_anthropic: urlAnthropic || undefined, // Anthropic URL
-        url_openai: urlOpenAI || undefined,       // OpenAI URL
-        // endpoint_type 和 path_prefix 自动推断，不再需要提交
-        auth_type: authType,
-        auth_value: authValue,
-        enabled: document.getElementById('endpoint-enabled').checked,
-        tags: tags,
-        // 移除 supported_clients - 现在自动检测
-        max_tokens_field_name: document.getElementById('max-tokens-field-name').value || '', // New: max tokens field name
-        proxy: collectProxyData(), // New: collect proxy configuration
-        header_overrides: collectHeaderOverrideData(), // New: collect header override configuration
-        parameter_overrides: collectParameterOverrideData(), // New: collect parameter override configuration
-        enhanced_protection: document.getElementById('enhanced-protection-enabled').checked // New: enhanced protection for official accounts
-    };
+	const data = {
+		name: document.getElementById('endpoint-name').value,
+		url_anthropic: urlAnthropic || undefined, // Anthropic URL
+		url_openai: urlOpenAI || undefined,       // OpenAI URL
+		// endpoint_type 和 path_prefix 自动推断，不再需要提交
+		auth_type: authType,
+		auth_value: authValue,
+		enabled: document.getElementById('endpoint-enabled').checked,
+		tags: tags,
+		// 移除 supported_clients - 现在自动检测
+		max_tokens_field_name: document.getElementById('max-tokens-field-name').value || '', // New: max tokens field name
+		proxy: collectProxyData(), // New: collect proxy configuration
+		header_overrides: collectHeaderOverrideData(), // New: collect header override configuration
+		parameter_overrides: collectParameterOverrideData(), // New: collect parameter override configuration
+		enhanced_protection: document.getElementById('enhanced-protection-enabled').checked, // New: enhanced protection for official accounts
+		count_tokens_enabled: document.getElementById('count-tokens-enabled').checked
+	};
     
     // Add OAuth config if present
     if (oauthConfig) {
@@ -336,41 +354,50 @@ function copyEndpoint(endpointName) {
     });
 }
 
-function toggleEndpointEnabled(endpointName, currentEnabled) {
+const togglePending = new Set();
+
+async function toggleEndpointEnabled(endpointName, currentEnabled) {
+    if (togglePending.has(endpointName)) {
+        return;
+    }
+
     const newEnabled = !currentEnabled;
     const actionText = newEnabled ? '启用' : '禁用';
-    
-    // 获取当前端点的状态信息
+
     const currentEndpoint = currentEndpoints.find(ep => ep.name === endpointName);
     const currentStatus = currentEndpoint ? currentEndpoint.status : 'unknown';
-    
-    apiRequest(`/admin/api/endpoints/${encodeURIComponent(endpointName)}/toggle`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            enabled: newEnabled
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            showAlert(data.error, 'danger');
-        } else {
-            showAlert(T('endpoint_action_success', '端点 "{0}" 已{1}').replace('{0}', endpointName).replace('{1}', actionText), 'success');
-            // 更新按钮状态而不重新加载整个表格
-            updateEndpointToggleButton(endpointName, newEnabled);
-            // 更新启用状态显示
-            updateEndpointEnabledBadge(endpointName, newEnabled);
-            // 更新状态badge显示
-            updateEndpointStatusBadge(endpointName, newEnabled, currentStatus);
+
+    try {
+        togglePending.add(endpointName);
+        const response = await apiRequest(`/admin/api/endpoints/${encodeURIComponent(endpointName)}/toggle`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ enabled: newEnabled })
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || data.error) {
+            const msg = data.error || `HTTP ${response.status}`;
+            throw new Error(msg);
         }
-    })
-    .catch(error => {
-        console.error('Failed to toggle endpoint:', error);
-        showAlert(T('endpoint_action_failed', '{0}端点失败').replace('{0}', actionText), 'danger');
-    });
+
+        showAlert(T('endpoint_action_success', '端点 "{0}" 已{1}').replace('{0}', endpointName).replace('{1}', actionText), 'success');
+        updateEndpointToggleButton(endpointName, newEnabled);
+        updateEndpointStatusBadge(endpointName, newEnabled, currentStatus);
+        if (currentEndpoint) {
+            currentEndpoint.enabled = newEnabled;
+        }
+    } catch (error) {
+        console.warn('Failed to toggle endpoint:', error);
+        const msg = error && error.message ? error.message : error;
+        showAlert(T('endpoint_action_failed', '{0}端点失败').replace('{0}', actionText) + `: ${msg}`, 'danger');
+    }
+    finally {
+        togglePending.delete(endpointName);
+    }
 }
 
 function resetEndpointStatus(endpointName) {
@@ -504,3 +531,9 @@ document.addEventListener('DOMContentLoaded', function() {
         urlInput.addEventListener('blur', checkEnhancedProtectionAvailability);
     }
 });
+    // Append tool settings if provided
+    const nativeToolVal = document.getElementById('native-tool-support').value;
+    if (nativeToolVal === 'true') data.native_tool_support = true;
+    else if (nativeToolVal === 'false') data.native_tool_support = false;
+    const enhModeVal = document.getElementById('tool-enhancement-mode').value;
+    if (enhModeVal) data.tool_enhancement_mode = enhModeVal;

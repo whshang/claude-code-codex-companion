@@ -120,6 +120,10 @@ async function apiRequest(url, options = {}) {
         ...options,
         headers
     };
+
+    if (!requestOptions.credentials) {
+        requestOptions.credentials = 'same-origin';
+    }
     
     try {
         const response = await fetch(url, requestOptions);

@@ -50,7 +50,7 @@ function displayLogDetails(log) {
                     <tr><th>${T('request_body_size', '请求体大小')}:</th><td>${log.request_body_size} ${T('bytes', '字节')}</td></tr>
                     <tr><th>${T('response_body_size', '响应体大小')}:</th><td>${log.response_body_size} ${T('bytes', '字节')}</td></tr>
                     <tr><th>${T('streaming_response', '流式响应')}:</th><td>${log.is_streaming ? `${T('yes_sse', '是 (SSE)')}` : `${T('no', '否')}`}</td></tr>
-                    <tr><th>${T('tags', '标签')}:</th><td>${log.tags && log.tags.length > 0 ? log.tags.map(tag => `<span class="badge bg-primary me-1">${escapeHtml(tag)}</span>`).join('') : `<small class="text-muted">${T('none', '无')}</small>`}</td></tr>
+                    <tr><th>${T('tags', '标签')}:</th><td>${log.tags && log.tags.length > 0 ? log.tags.map(tag => `<span class="badge bg-primary">${escapeHtml(tag)}</span>`).join('') : `<small class="text-muted">${T('none', '无')}</small>`}</td></tr>
                     <tr><th>${T('content_type_override', 'Content-Type覆盖')}:</th><td>${log.content_type_override ? `<span class="badge bg-warning text-dark">${escapeHtml(log.content_type_override)}</span>` : `<small class="text-muted">${T('none', '无')}</small>`}</td></tr>
                     ${log.error ? `<tr><th>${T('error', '错误')}:</th><td class="text-danger">${escapeHtml(log.error)}</td></tr>` : ''}
                 </table>

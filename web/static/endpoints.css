@@ -84,3 +84,26 @@
 .response-cell {
     min-width: 120px;
 }
+
+/* Actions grid: 2 rows x 3 columns to reduce width */
+.action-buttons .actions-grid {
+    display: grid;
+    grid-template-columns: repeat(3, auto);
+    gap: 4px 6px;
+    align-items: center;
+}
+.action-buttons .btn {
+    padding: 2px 6px;
+}
+
+/* URL cell: smaller font & wrap to reduce horizontal scroll */
+.url-cell code {
+    font-size: 12px;
+    word-break: break-all;
+    white-space: normal;
+}
+
+/* 工具提示优化 */
+[data-bs-toggle="tooltip"] {
+    cursor: help;
+}

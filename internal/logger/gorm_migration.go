@@ -2,8 +2,8 @@ package logger
 
 import (
 	"fmt"
-	"strings"
 	"gorm.io/gorm"
+	"strings"
 )
 
 // createOptimizedIndexes 创建基于现有查询模式的优化索引
@@ -41,7 +41,7 @@ func createOptimizedIndexes(db *gorm.DB) error {
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_client_time ON request_logs(client_type, timestamp DESC)",
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_format_time ON request_logs(request_format, format_converted, timestamp DESC)",
 	}
-	
+
 	for _, sql := range indexes {
 		if err := db.Exec(sql).Error; err != nil {
 			// 忽略已存在的索引错误，但记录其他错误
@@ -59,7 +59,7 @@ func validateTableCompatibility(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&GormRequestLog{}) {
 		return fmt.Errorf("request_logs table does not exist")
 	}
-	
+
 	// 检查关键字段是否存在
 	requiredColumns := []string{
 		"timestamp", "request_id", "endpoint", "method", "path",
@@ -68,27 +68,32 @@ func validateTableCompatibility(db *gorm.DB) error {
 		"original_model", "rewritten_model", "model_rewrite_applied",
 		"attempt_number", "thinking_budget_tokens",
 	}
-	
+
 	for _, column := range requiredColumns {
 		if !db.Migrator().HasColumn(&GormRequestLog{}, column) {
 			return fmt.Errorf("required column %s does not exist", column)
 		}
 	}
-	
+
 	// 检查并添加新增的可选列
 	optionalColumns := map[string]string{
-		"session_id": "session_id VARCHAR(100) DEFAULT ''",
+		"session_id":                    "session_id VARCHAR(100) DEFAULT ''",
 		"blacklist_causing_request_ids": "blacklist_causing_request_ids TEXT DEFAULT '[]'",
-		"endpoint_blacklisted_at": "endpoint_blacklisted_at DATETIME",
-		"endpoint_blacklist_reason": "endpoint_blacklist_reason TEXT DEFAULT ''",
-		"client_type": "client_type VARCHAR(50) DEFAULT ''",
-		"request_format": "request_format VARCHAR(50) DEFAULT ''",
-		"target_format": "target_format VARCHAR(50) DEFAULT ''",
-		"format_converted": "format_converted BOOLEAN DEFAULT 0",
-		"detection_confidence": "detection_confidence REAL DEFAULT 0",
-		"detected_by": "detected_by VARCHAR(50) DEFAULT ''",
+		"endpoint_blacklisted_at":       "endpoint_blacklisted_at DATETIME",
+		"endpoint_blacklist_reason":     "endpoint_blacklist_reason TEXT DEFAULT ''",
+		"client_type":                   "client_type VARCHAR(50) DEFAULT ''",
+		"request_format":                "request_format VARCHAR(50) DEFAULT ''",
+		"target_format":                 "target_format VARCHAR(50) DEFAULT ''",
+		"format_converted":              "format_converted BOOLEAN DEFAULT 0",
+		"detection_confidence":          "detection_confidence REAL DEFAULT 0",
+		"detected_by":                   "detected_by VARCHAR(50) DEFAULT ''",
+		"tool_enhancement_applied":      "tool_enhancement_applied BOOLEAN DEFAULT 0",
+		"tool_enhancement_mode":         "tool_enhancement_mode VARCHAR(20) DEFAULT ''",
+		"tool_calls_detected":           "tool_calls_detected BOOLEAN DEFAULT 0",
+		"tool_call_count":               "tool_call_count INTEGER DEFAULT 0",
+		"tool_native_support":           "tool_native_support BOOLEAN",
 	}
-	
+
 	for column, definition := range optionalColumns {
 		if !db.Migrator().HasColumn(&GormRequestLog{}, column) {
 			// 添加缺失的列
@@ -99,6 +104,6 @@ func validateTableCompatibility(db *gorm.DB) error {
 			fmt.Printf("Added column %s to request_logs table\n", column)
 		}
 	}
-	
+
 	return nil
 }

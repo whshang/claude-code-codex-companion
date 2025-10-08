@@ -20,24 +20,24 @@ func (s *Server) sendFailureResponse(c *gin.Context, requestID string, startTime
 	requestLog := s.logger.CreateRequestLog(requestID, "failed", c.Request.Method, c.Param("path"))
 	requestLog.DurationMs = duration.Nanoseconds() / 1000000
 	requestLog.StatusCode = http.StatusBadGateway
-	
+
 	// 记录请求头信息
 	if c.Request != nil {
 		requestLog.OriginalRequestHeaders = utils.HeadersToMap(c.Request.Header)
 		requestLog.RequestHeaders = requestLog.OriginalRequestHeaders
-		
+
 		// 记录请求URL
 		requestLog.OriginalRequestURL = c.Request.URL.String()
 	}
-	
+
 	// 记录请求体信息
 	if len(requestBody) > 0 {
 		requestLog.Model = utils.ExtractModelFromRequestBody(string(requestBody))
 		requestLog.RequestBodySize = len(requestBody)
-		
+
 		// 提取 Session ID
 		requestLog.SessionID = utils.ExtractSessionIDFromRequestBody(string(requestBody))
-		
+
 		// 根据配置记录请求体内容
 		if s.config.Logging.LogRequestBody != "none" {
 			if s.config.Logging.LogRequestBody == "truncated" {
@@ -49,30 +49,30 @@ func (s *Server) sendFailureResponse(c *gin.Context, requestID string, startTime
 			requestLog.RequestBody = requestLog.OriginalRequestBody
 		}
 	}
-	
+
 	// 添加被拉黑端点的详细信息
 	allEndpoints := s.endpointManager.GetAllEndpoints()
 	var blacklistedEndpoints []string
 	var blacklistReasons []string
-	
+
 	for _, ep := range allEndpoints {
 		if !ep.IsAvailable() {
 			blacklistReason := ep.GetBlacklistReason()
-			
+
 			if blacklistReason != nil {
 				blacklistedEndpoints = append(blacklistedEndpoints, ep.Name)
-				blacklistReasons = append(blacklistReasons, 
-					fmt.Sprintf("caused by requests: %v", 
+				blacklistReasons = append(blacklistReasons,
+					fmt.Sprintf("caused by requests: %v",
 						blacklistReason.CausingRequestIDs))
 			}
 		}
 	}
-	
+
 	if len(blacklistedEndpoints) > 0 {
-		errorMsg += fmt.Sprintf(". Blacklisted endpoints: %v. Reasons: %v", 
+		errorMsg += fmt.Sprintf(". Blacklisted endpoints: %v. Reasons: %v",
 			blacklistedEndpoints, blacklistReasons)
 	}
-	
+
 	requestLog.Tags = requestTags
 	requestLog.Error = errorMsg
 
@@ -86,6 +86,43 @@ func (s *Server) sendFailureResponse(c *gin.Context, requestID string, startTime
 		}
 	}
 
+	// 工具调用增强信息
+	if val, exists := c.Get("tool_enhanced"); exists {
+		if applied, ok := val.(bool); ok {
+			requestLog.ToolEnhancementApplied = applied
+		}
+	}
+	if val, exists := c.Get("tool_enhancement_mode_effective"); exists {
+		if mode, ok := val.(string); ok {
+			requestLog.ToolEnhancementMode = mode
+		}
+	}
+	if val, exists := c.Get("tool_call_count"); exists {
+		if count, ok := val.(int); ok {
+			requestLog.ToolCallCount = count
+			if count > 0 {
+				requestLog.ToolCallsDetected = true
+			}
+		}
+	}
+	if val, exists := c.Get("tool_call_detected"); exists {
+		if detected, ok := val.(bool); ok {
+			requestLog.ToolCallsDetected = detected || requestLog.ToolCallsDetected
+		}
+	}
+	if val, exists := c.Get("tool_native_support_value"); exists {
+		switch v := val.(type) {
+		case bool:
+			b := v
+			requestLog.ToolNativeSupport = &b
+		case *bool:
+			requestLog.ToolNativeSupport = v
+		}
+	}
+	if requestLog.ToolEnhancementMode == "" {
+		requestLog.ToolEnhancementMode = "auto"
+	}
+
 	s.logger.LogRequest(requestLog)
 	s.sendProxyError(c, http.StatusBadGateway, errorType, requestLog.Error, requestID)
 }
@@ -97,7 +134,7 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 	requestLog.Tags = tags
 	requestLog.ContentTypeOverride = contentTypeOverride
 	requestLog.AttemptNumber = attemptNumber
-	
+
 	// 设置 thinking 信息
 	if c != nil {
 		if thinkingInfo, exists := c.Get("thinking_info"); exists {
@@ -117,13 +154,47 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 			}
 		}
 	}
-	
+
 	// 记录原始客户端请求数据
 	if c != nil {
 		requestLog.OriginalRequestURL = c.Request.URL.String()
 		requestLog.OriginalRequestHeaders = utils.HeadersToMap(c.Request.Header)
+
+		// 工具调用增强上下文
+		if val, exists := c.Get("tool_enhanced"); exists {
+			if applied, ok := val.(bool); ok {
+				requestLog.ToolEnhancementApplied = applied
+			}
+		}
+		if val, exists := c.Get("tool_enhancement_mode_effective"); exists {
+			if mode, ok := val.(string); ok {
+				requestLog.ToolEnhancementMode = mode
+			}
+		}
+		if val, exists := c.Get("tool_call_count"); exists {
+			if count, ok := val.(int); ok {
+				requestLog.ToolCallCount = count
+				if count > 0 {
+					requestLog.ToolCallsDetected = true
+				}
+			}
+		}
+		if val, exists := c.Get("tool_call_detected"); exists {
+			if detected, ok := val.(bool); ok {
+				requestLog.ToolCallsDetected = detected || requestLog.ToolCallsDetected
+			}
+		}
+		if val, exists := c.Get("tool_native_support_value"); exists {
+			switch v := val.(type) {
+			case bool:
+				b := v
+				requestLog.ToolNativeSupport = &b
+			case *bool:
+				requestLog.ToolNativeSupport = v
+			}
+		}
 	}
-	
+
 	if len(originalRequestBody) > 0 {
 		if s.config.Logging.LogRequestBody != "none" {
 			if s.config.Logging.LogRequestBody == "truncated" {
@@ -135,7 +206,7 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 			}
 		}
 	}
-	
+
 	// 记录最终请求体（如果不同于原始请求体）
 	if len(finalRequestBody) > 0 && !bytes.Equal(originalRequestBody, finalRequestBody) {
 		if s.config.Logging.LogRequestBody != "none" {
@@ -146,19 +217,19 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 			}
 		}
 	}
-	
+
 	// 设置最终请求数据（发送给上游的数据）
 	if req != nil {
 		requestLog.FinalRequestURL = req.URL.String()
 		requestLog.FinalRequestHeaders = utils.HeadersToMap(req.Header)
 		requestLog.RequestHeaders = requestLog.FinalRequestHeaders
-		
+
 		// 尝试读取最终请求体（如果有的话）
 		if req.Body != nil {
 			if finalBody, err := io.ReadAll(req.Body); err == nil && len(finalBody) > 0 {
 				// 重新设置请求体供后续使用
 				req.Body = io.NopCloser(bytes.NewReader(finalBody))
-				
+
 				if s.config.Logging.LogRequestBody != "none" {
 					if s.config.Logging.LogRequestBody == "truncated" {
 						requestLog.FinalRequestBody = utils.TruncateBody(string(finalBody), 1024)
@@ -172,7 +243,7 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 		// 如果没有最终请求，使用原始请求数据作为兼容
 		requestLog.RequestHeaders = requestLog.OriginalRequestHeaders
 	}
-	
+
 	// 设置响应数据
 	if resp != nil {
 		requestLog.OriginalResponseHeaders = utils.HeadersToMap(resp.Header)
@@ -189,7 +260,7 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 			}
 		}
 	}
-	
+
 	// 设置模型信息和 Session ID
 	if len(originalRequestBody) > 0 {
 		extractedModel := utils.ExtractModelFromRequestBody(string(originalRequestBody))
@@ -200,16 +271,16 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 			requestLog.Model = extractedModel
 			requestLog.OriginalModel = extractedModel
 		}
-		
+
 		if rewrittenModel != "" {
 			requestLog.RewrittenModel = rewrittenModel
 			requestLog.ModelRewriteApplied = rewrittenModel != requestLog.OriginalModel
 		}
-		
+
 		// 提取 Session ID
 		requestLog.SessionID = utils.ExtractSessionIDFromRequestBody(string(originalRequestBody))
 	}
-	
+
 	// 更新并记录日志
 	s.logger.UpdateRequestLog(requestLog, req, resp, responseBody, duration, err)
 	requestLog.IsStreaming = isStreaming
@@ -224,34 +295,34 @@ func (s *Server) logBlacklistedEndpointRequest(requestID string, ep *endpoint.En
 	requestLog.DurationMs = duration.Nanoseconds() / 1000000
 	requestLog.StatusCode = http.StatusServiceUnavailable
 	requestLog.Error = errorMsg
-	
+
 	// 设置被拉黑端点相关信息
 	requestLog.BlacklistCausingRequestIDs = causingRequestIDs
-	
+
 	// 获取失效原因信息（使用安全的访问器方法）
 	blacklistReason := ep.GetBlacklistReason()
 	if blacklistReason != nil {
 		requestLog.EndpointBlacklistedAt = &blacklistReason.BlacklistedAt
 		requestLog.EndpointBlacklistReason = blacklistReason.ErrorSummary
 	}
-	
+
 	// 设置请求标签
 	if taggedRequest != nil {
 		requestLog.Tags = taggedRequest.Tags
 	}
-	
+
 	// 记录原始请求数据
 	if c.Request != nil {
 		requestLog.OriginalRequestHeaders = utils.HeadersToMap(c.Request.Header)
 		requestLog.OriginalRequestURL = c.Request.URL.String()
 		requestLog.RequestHeaders = requestLog.OriginalRequestHeaders
 	}
-	
+
 	// 记录请求体
 	if len(requestBody) > 0 {
 		requestLog.Model = utils.ExtractModelFromRequestBody(string(requestBody))
 		requestLog.SessionID = utils.ExtractSessionIDFromRequestBody(string(requestBody))
-		
+
 		if s.config.Logging.LogRequestBody != "none" {
 			if s.config.Logging.LogRequestBody == "truncated" {
 				requestLog.OriginalRequestBody = utils.TruncateBody(string(requestBody), 1024)
@@ -261,6 +332,6 @@ func (s *Server) logBlacklistedEndpointRequest(requestID string, ep *endpoint.En
 			requestLog.RequestBody = requestLog.OriginalRequestBody
 		}
 	}
-	
+
 	s.logger.LogRequest(requestLog)
 }

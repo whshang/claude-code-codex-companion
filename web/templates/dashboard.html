@@ -16,33 +16,45 @@
         <div class="row">
             <div class="col-md-3 col-sm-6 mb-3">
                 <div class="card bg-primary text-white">
-                    <div class="card-body">
-                        <h5 class="card-title" data-t="total_endpoints">端点总数</h5>
-                        <h2>{{.TotalEndpoints}}</h2>
+                    <div class="card-body d-flex align-items-center">
+                        <div class="me-3"><i class="fas fa-server fa-2x"></i></div>
+                        <div>
+                            <h6 class="card-title mb-1" data-t="total_endpoints">端点总数</h6>
+                            <h2 class="mb-0">{{.TotalEndpoints}}</h2>
+                        </div>
                     </div>
                 </div>
             </div>
             <div class="col-md-3 col-sm-6 mb-3">
                 <div class="card bg-success text-white">
-                    <div class="card-body">
-                        <h5 class="card-title" data-t="active_endpoints">活跃端点</h5>
-                        <h2>{{.ActiveEndpoints}}</h2>
+                    <div class="card-body d-flex align-items-center">
+                        <div class="me-3"><i class="fas fa-check-circle fa-2x"></i></div>
+                        <div>
+                            <h6 class="card-title mb-1" data-t="active_endpoints">活跃端点</h6>
+                            <h2 class="mb-0">{{.ActiveEndpoints}}</h2>
+                        </div>
                     </div>
                 </div>
             </div>
             <div class="col-md-3 col-sm-6 mb-3">
                 <div class="card bg-info text-white">
-                    <div class="card-body">
-                        <h5 class="card-title" data-t="total_requests">请求总数</h5>
-                        <h2>{{.TotalRequests}}</h2>
+                    <div class="card-body d-flex align-items-center">
+                        <div class="me-3"><i class="fas fa-exchange-alt fa-2x"></i></div>
+                        <div>
+                            <h6 class="card-title mb-1" data-t="total_requests">请求总数</h6>
+                            <h2 class="mb-0">{{.TotalRequests}}</h2>
+                        </div>
                     </div>
                 </div>
             </div>
             <div class="col-md-3 col-sm-6 mb-3">
                 <div class="card bg-warning text-white">
-                    <div class="card-body">
-                        <h5 class="card-title" data-t="success_rate">成功率</h5>
-                        <h2>{{.OverallSuccessRate}}</h2>
+                    <div class="card-body d-flex align-items-center">
+                        <div class="me-3"><i class="fas fa-percentage fa-2x"></i></div>
+                        <div>
+                            <h6 class="card-title mb-1" data-t="success_rate">成功率</h6>
+                            <h2 class="mb-0">{{.OverallSuccessRate}}</h2>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -75,13 +87,13 @@
                                         <td class="url-cell">
                                             {{if .URLAnthropic}}
                                                 {{if .URLOpenAI}}
-                                                    <div class="small"><span class="badge bg-primary me-1">Claude</span><code>{{.URLAnthropic}}</code></div>
-                                                    <div class="small mt-1"><span class="badge bg-warning me-1">Codex</span><code>{{.URLOpenAI}}</code></div>
+                                                    <div class="small"><span class="badge bg-warning">Claude</span>{{.URLAnthropic}}</div>
+                                                    <div class="small mt-1"><span class="badge bg-primary">Codex</span>{{.URLOpenAI}}</div>
                                                 {{else}}
-                                                    <span class="badge bg-primary me-1">Claude</span><code>{{.URLAnthropic}}</code>
+                                                    <span class="badge bg-warning">Claude</span>{{.URLAnthropic}}
                                                 {{end}}
                                             {{else if .URLOpenAI}}
-                                                <span class="badge bg-warning me-1">Codex</span><code>{{.URLOpenAI}}</code>
+                                                <span class="badge bg-primary">Codex</span>{{.URLOpenAI}}
                                             {{else}}
                                                 <span class="text-muted">-</span>
                                             {{end}}

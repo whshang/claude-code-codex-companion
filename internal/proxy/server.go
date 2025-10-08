@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"claude-code-codex-companion/internal/config"
 	"claude-code-codex-companion/internal/endpoint"
@@ -12,6 +13,7 @@ import (
 	"claude-code-codex-companion/internal/modelrewrite"
 	"claude-code-codex-companion/internal/statistics"
 	"claude-code-codex-companion/internal/tagging"
+	"claude-code-codex-companion/internal/toolcall"
 	"claude-code-codex-companion/internal/validator"
 	"claude-code-codex-companion/internal/web"
 
@@ -30,7 +32,10 @@ type Server struct {
 	i18nManager     *i18n.Manager          // 新增：国际化管理器
 	router          *gin.Engine
 	configFilePath  string
-	configMutex     sync.Mutex             // 新增：保护配置文件操作的互斥锁
+	configMutex     sync.Mutex // 新增：保护配置文件操作的互斥锁
+
+	// Tool Calling enhancer (auto-enabled when tools provided by client)
+	toolEnhancer *toolcall.Enhancer
 }
 
 func NewServer(cfg *config.Config, configFilePath string, version string) (*Server, error) {
@@ -75,7 +80,7 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 	if cfg.I18n.DefaultLanguage == "" {
 		i18nConfig = i18n.DefaultConfig()
 	}
-	
+
 	i18nManager, err := i18n.NewManager(i18nConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize i18n manager: %v", err)
@@ -96,7 +101,16 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 		i18nManager:     i18nManager,    // 新增：设置国际化管理器
 		configFilePath:  configFilePath,
 	}
-	
+
+	// Initialize tool enhancer with sensible defaults (zero-config enable when tools present)
+	// Use defaults from config.Default, with fallbacks
+	// Zero-config defaults for tool calling enhancer
+	ttl := 30 * time.Minute
+	server.toolEnhancer = toolcall.NewEnhancer(toolcall.CacheConfig{
+		MaxSize: 100,
+		TTL:     ttl,
+	})
+
 	// 设置持久化回调，让AdminServer可以被Server调用
 	adminServer.SetPersistenceCallbacks(server)
 
@@ -242,7 +256,7 @@ func (s *Server) saveConfigToFile() error {
 func (s *Server) updateEndpointConfig(endpointName string, updateFunc func(*config.EndpointConfig) error) error {
 	s.configMutex.Lock()
 	defer s.configMutex.Unlock()
-	
+
 	// 查找对应的端点配置
 	for i, cfgEndpoint := range s.config.Endpoints {
 		if cfgEndpoint.Name == endpointName {
@@ -250,12 +264,12 @@ func (s *Server) updateEndpointConfig(endpointName string, updateFunc func(*conf
 			if err := updateFunc(&s.config.Endpoints[i]); err != nil {
 				return err
 			}
-			
+
 			// 保存到配置文件
 			return s.saveConfigToFile()
 		}
 	}
-	
+
 	return fmt.Errorf("endpoint not found: %s", endpointName)
 }
 
@@ -282,11 +296,11 @@ func (s *Server) persistRateLimitState(endpointID string, reset *int64, status *
 		}
 	}
 	s.configMutex.Unlock()
-	
+
 	if endpointName == "" {
 		return fmt.Errorf("endpoint with ID %s not found", endpointID)
 	}
-	
+
 	// 使用统一的配置更新机制
 	return s.updateEndpointConfig(endpointName, func(cfg *config.EndpointConfig) error {
 		cfg.RateLimitReset = reset
@@ -301,18 +315,21 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 	if ep == nil {
 		return
 	}
-	
+
 	// 线程安全：获取端点当前的学习状态
 	ep.AuthHeaderMutex.RLock()
 	detectedAuthHeader := ep.DetectedAuthHeader
 	ep.AuthHeaderMutex.RUnlock()
-	
+
 	openAIPreference := ep.OpenAIPreference
-	
+	nativeToolSupport := ep.NativeToolSupport
+	toolEnhMode := ep.ToolEnhancementMode
+	countTokensEnabled := ep.CountTokensEnabled
+
 	// 调用 AdminServer 的持久化方法
 	// 只有在学习到新信息时才持久化
 	needsPersist := false
-	
+
 	// 1. 检查认证方式是否需要持久化
 	if detectedAuthHeader != "" && (ep.AuthType == "" || ep.AuthType == "auto") {
 		// 从检测到的头部类型推断认证类型
@@ -322,11 +339,11 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 		} else {
 			authType = "auth_token"
 		}
-		
+
 		// 只有当配置中的认证类型与检测到的不同时才更新
 		if ep.AuthType != authType {
 			s.logger.Info(fmt.Sprintf("🔐 Learning: Detected auth type '%s' for endpoint '%s'", authType, ep.Name), nil)
-			
+
 			// 使用统一的配置更新机制持久化认证类型
 			if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
 				cfg.AuthType = authType
@@ -339,7 +356,7 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 			}
 		}
 	}
-	
+
 	// 2. 检查 OpenAI 格式偏好是否需要持久化
 	if openAIPreference != "" && openAIPreference != "auto" {
 		// 检查配置中是否已经有这个偏好设置
@@ -350,13 +367,26 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 				configPreference = s.config.Endpoints[i].OpenAIPreference
 				break
 			}
+
+			// 3. 持久化原生工具调用支持（当有学习结果或明确设置时）
+			if nativeToolSupport != nil {
+				s.logger.Info(fmt.Sprintf("🧩 Learning: Detected native tool support=%v for endpoint '%s'", *nativeToolSupport, ep.Name), nil)
+				if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
+					cfg.NativeToolSupport = nativeToolSupport
+					return nil
+				}); err != nil {
+					s.logger.Error(fmt.Sprintf("Failed to persist native tool support for endpoint '%s'", ep.Name), err)
+				} else {
+					needsPersist = true
+				}
+			}
 		}
 		s.configMutex.Unlock()
-		
+
 		// 只有当配置中的偏好与当前学习到的不同时才更新
 		if configPreference == "" || configPreference == "auto" || configPreference != openAIPreference {
 			s.logger.Info(fmt.Sprintf("🔍 Learning: Detected OpenAI format preference '%s' for endpoint '%s'", openAIPreference, ep.Name), nil)
-			
+
 			// 使用统一的配置更新机制持久化 OpenAI 格式偏好
 			if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
 				cfg.OpenAIPreference = openAIPreference
@@ -369,9 +399,38 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 			}
 		}
 	}
-	
+
+	// 4. count_tokens 可用性（仅在需要时持久化）
+	if !countTokensEnabled {
+		if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
+			if cfg.CountTokensEnabled != nil && *cfg.CountTokensEnabled == countTokensEnabled {
+				return nil
+			}
+			ptr := new(bool)
+			*ptr = countTokensEnabled
+			cfg.CountTokensEnabled = ptr
+			return nil
+		}); err != nil {
+			s.logger.Error(fmt.Sprintf("Failed to persist count_tokens flag for endpoint '%s'", ep.Name), err)
+		} else {
+			s.logger.Info(fmt.Sprintf("✓ Persisted count_tokens_enabled=%v for endpoint '%s'", countTokensEnabled, ep.Name), nil)
+			needsPersist = true
+		}
+	}
+
 	if needsPersist {
 		s.logger.Info(fmt.Sprintf("🎓 Successfully persisted learned configuration for endpoint '%s'", ep.Name), nil)
 	}
-}
 
+	// 5. 工具增强模式（如果被设置，持久化）
+	if toolEnhMode != "" {
+		if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
+			cfg.ToolEnhancementMode = toolEnhMode
+			return nil
+		}); err != nil {
+			s.logger.Error(fmt.Sprintf("Failed to persist tool enhancement mode for endpoint '%s'", ep.Name), err)
+		} else {
+			s.logger.Info(fmt.Sprintf("✓ Persisted tool enhancement mode '%s' for endpoint '%s'", toolEnhMode, ep.Name), nil)
+		}
+	}
+}

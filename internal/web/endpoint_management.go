@@ -53,8 +53,8 @@ func (s *AdminServer) handleToggleEndpoint(c *gin.Context) {
 		// 提供更详细的错误信息
 		errorMsg := fmt.Sprintf("Failed to toggle endpoint '%s': %v", endpointName, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": errorMsg,
-			"endpoint": endpointName,
+			"error":           errorMsg,
+			"endpoint":        endpointName,
 			"requested_state": request.Enabled,
 		})
 		return
@@ -66,9 +66,9 @@ func (s *AdminServer) handleToggleEndpoint(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Endpoint '%s' has been %s successfully", endpointName, actionText),
+		"message":  fmt.Sprintf("Endpoint '%s' has been %s successfully", endpointName, actionText),
 		"endpoint": endpointName,
-		"enabled": request.Enabled,
+		"enabled":  request.Enabled,
 	})
 }
 
@@ -111,14 +111,15 @@ func (s *AdminServer) handleCopyEndpoint(c *gin.Context) {
 
 	// 创建新端点（复制所有属性，除了名称和优先级）
 	newEndpoint := config.EndpointConfig{
-		Name:              newName,
-		URLAnthropic:      sourceEndpoint.URLAnthropic,
-		URLOpenAI:         sourceEndpoint.URLOpenAI,
-		AuthType:          sourceEndpoint.AuthType,
-		AuthValue:         sourceEndpoint.AuthValue,
-		Enabled:           sourceEndpoint.Enabled,
-		Priority:          maxPriority + 1,
-		Tags:              make([]string, len(sourceEndpoint.Tags)), // 复制tags
+		Name:               newName,
+		URLAnthropic:       sourceEndpoint.URLAnthropic,
+		URLOpenAI:          sourceEndpoint.URLOpenAI,
+		AuthType:           sourceEndpoint.AuthType,
+		AuthValue:          sourceEndpoint.AuthValue,
+		Enabled:            sourceEndpoint.Enabled,
+		Priority:           maxPriority + 1,
+		Tags:               make([]string, len(sourceEndpoint.Tags)), // 复制tags
+		CountTokensEnabled: sourceEndpoint.CountTokensEnabled,
 	}
 
 	// 深度复制Tags切片
@@ -192,7 +193,7 @@ func (s *AdminServer) handleResetEndpointStatus(c *gin.Context) {
 	// 重置端点状态，增加重试机制
 	maxRetries := 3
 	var lastErr error
-	
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if err := s.endpointManager.ResetEndpointStatus(endpointName); err != nil {
 			lastErr = err
@@ -203,8 +204,8 @@ func (s *AdminServer) handleResetEndpointStatus(c *gin.Context) {
 		} else {
 			// 成功重置
 			c.JSON(http.StatusOK, gin.H{
-				"message": fmt.Sprintf("Endpoint '%s' status has been reset to normal", endpointName),
-				"endpoint": endpointName,
+				"message":   fmt.Sprintf("Endpoint '%s' status has been reset to normal", endpointName),
+				"endpoint":  endpointName,
 				"timestamp": time.Now().Unix(),
 			})
 			return
@@ -212,11 +213,11 @@ func (s *AdminServer) handleResetEndpointStatus(c *gin.Context) {
 	}
 
 	// 所有重试都失败了
-	fmt.Printf("Failed to reset endpoint '%s' after %d attempts: %v\n", 
+	fmt.Printf("Failed to reset endpoint '%s' after %d attempts: %v\n",
 		endpointName, maxRetries, lastErr)
-	
+
 	c.JSON(http.StatusInternalServerError, gin.H{
-		"error": "Failed to reset endpoint status: " + lastErr.Error(),
+		"error":    "Failed to reset endpoint status: " + lastErr.Error(),
 		"endpoint": endpointName,
 		"attempts": maxRetries,
 	})
@@ -239,7 +240,7 @@ func (s *AdminServer) handleResetAllEndpointsStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Successfully reset %d endpoint(s)", resetCount),
+		"message":     fmt.Sprintf("Successfully reset %d endpoint(s)", resetCount),
 		"reset_count": resetCount,
 	})
 }
@@ -293,26 +294,26 @@ func (s *AdminServer) handleReorderEndpoints(c *gin.Context) {
 // hotUpdateEndpointsWithRetry 带重试机制的热更新
 func (s *AdminServer) hotUpdateEndpointsWithRetry(endpoints []config.EndpointConfig, maxRetries int) error {
 	var lastErr error
-	
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		err := s.hotUpdateEndpoints(endpoints)
 		if err == nil {
 			return nil // 成功
 		}
-		
+
 		lastErr = err
-		
+
 		// 如果不是数据库相关错误，不重试
-		if !strings.Contains(err.Error(), "database") && 
-		   !strings.Contains(err.Error(), "locked") &&
-		   !strings.Contains(err.Error(), "timeout") {
+		if !strings.Contains(err.Error(), "database") &&
+			!strings.Contains(err.Error(), "locked") &&
+			!strings.Contains(err.Error(), "timeout") {
 			break
 		}
-		
+
 		// 等待一段时间后重试
 		time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
 		fmt.Printf("Endpoint update retry %d/%d: %v\n", attempt+1, maxRetries, err)
 	}
-	
+
 	return lastErr
 }

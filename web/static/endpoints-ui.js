@@ -8,6 +8,17 @@ function truncatePath(path, maxLength = 10) {
     return path.substring(0, maxLength) + '...';
 }
 
+function refreshTooltip(element) {
+    if (!element || !window.bootstrap || typeof bootstrap.Tooltip !== 'function') {
+        return;
+    }
+    const instance = bootstrap.Tooltip.getInstance(element);
+    if (instance) {
+        instance.dispose();
+    }
+    bootstrap.Tooltip.getOrCreateInstance(element);
+}
+
 function rebuildTable(endpoints) {
     const specialTbody = document.getElementById('special-endpoint-list');
     const generalTbody = document.getElementById('general-endpoint-list');
@@ -35,25 +46,22 @@ function rebuildTable(endpoints) {
         row.setAttribute('data-endpoint-name', escapeHtml(endpoint.name));
         
         // Build status badge - 三种状态：禁用（灰色）、正常（绿色）、不可用（红色）
-        let statusBadge = '';
-        if (!endpoint.enabled) {
-            // 如果端点被禁用，显示灰色的"禁用"状态
-            statusBadge = `<span class="badge bg-secondary"><i class="fas fa-ban"></i> ${T('disabled', '禁用')}</span>`;
-        } else if (endpoint.status === 'active') {
-            // 如果端点已启用且状态为活跃，显示绿色的"正常"状态
-            statusBadge = `<span class="badge bg-success"><i class="fas fa-check-circle"></i> ${T('normal', '正常')}</span>`;
-        } else if (endpoint.status === 'inactive') {
-            // 如果端点已启用但状态为不活跃，显示红色的"不可用"状态
-            statusBadge = `<span class="badge bg-danger"><i class="fas fa-times-circle"></i> ${T('unavailable', '不可用')}</span>`;
+        const profileBadges = [];
+        if (endpoint.enabled) {
+            profileBadges.push('<span class="badge bg-success">Enabled</span>');
         } else {
-            // 其他状态（如检测中）
-            statusBadge = `<span class="badge bg-warning"><i class="fas fa-clock"></i> ${T('detecting', '检测中')}</span>`;
+            profileBadges.push('<span class="badge bg-secondary text-dark">Disabled</span>');
         }
-        
-        // Build enabled status badge
-        const enabledBadge = endpoint.enabled
-            ? `<span class="badge bg-success"><i class="fas fa-toggle-on"></i> ${T('enabled', '已启用')}</span>`
-            : `<span class="badge bg-secondary"><i class="fas fa-toggle-off"></i> ${T('disabled', '已禁用')}</span>`;
+
+        if (endpoint.status === 'active') {
+            profileBadges.push('<span class="badge bg-primary">Active</span>');
+        } else if (endpoint.status === 'inactive') {
+            profileBadges.push('<span class="badge bg-warning text-dark">Idle</span>');
+        } else {
+            profileBadges.push('<span class="badge bg-info text-dark">Check</span>');
+        }
+
+        const profileBadgesHTML = profileBadges.join(' ');
 
         // Build URL display: show full URLs (matching dashboard style)
         let urlDisplay = '';
@@ -61,50 +69,81 @@ function rebuildTable(endpoints) {
             // Both URLs available
             urlDisplay = `
                 <div class="small">
-                    <div><span class="badge bg-primary me-1">Claude</span><code>${escapeHtml(endpoint.url_anthropic)}</code></div>
-                    <div class="mt-1"><span class="badge bg-warning me-1">Codex</span><code>${escapeHtml(endpoint.url_openai)}</code></div>
+                    <div><span class="badge bg-warning">Claude</span> ${escapeHtml(endpoint.url_anthropic)}</div>
+                    <div class="mt-1"><span class="badge bg-primary">Codex</span> ${escapeHtml(endpoint.url_openai)}</div>
                 </div>
             `;
         } else if (endpoint.url_anthropic) {
             // Only Anthropic URL
-            urlDisplay = `<span class="badge bg-primary me-1">Claude</span><code>${escapeHtml(endpoint.url_anthropic)}</code>`;
+            urlDisplay = `<span class="badge bg-warning">Claude</span> ${escapeHtml(endpoint.url_anthropic)}`;
         } else if (endpoint.url_openai) {
             // Only OpenAI URL
-            urlDisplay = `<span class="badge bg-warning me-1">Codex</span><code>${escapeHtml(endpoint.url_openai)}</code>`;
+            urlDisplay = `<span class="badge bg-primary">Codex</span> ${escapeHtml(endpoint.url_openai)}`;
         } else {
             // Fallback for old single URL field
-            urlDisplay = `<code>${escapeHtml(endpoint.url || '-')}</code>`;
+            urlDisplay = ` ${escapeHtml(endpoint.url || '-')}`;
         }
 
-        // Build auth type badge
+        // Build auth badge (will be merged into config chips)
         let authTypeBadge;
         if (endpoint.auth_type === 'api_key') {
-            authTypeBadge = '<span class="badge bg-primary">api_key</span>';
+            authTypeBadge = '<span class="badge bg-primary" data-bs-toggle="tooltip" title="认证方式：x-api-key (api_key)"><i class="fas fa-key"></i></span>';
         } else if (endpoint.auth_type === 'oauth') {
-            authTypeBadge = '<span class="badge bg-success">oauth</span>';
+            authTypeBadge = '<span class="badge bg-success" data-bs-toggle="tooltip" title="认证方式：OAuth（支持自动刷新）"><i class="fas fa-id-badge"></i></span>';
         } else if (endpoint.auth_type === 'auto') {
-            authTypeBadge = '<span class="badge bg-info">auto</span>';
+            authTypeBadge = '<span class="badge bg-info" data-bs-toggle="tooltip" title="认证方式：auto（自动探测并学习）"><i class="fas fa-magic"></i></span>';
         } else {
-            authTypeBadge = '<span class="badge bg-secondary">auth_token</span>';
+            authTypeBadge = '<span class="badge bg-secondary" data-bs-toggle="tooltip" title="认证方式：Authorization Bearer (auth_token)"><i class="fas fa-lock"></i></span>';
         }
         
         // Build proxy status display
         let proxyDisplay = '';
         if (endpoint.proxy && endpoint.proxy.type && endpoint.proxy.address) {
             const proxyType = endpoint.proxy.type.toUpperCase();
-            const hasAuth = endpoint.proxy.username ? ' 🔐' : '';
-            proxyDisplay = `<span class="badge bg-warning" title="${T('proxy_with_auth', '代理')}: ${endpoint.proxy.type}://${endpoint.proxy.address}">${proxyType}${hasAuth}</span>`;
+            const hasAuth = endpoint.proxy.username;
+            proxyDisplay = `<span class="badge bg-warning" data-bs-toggle="tooltip" title="代理: ${endpoint.proxy.type}://${endpoint.proxy.address}${hasAuth ? ' (已认证)' : ''}">${proxyType}</span>`;
         } else {
-            proxyDisplay = `<span class="text-muted">${T('no_proxy', '无')}</span>`;
+            proxyDisplay = '<span class="text-muted" data-bs-toggle="tooltip" title="无代理配置"><i class="fas fa-times-circle"></i></span>';
         }
         
         // Build tags display
         let tagsDisplay = '';
         if (endpoint.tags && endpoint.tags.length > 0) {
-            tagsDisplay = endpoint.tags.map(tag => `<span class="badge bg-info me-1 mb-1">${escapeHtml(tag)}</span>`).join('');
+            tagsDisplay = endpoint.tags.map(tag => `<span class="badge bg-info me-1 mb-1" data-bs-toggle="tooltip" title="标签">${escapeHtml(tag)}</span>`).join('');
         } else {
-            tagsDisplay = `<span class="text-muted">${T('general', '通用')}</span>`;
+            tagsDisplay = '<span class="text-muted" data-bs-toggle="tooltip" title="通用端点"><i class="fas fa-globe"></i></span>';
         }
+
+        // Build config chips
+        const chips = [];
+        // Auth first (merged column)
+        chips.push(authTypeBadge);
+        // Tool support
+        const enhMode = (endpoint.tool_enhancement_mode || 'auto').toLowerCase();
+        if (endpoint.native_tool_support === true) {
+            chips.push('<span class="badge bg-success" data-bs-toggle="tooltip" title="工具调用：原生支持（不注入增强）"><i class="fas fa-tools"></i></span>');
+        } else {
+            let modeLabel = enhMode || 'auto';
+            let cls = 'bg-info';
+            if (modeLabel === 'force') cls = 'bg-warning';
+            if (modeLabel === 'disable') cls = 'bg-secondary';
+            let tip = '工具增强模式：auto（原生不支持/未知时注入）';
+            if (modeLabel === 'force') tip = '工具增强模式：force（始终注入增强）';
+            if (modeLabel === 'disable') tip = '工具增强模式：disable（从不注入增强）';
+            chips.push(`<span class="badge ${cls}" data-bs-toggle="tooltip" title="${tip}"><i class="fas fa-tools"></i></span>`);
+        }
+        // OpenAI preference
+        const pref = (endpoint.openai_preference || 'auto');
+        const prefShort = pref === 'chat_completions' ? 'chat' : (pref === 'responses' ? 'resp' : 'auto');
+        let prefTip = 'OpenAI 偏好：auto（自动探测并学习）';
+        if (prefShort === 'chat') prefTip = 'OpenAI 偏好：chat_completions（/v1/chat/completions）';
+        if (prefShort === 'resp') prefTip = 'OpenAI 偏好：responses（/v1/responses）';
+        chips.push(`<span class="badge bg-primary" data-bs-toggle="tooltip" title="${prefTip}"><i class="fas fa-robot"></i></span>`);
+        // Model rewrite
+        const mrEnabled = endpoint.model_rewrite && endpoint.model_rewrite.enabled === true;
+        chips.push(`<span class="badge ${mrEnabled ? 'bg-info' : 'bg-secondary'}" data-bs-toggle="tooltip" title="模型重写：${mrEnabled ? '启用（应用映射规则）' : '关闭'}"><i class="fas fa-exchange-alt"></i></span>`);
+        // Proxy auth note already shown in proxyDisplay
+        const configDisplay = chips.join(' ');
 
 
         row.innerHTML = `
@@ -115,49 +154,22 @@ function rebuildTable(endpoints) {
                 <span class="badge bg-info priority-badge">${endpoint.priority}</span>
             </td>
             <td><strong>${escapeHtml(endpoint.name)}</strong></td>
-            <td>${urlDisplay}</td>
-            <td>${authTypeBadge}</td>
+            <td class="url-cell">${urlDisplay}</td>
             <td>${proxyDisplay}</td>
             <td>${tagsDisplay}</td>
+            <td>${configDisplay}</td>
             <td class="response-cell">
                 <span class="text-muted">-</span>
             </td>
-            <td data-cell-type="status">${statusBadge}</td>
-            <td data-cell-type="enabled">${enabledBadge}</td>
+            <td data-cell-type="status">${profileBadgesHTML}</td>
             <td class="action-buttons">
-                <div class="btn-group btn-group-sm" role="group">
-                    <button class="btn ${endpoint.enabled ? 'btn-success' : 'btn-secondary'} btn-sm"
-                            onclick="event.stopPropagation(); toggleEndpointEnabled('${escapeHtml(endpoint.name)}', ${endpoint.enabled})"
-                            title="${endpoint.enabled ? '点击禁用' : '点击启用'}">
-                        <i class="fas ${endpoint.enabled ? 'fa-toggle-on' : 'fa-toggle-off'}"></i>
-                    </button>
-                    <button class="btn btn-outline-secondary btn-sm"
-                            onclick="event.stopPropagation(); testEndpoint('${escapeHtml(endpoint.name)}');"
-                            data-endpoint="${escapeHtml(endpoint.name)}"
-                            data-action="test-endpoint"
-                            title="测试端点">
-                        <i class="fas fa-vial"></i>
-                    </button>
-                    <button class="btn btn-outline-primary btn-sm"
-                            onclick="event.stopPropagation(); showEditEndpointModal('${escapeHtml(endpoint.name)}')"
-                            title="编辑">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button class="btn btn-outline-info btn-sm"
-                            onclick="event.stopPropagation(); copyEndpoint('${escapeHtml(endpoint.name)}')"
-                            title="复制">
-                        <i class="fas fa-copy"></i>
-                    </button>
-                    <button class="btn btn-outline-warning btn-sm"
-                            onclick="event.stopPropagation(); resetEndpointStatus('${escapeHtml(endpoint.name)}')"
-                            title="重置状态">
-                        <i class="fas fa-redo"></i>
-                    </button>
-                    <button class="btn btn-outline-danger btn-sm"
-                            onclick="event.stopPropagation(); deleteEndpoint('${escapeHtml(endpoint.name)}')"
-                            title="删除">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                <div class="actions-grid">
+                    <button class="btn ${endpoint.enabled ? 'btn-success' : 'btn-secondary'} btn-sm" data-action="toggle-endpoint" onclick="event.stopPropagation(); toggleEndpointEnabled('${escapeHtml(endpoint.name)}', ${endpoint.enabled})" data-bs-toggle="tooltip" title="${endpoint.enabled ? '点击禁用' : '点击启用'}"><i class="fas ${endpoint.enabled ? 'fa-toggle-on' : 'fa-toggle-off'}"></i></button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="event.stopPropagation(); testEndpoint('${escapeHtml(endpoint.name)}');" data-endpoint="${escapeHtml(endpoint.name)}" data-action="test-endpoint" data-bs-toggle="tooltip" title="测试端点"><i class="fas fa-vial"></i></button>
+                    <button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation(); showEditEndpointModal('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="编辑"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-outline-info btn-sm" onclick="event.stopPropagation(); copyEndpoint('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="复制"><i class="fas fa-copy"></i></button>
+                    <button class="btn btn-outline-warning btn-sm" onclick="event.stopPropagation(); resetEndpointStatus('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="重置状态"><i class="fas fa-redo"></i></button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); deleteEndpoint('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="删除"><i class="fas fa-trash"></i></button>
                 </div>
             </td>
         `;
@@ -184,6 +196,12 @@ function rebuildTable(endpoints) {
     if (typeof restoreCachedTestResults === 'function') {
         restoreCachedTestResults();
     }
+
+    // Initialize Bootstrap tooltips for new badges
+    if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
+        const tooltipEls = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipEls.forEach(refreshTooltip);
+    }
 }
 
 function updateEndpointToggleButton(endpointName, enabled) {
@@ -193,9 +211,9 @@ function updateEndpointToggleButton(endpointName, enabled) {
         // If not found, search in general endpoint list
         row = document.querySelector(`#general-endpoint-list tr[data-endpoint-name="${endpointName}"]`);
     }
-    
+
     if (row) {
-        const toggleButton = row.querySelector('.btn-group button:first-child');
+        const toggleButton = row.querySelector('button[data-action="toggle-endpoint"]');
         if (toggleButton) {
             // Update button class
             toggleButton.className = `btn ${enabled ? 'btn-success' : 'btn-secondary'} btn-sm`;
@@ -204,29 +222,14 @@ function updateEndpointToggleButton(endpointName, enabled) {
             icon.className = `fas ${enabled ? 'fa-toggle-on' : 'fa-toggle-off'}`;
             // Update button title
             toggleButton.title = enabled ? '点击禁用' : '点击启用';
+            toggleButton.setAttribute('data-bs-original-title', toggleButton.title);
+            refreshTooltip(toggleButton);
             // Update button onclick
             toggleButton.onclick = function(event) {
                 event.stopPropagation();
                 toggleEndpointEnabled(endpointName, enabled);
             };
         }
-    }
-}
-
-function updateEndpointEnabledBadge(endpointName, enabled) {
-    // Try to find in special endpoint list first
-    let row = document.querySelector(`#special-endpoint-list tr[data-endpoint-name="${endpointName}"]`);
-    if (!row) {
-        // If not found, search in general endpoint list
-        row = document.querySelector(`#general-endpoint-list tr[data-endpoint-name="${endpointName}"]`);
-    }
-
-    if (row) {
-        const enabledCell = row.querySelector('[data-cell-type="enabled"]'); // 使用data属性选择器
-        const enabledBadge = enabled
-            ? '<span class="badge bg-success"><i class="fas fa-toggle-on"></i> ' + T('enabled', '已启用') + '</span>'
-            : '<span class="badge bg-secondary"><i class="fas fa-toggle-off"></i> ' + T('disabled', '已禁用') + '</span>';
-        enabledCell.innerHTML = enabledBadge;
     }
 }
 
@@ -238,22 +241,21 @@ function updateEndpointStatusBadge(endpointName, enabled, status) {
         row = document.querySelector(`#general-endpoint-list tr[data-endpoint-name="${endpointName}"]`);
     }
 
-    if (row) {
-        const statusCell = row.querySelector('[data-cell-type="status"]'); // 使用data属性选择器
-        let statusBadge = '';
-        if (!enabled) {
-            // 如果端点被禁用，显示灰色的"禁用"状态
-            statusBadge = '<span class="badge bg-secondary"><i class="fas fa-ban"></i> ' + T('disabled', '禁用') + '</span>';
-        } else if (status === 'active') {
-            // 如果端点已启用且状态为活跃，显示绿色的"正常"状态
-            statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> ' + T('normal', '正常') + '</span>';
-        } else if (status === 'inactive') {
-            // 如果端点已启用但状态为不活跃，显示红色的"不可用"状态
-            statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> ' + T('unavailable', '不可用') + '</span>';
-        } else {
-            // 其他状态（如检测中）
-            statusBadge = '<span class="badge bg-warning"><i class="fas fa-clock"></i> ' + T('detecting', '检测中') + '</span>';
-        }
-        statusCell.innerHTML = statusBadge;
-    }
+	if (row) {
+		const statusCell = row.querySelector('[data-cell-type="status"]');
+		if (!statusCell) return;
+
+		const badges = [];
+		badges.push(enabled ? '<span class="badge bg-success">Enabled</span>' : '<span class="badge bg-secondary text-dark">Disabled</span>');
+
+		if (status === 'active') {
+			badges.push('<span class="badge bg-primary">Active</span>');
+		} else if (status === 'inactive') {
+			badges.push('<span class="badge bg-warning text-dark">Idle</span>');
+		} else {
+			badges.push('<span class="badge bg-info text-dark">Check</span>');
+		}
+
+		statusCell.innerHTML = badges.join(' ');
+	}
 }

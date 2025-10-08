@@ -6,8 +6,8 @@ import (
 	"net/url"
 
 	"claude-code-codex-companion/internal/config"
-	"claude-code-codex-companion/internal/security"
 	"claude-code-codex-companion/internal/i18n"
+	"claude-code-codex-companion/internal/security"
 
 	"github.com/gin-gonic/gin"
 )
@@ -54,17 +54,20 @@ func (s *AdminServer) handleUpdateEndpoints(c *gin.Context) {
 // handleCreateEndpoint 创建新端点
 func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 	var request struct {
-		Name              string               `json:"name" binding:"required"`
-		URLAnthropic      string               `json:"url_anthropic"`
-		URLOpenAI         string               `json:"url_openai"`
-		AuthType          string               `json:"auth_type" binding:"required"`
-		AuthValue         string               `json:"auth_value"`    // OAuth时不需要
-		Enabled           bool                 `json:"enabled"`
-		Tags              []string             `json:"tags"`
-		Proxy             *config.ProxyConfig  `json:"proxy,omitempty"` // 新增：代理配置
-		OAuthConfig       *config.OAuthConfig  `json:"oauth_config,omitempty"` // 新增：OAuth配置
-		HeaderOverrides     map[string]string    `json:"header_overrides,omitempty"`   // 新增：HTTP Header覆盖配置
-		ParameterOverrides  map[string]string    `json:"parameter_overrides,omitempty"` // 新增：Request Parameter覆盖配置
+		Name                string              `json:"name" binding:"required"`
+		URLAnthropic        string              `json:"url_anthropic"`
+		URLOpenAI           string              `json:"url_openai"`
+		AuthType            string              `json:"auth_type" binding:"required"`
+		AuthValue           string              `json:"auth_value"` // OAuth时不需要
+		Enabled             bool                `json:"enabled"`
+		Tags                []string            `json:"tags"`
+		Proxy               *config.ProxyConfig `json:"proxy,omitempty"`                 // 新增：代理配置
+		OAuthConfig         *config.OAuthConfig `json:"oauth_config,omitempty"`          // 新增：OAuth配置
+		HeaderOverrides     map[string]string   `json:"header_overrides,omitempty"`      // 新增：HTTP Header覆盖配置
+		ParameterOverrides  map[string]string   `json:"parameter_overrides,omitempty"`   // 新增：Request Parameter覆盖配置
+		NativeToolSupport   *bool               `json:"native_tool_support,omitempty"`   // 新增：原生工具调用支持（可选）
+		ToolEnhancementMode string              `json:"tool_enhancement_mode,omitempty"` // 新增：工具调用增强模式（可选）
+		CountTokensEnabled  *bool               `json:"count_tokens_enabled,omitempty"`  // 新增：是否允许 /count_tokens
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -116,7 +119,7 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "auth_type must be 'api_key', 'auth_token', 'oauth', or 'auto'"})
 		return
 	}
-	
+
 	// 验证 OAuth 或传统认证配置
 	if request.AuthType == "oauth" {
 		if request.OAuthConfig == nil {
@@ -158,10 +161,20 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 	}
 
 	// 创建新端点配置
+	var countTokensPtr *bool
+	if request.CountTokensEnabled != nil {
+		countTokensPtr = new(bool)
+		*countTokensPtr = *request.CountTokensEnabled
+	}
 	newEndpoint := createEndpointConfigFromRequest(
 		request.Name, request.URLAnthropic, request.URLOpenAI,
 		request.AuthType, request.AuthValue,
-		request.Enabled, maxPriority+1, request.Tags, request.Proxy, request.OAuthConfig, request.HeaderOverrides, request.ParameterOverrides)
+		request.Enabled, maxPriority+1, request.Tags, request.Proxy, request.OAuthConfig, request.HeaderOverrides, request.ParameterOverrides, countTokensPtr)
+	// 设置可选的工具相关配置
+	newEndpoint.NativeToolSupport = request.NativeToolSupport
+	if request.ToolEnhancementMode != "" {
+		newEndpoint.ToolEnhancementMode = request.ToolEnhancementMode
+	}
 	currentEndpoints = append(currentEndpoints, newEndpoint)
 
 	// 使用热更新机制
@@ -188,18 +201,21 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 	}
 
 	var request struct {
-		Name              string               `json:"name"`
-		URLAnthropic      string               `json:"url_anthropic"`
-		URLOpenAI         string               `json:"url_openai"`
-		AuthType          string               `json:"auth_type"`
-		AuthValue         string               `json:"auth_value"`
-		Enabled           bool                 `json:"enabled"`
-		Tags              []string             `json:"tags"`
-		Proxy             *config.ProxyConfig  `json:"proxy,omitempty"` // 新增：代理配置
-		OAuthConfig       *config.OAuthConfig  `json:"oauth_config,omitempty"` // 新增：OAuth配置
-		HeaderOverrides     map[string]string    `json:"header_overrides,omitempty"`   // 新增：HTTP Header覆盖配置
-		ParameterOverrides  map[string]string    `json:"parameter_overrides,omitempty"` // 新增：Request Parameter覆盖配置
-		ModelRewrite      *config.ModelRewriteConfig `json:"model_rewrite"` // 修改：移除omitempty，允许null值
+		Name                string                     `json:"name"`
+		URLAnthropic        string                     `json:"url_anthropic"`
+		URLOpenAI           string                     `json:"url_openai"`
+		AuthType            string                     `json:"auth_type"`
+		AuthValue           string                     `json:"auth_value"`
+		Enabled             bool                       `json:"enabled"`
+		Tags                []string                   `json:"tags"`
+		Proxy               *config.ProxyConfig        `json:"proxy,omitempty"`               // 新增：代理配置
+		OAuthConfig         *config.OAuthConfig        `json:"oauth_config,omitempty"`        // 新增：OAuth配置
+		HeaderOverrides     map[string]string          `json:"header_overrides,omitempty"`    // 新增：HTTP Header覆盖配置
+		ParameterOverrides  map[string]string          `json:"parameter_overrides,omitempty"` // 新增：Request Parameter覆盖配置
+		ModelRewrite        *config.ModelRewriteConfig `json:"model_rewrite"`                 // 修改：移除omitempty，允许null值
+		NativeToolSupport   *bool                      `json:"native_tool_support,omitempty"`
+		ToolEnhancementMode string                     `json:"tool_enhancement_mode,omitempty"`
+		CountTokensEnabled  *bool                      `json:"count_tokens_enabled,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -273,7 +289,7 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 					c.JSON(http.StatusBadRequest, gin.H{"error": "auth_type must be 'api_key', 'auth_token', 'oauth', or 'auto'"})
 					return
 				}
-				
+
 				// 验证 OAuth 或传统认证配置
 				if request.AuthType == "oauth" {
 					if request.OAuthConfig == nil {
@@ -285,23 +301,23 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 						c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid oauth config: " + err.Error()})
 						return
 					}
-					
+
 					// 检查内存中是否已有更新的 OAuth token（防止覆盖已刷新的token）
 					if currentEndpoints[i].AuthType == "oauth" && currentEndpoints[i].OAuthConfig != nil {
 						currentExpiresAt := currentEndpoints[i].OAuthConfig.ExpiresAt
 						requestExpiresAt := request.OAuthConfig.ExpiresAt
-						
+
 						// 如果内存中的过期时间比 WebUI 发送的更大，说明后台已刷新token，拒绝更新
 						if currentExpiresAt > requestExpiresAt && requestExpiresAt > 0 {
 							c.JSON(http.StatusConflict, gin.H{
-								"error": "Cannot update OAuth config: token has been refreshed in background. Please reload the page to get the latest configuration.",
+								"error":              "Cannot update OAuth config: token has been refreshed in background. Please reload the page to get the latest configuration.",
 								"current_expires_at": currentExpiresAt,
 								"request_expires_at": requestExpiresAt,
 							})
 							return
 						}
 					}
-					
+
 					// 设置OAuth配置，清空auth_value
 					currentEndpoints[i].OAuthConfig = request.OAuthConfig
 					currentEndpoints[i].AuthValue = ""
@@ -319,17 +335,15 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 			// 更新tags字段
 			currentEndpoints[i].Tags = request.Tags
 
-			
 			// 更新代理配置
 			currentEndpoints[i].Proxy = request.Proxy
-			
-			
+
 			// 更新HTTP Header覆盖配置
 			currentEndpoints[i].HeaderOverrides = request.HeaderOverrides
-			
+
 			// 更新Request Parameter覆盖配置
 			currentEndpoints[i].ParameterOverrides = request.ParameterOverrides
-			
+
 			// 更新模型重写配置
 			// 前端现在始终发送配置对象（enabled=false或enabled=true+rules），不再发送null
 			// 因此简化逻辑：直接使用request中的配置，如果为nil则保持原值不变
@@ -342,8 +356,20 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 				// 始终保存配置对象，即使enabled=false（前端需要显示禁用状态）
 				currentEndpoints[i].ModelRewrite = request.ModelRewrite
 			}
+			// 更新工具相关配置（非必填）
+			if request.NativeToolSupport != nil {
+				currentEndpoints[i].NativeToolSupport = request.NativeToolSupport
+			}
+			if request.ToolEnhancementMode != "" {
+				currentEndpoints[i].ToolEnhancementMode = request.ToolEnhancementMode
+			}
+			if request.CountTokensEnabled != nil {
+				ptr := new(bool)
+				*ptr = *request.CountTokensEnabled
+				currentEndpoints[i].CountTokensEnabled = ptr
+			}
 			// 如果没有model_rewrite字段，保持原有配置不变
-			
+
 			found = true
 			break
 		}

@@ -21,6 +21,27 @@ function generateLogAttemptHtml(log, attemptNum) {
         clientBadge = `<span class="badge bg-secondary">${escapeHtml(log.client_type)}</span>`;
     }
 
+    // Tool calling badges
+    let toolBadges = '';
+    if (log.tool_enhancement_mode) {
+        const modeLabel = log.tool_enhancement_mode.toUpperCase();
+        const badgeClass = log.tool_enhancement_applied ? 'bg-warning text-dark' : 'bg-secondary';
+        toolBadges += `<span class="badge ${badgeClass}" title="${T('log_tool_mode', '工具增强模式')}">${T('log_tool_mode_short', 'Tool')} ${escapeHtml(modeLabel)}</span>`;
+    }
+    if (log.tool_enhancement_applied) {
+        const count = log.tool_call_count || 0;
+        toolBadges += `<span class="badge bg-info text-dark" title="${T('log_tool_prompt_injected', '已注入工具增强提示')}">${T('log_tool_enhanced', 'Enh+')}${count > 0 ? ` (${count})` : ''}</span>`;
+    }
+    if (log.tool_calls_detected) {
+        const count = log.tool_call_count || 0;
+        toolBadges += `<span class="badge bg-success" title="${T('log_tool_detected', '检测到工具调用')}">${T('log_tool_calls', 'Tool×')}${count}</span>`;
+    }
+    if (log.tool_native_support !== undefined && log.tool_native_support !== null) {
+        toolBadges += log.tool_native_support ?
+            `<span class="badge bg-primary" title="${T('log_tool_native', '端点原生支持工具调用')}">${T('log_tool_native_short', 'Native')}</span>` :
+            `<span class="badge bg-danger" title="${T('log_tool_non_native', '端点不支持工具调用')}">${T('log_tool_non_native_short', 'NoNative')}</span>`;
+    }
+
     return `
         <div class="card mb-3">
             <div class="card-header">
@@ -38,6 +59,7 @@ function generateLogAttemptHtml(log, attemptNum) {
                     ${log.is_streaming ? '<span class="badge bg-info">SSE</span>' : ''}
                     ${log.content_type_override ? `<span class="badge bg-warning text-dark" title="Content-Type覆盖: ${escapeHtml(log.content_type_override)}">${escapeHtml(log.content_type_override)}</span>` : ''}
                     ${requestChanges || responseChanges ? `<span class="badge bg-info">${T('has_modifications', '有修改')}</span>` : ''}
+                    ${toolBadges}
                 </h6>
             </div>
             <div class="card-body">
@@ -93,6 +115,26 @@ function generateLogAttemptContentHtml(log, attemptNum) {
         clientBadge = `<span class="badge bg-secondary">${escapeHtml(log.client_type)}</span>`;
     }
 
+    let toolBadges = '';
+    if (log.tool_enhancement_mode) {
+        const modeLabel = log.tool_enhancement_mode.toUpperCase();
+        const badgeClass = log.tool_enhancement_applied ? 'bg-warning text-dark' : 'bg-secondary';
+        toolBadges += `<span class="badge ${badgeClass}" title="${T('log_tool_mode', '工具增强模式')}">${T('log_tool_mode_short', 'Tool')} ${escapeHtml(modeLabel)}</span>`;
+    }
+    if (log.tool_enhancement_applied) {
+        const count = log.tool_call_count || 0;
+        toolBadges += `<span class="badge bg-info text-dark" title="${T('log_tool_prompt_injected', '已注入工具增强提示')}">${T('log_tool_enhanced', 'Enh+')}${count > 0 ? ` (${count})` : ''}</span>`;
+    }
+    if (log.tool_calls_detected) {
+        const count = log.tool_call_count || 0;
+        toolBadges += `<span class="badge bg-success" title="${T('log_tool_detected', '检测到工具调用')}">${T('log_tool_calls', 'Tool×')}${count}</span>`;
+    }
+    if (log.tool_native_support !== undefined && log.tool_native_support !== null) {
+        toolBadges += log.tool_native_support ?
+            `<span class="badge bg-primary" title="${T('log_tool_native', '端点原生支持工具调用')}">${T('log_tool_native_short', 'Native')}</span>` :
+            `<span class="badge bg-danger" title="${T('log_tool_non_native', '端点不支持工具调用')}"">${T('log_tool_non_native_short', 'NoNative')}</span>`;
+    }
+
     return `
         ${log.error ? `<div class="alert alert-danger mb-3"><strong>${T('error', '错误')}:</strong> ${escapeHtml(log.error)}</div>` : ''}
 
@@ -111,6 +153,7 @@ function generateLogAttemptContentHtml(log, attemptNum) {
                 ${log.is_streaming ? '<span class="badge bg-info">SSE</span>' : ''}
                 ${log.content_type_override ? `<span class="badge bg-warning text-dark" title="Content-Type覆盖: ${escapeHtml(log.content_type_override)}">${escapeHtml(log.content_type_override)}</span>` : ''}
                 ${requestChanges || responseChanges ? `<span class="badge bg-info">${T('has_modifications', '有修改')}</span>` : ''}
+                ${toolBadges}
             </h6>
         </div>
         

@@ -12,7 +12,7 @@
 
 ## 📖 项目简介
 
-CCCC (Claude Code and Codex Companion) 是一个智能 AI API 代理工具，专为 [Claude Code](https://claude.ai/code) 和 [Codex](https://github.com/openai/codex-cli) 设计。通过统一的接口管理多个上游 API 端点，实现：
+CCCC (Claude Code and Codex Companion) 是一个智能 AI API 代理工具，专为 [Claude Code](https://claude.ai/code) 和 [Codex](https://github.com/openai/codex-cli) 设计，并感谢 [Toolify](https://toolify.ai/) 社区提供的零配置 Tool Calling 方案灵感。通过统一的接口管理多个上游 API 端点，实现：
 
 - 🔄 **自动格式转换**：Anthropic ↔ OpenAI 格式无缝切换
 - 🎯 **智能路由**：根据客户端类型自动选择最佳端点
@@ -107,6 +107,34 @@ CCCC (Claude Code and Codex Companion) 是一个智能 AI API 代理工具，专
   - 格式验证结果（Anthropic/OpenAI兼容性）
 - **配置智能回写**：测试学习到的 `openai_preference`、`DetectedAuthHeader` 可持久化到配置文件
 
+### 🧠 Tool Calling Enhancement（零配置）
+
+> 感谢 Toolify 社区的大力支持与联调，让零配置工具调用体验落地成为可能。
+
+- 客户端请求包含 `tools` 时自动注入严格的系统提示，指导模型用触发信号 + XML 输出函数调用。
+- 自动解析函数调用并回写为标准响应：
+  - OpenAI：`choices[0].message.tool_calls` + `finish_reason: "tool_calls"`
+  - Anthropic：`content[]` 中的 `type: "tool_use"`
+- 当前已集成“非流式”路径，SSE/流式将在后续版本接入（探测器已就位）。
+- 无需全局配置；支持端点级开关与自动学习：
+  - `native_tool_support`（可选）：是否原生支持工具调用（留空=自动学习）
+  - `tool_enhancement_mode`（可选）：`auto | force | disable`（默认 `auto`）
+    - `auto`：原生支持时不注入，否则注入
+    - `force`：总是注入增强
+    - `disable`：从不注入增强
+- 运行时兜底：若请求带 `tools` 且上游返回业务错误，自动学习并回写 `native_tool_support=false` 且 `tool_enhancement_mode=force`，防止“号称支持但实际失败”的端点持续报错。
+- 管理界面端点列表新增配置摘要：Tool/native 或增强模式、OpenAI 偏好（chat/resp/auto）、模型重写开关等；“端点专题”列现以纯文字徽章呈现（Enabled/Disabled、Active/Idle/Check），信息更易读。
+- 管理端/探针测试默认超时提升至 20 秒，尽量减少 `context deadline exceeded` 误报（代理主路径不设置整体超时，以保证流式）。
+- 日志监控：`request_logs` 新增字段 `tool_enhancement_applied`、`tool_enhancement_mode`、`tool_calls_detected`、`tool_call_count`、`tool_native_support`，可以在 Web 控制台或外部分析中快速判断增强是否生效。
+
+### 📏 count_tokens 兜底估算（NEW!）
+
+- **显式开关**：端点支持 `count_tokens_enabled` 字段，一键控制是否参与 `/v1/messages/count_tokens` 请求，避免反复探测不兼容供应商。
+- **自动学习**：若上游返回 “Invalid URL” 等错误，代理会自动标记端点不支持 `count_tokens`，并持久化这一判断。
+- **本地估算**：所有端点均不支持时，系统会返回基于字符数的轻量估算，并在响应中附带 `"proxy_estimated": true` 说明。
+- **噪声抑制**：确认端点不支持后，将跳过重复日志和健康检查统计，确保日志聚焦真实故障。
+
+
 #### 批量测试 CLI
 
 ```bash
@@ -118,11 +146,11 @@ go run ./cmd/test_endpoints -config config.yaml -json
 - 失败结果会区分账号/额度（429）、认证（401）、格式（400）等类型，并记录到运行时配置；
 - 可配合全局拉黑开关关闭自动拉黑，以安全执行保守测试。
 
-### 📊 企业级可观测性
-- **Web 管理界面**：实时查看端点状态、请求日志
-- **详细日志**：请求/响应完整追踪，包含参数学习过程
-- **性能统计**：成功率、响应时间、流量分析
-- **调试导出**：一键导出请求详情
+-### 📊 企业级可观测性
+- **Web 管理界面**：实时查看端点状态、请求日志；“端点专题”徽章与工具配置 Chips 已简化为纯文字，便于快速识别。
+- **详细日志**：请求/响应完整追踪，包含参数学习过程以及 Tool Calling 触发情况（Enh/Calls/Native 等指标）。
+- **性能统计**：成功率、响应时间、流量分析。
+- **调试导出**：一键导出请求详情。
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## 📋 概述
 
-CCCC (Claude Code and Codex Companion) 为 Claude Code 提供了完整的 API 代理支持，实现多端点负载均衡、故障转移和模型重写功能。
+CCCC (Claude Code and Codex Companion) 为 Claude Code 提供了完整的 API 代理支持，实现多端点负载均衡、故障转移和模型重写功能。零配置工具调用能力由 Toolify 社区鼎力协助打造，文档中也包含相关指引。
 
 ## 🚀 快速配置
 
@@ -115,7 +115,15 @@ endpoints:
     auth_value: your-token
     enabled: true
     priority: 2
+    count_tokens_enabled: false   # 可选：如上游不支持 /messages/count_tokens，可关闭以避免探测
 ```
+
+## 🧠 Tool Calling 零配置增强（感谢 Toolify）
+
+- 无需自定义系统提示，CCCC 会在检测到 `tools` 字段时自动注入规范化提示，并解析模型返回的 XML 函数调用。
+- 支持端点级控制：`native_tool_support` 与 `tool_enhancement_mode`（auto/force/disable），留空时会根据测试结果自动学习。
+- 请求日志会记录 `tool_enhancement_applied`、`tool_call_count` 等字段，在 `/admin/logs` 页面即可验证函数调用是否触发。
+- 若上游返回工具调用相关的业务错误，代理会自动将该端点切换到增强模式并持久化，避免持续失败。
 
 ## 🎯 模型重写机制
 
@@ -355,6 +363,10 @@ logging:
 - 在生产环境中使用真实的 API Key
 - 定期轮换认证凭据
 - 监控异常请求模式
+
+### 5. count_tokens 建议
+- 对不支持 `/messages/count_tokens` 的第三方端点，推荐将 `count_tokens_enabled` 设置为 `false`，避免重复探测。
+- 如需保留估算能力，可依赖 CCCC 的本地 `proxy_estimated` 结果；实际补全仍然会照常路由到可用端点。
 
 ## 📚 相关文档
 

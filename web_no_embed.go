@@ -5,10 +5,9 @@ package main
 
 import (
 	"embed"
-	"io/fs"
 )
 
-// WebAssets placeholder - we won't actually embed when no_embed is used, 
+// WebAssets placeholder - we won't actually embed when no_embed is used,
 // so this won't be used, but we still need it defined to satisfy the compiler
 var WebAssets embed.FS
 

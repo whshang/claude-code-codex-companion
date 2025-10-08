@@ -108,11 +108,13 @@ type DefaultValues struct {
 		MaxPages     int
 	}
 
-	// 代理拨号器默认值  
+	// 代理拨号器默认值
 	ProxyDialer struct {
 		Timeout   time.Duration
 		KeepAlive time.Duration
 	}
+
+    // （已移除）ToolCalling 全局默认：采用零配置 + 端点级自动学习/开关
 }
 
 // Default 全局默认值实例
@@ -305,6 +307,8 @@ var Default = DefaultValues{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
 	},
+
+    // ToolCalling 默认已移除
 }
 
 // GetTimeoutDuration 获取超时配置的Duration值，如果配置为空则返回默认值
