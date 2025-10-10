@@ -92,6 +92,13 @@ func validateTableCompatibility(db *gorm.DB) error {
 		"tool_calls_detected":           "tool_calls_detected BOOLEAN DEFAULT 0",
 		"tool_call_count":               "tool_call_count INTEGER DEFAULT 0",
 		"tool_native_support":           "tool_native_support BOOLEAN",
+		"request_body_hash":             "request_body_hash VARCHAR(128) DEFAULT ''",
+		"response_body_hash":            "response_body_hash VARCHAR(128) DEFAULT ''",
+		"request_body_truncated":        "request_body_truncated BOOLEAN DEFAULT 0",
+		"response_body_truncated":       "response_body_truncated BOOLEAN DEFAULT 0",
+		"was_streaming":                 "was_streaming BOOLEAN DEFAULT 0",
+		"conversion_path":               "conversion_path VARCHAR(100) DEFAULT ''",
+		"supports_responses_flag":       "supports_responses_flag VARCHAR(20) DEFAULT ''",
 	}
 
 	for column, definition := range optionalColumns {

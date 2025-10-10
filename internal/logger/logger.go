@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,30 +13,39 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const logBodyPreviewLimit = 2048
+
 type RequestLog struct {
-	Timestamp           time.Time         `json:"timestamp"`
-	RequestID           string            `json:"request_id"`
-	Endpoint            string            `json:"endpoint"`
-	Method              string            `json:"method"`
-	Path                string            `json:"path"`
-	StatusCode          int               `json:"status_code"`
-	DurationMs          int64             `json:"duration_ms"`
-	AttemptNumber       int               `json:"attempt_number"` // 尝试次数（1表示第一次，2表示第一次重试，等等）
-	RequestHeaders      map[string]string `json:"request_headers"`
-	RequestBody         string            `json:"request_body"`
-	ResponseHeaders     map[string]string `json:"response_headers"`
-	ResponseBody        string            `json:"response_body"`
-	Error               string            `json:"error,omitempty"`
-	RequestBodySize     int               `json:"request_body_size"`
-	ResponseBodySize    int               `json:"response_body_size"`
-	IsStreaming         bool              `json:"is_streaming"`
-	Model               string            `json:"model,omitempty"`           // 显示的模型名（原始模型名）
-	OriginalModel       string            `json:"original_model,omitempty"`  // 新增：客户端请求的原始模型名
-	RewrittenModel      string            `json:"rewritten_model,omitempty"` // 新增：重写后发送给上游的模型名
-	ModelRewriteApplied bool              `json:"model_rewrite_applied"`     // 新增：是否发生了模型重写
-	Tags                []string          `json:"tags,omitempty"`
-	ContentTypeOverride string            `json:"content_type_override,omitempty"`
-	SessionID           string            `json:"session_id,omitempty"`
+	Timestamp             time.Time         `json:"timestamp"`
+	RequestID             string            `json:"request_id"`
+	Endpoint              string            `json:"endpoint"`
+	Method                string            `json:"method"`
+	Path                  string            `json:"path"`
+	StatusCode            int               `json:"status_code"`
+	DurationMs            int64             `json:"duration_ms"`
+	AttemptNumber         int               `json:"attempt_number"` // 尝试次数（1表示第一次，2表示第一次重试，等等）
+	RequestHeaders        map[string]string `json:"request_headers"`
+	RequestBody           string            `json:"request_body"`
+	ResponseHeaders       map[string]string `json:"response_headers"`
+	ResponseBody          string            `json:"response_body"`
+	RequestBodyHash       string            `json:"request_body_hash,omitempty"`
+	ResponseBodyHash      string            `json:"response_body_hash,omitempty"`
+	RequestBodyTruncated  bool              `json:"request_body_truncated"`
+	ResponseBodyTruncated bool              `json:"response_body_truncated"`
+	Error                 string            `json:"error,omitempty"`
+	RequestBodySize       int               `json:"request_body_size"`
+	ResponseBodySize      int               `json:"response_body_size"`
+	IsStreaming           bool              `json:"is_streaming"`
+	WasStreaming          bool              `json:"was_streaming"`
+	ConversionPath        string            `json:"conversion_path,omitempty"`
+	SupportsResponsesFlag string            `json:"supports_responses_flag,omitempty"`
+	Model                 string            `json:"model,omitempty"`           // 显示的模型名（原始模型名）
+	OriginalModel         string            `json:"original_model,omitempty"`  // 新增：客户端请求的原始模型名
+	RewrittenModel        string            `json:"rewritten_model,omitempty"` // 新增：重写后发送给上游的模型名
+	ModelRewriteApplied   bool              `json:"model_rewrite_applied"`     // 新增：是否发生了模型重写
+	Tags                  []string          `json:"tags,omitempty"`
+	ContentTypeOverride   string            `json:"content_type_override,omitempty"`
+	SessionID             string            `json:"session_id,omitempty"`
 	// Thinking mode fields
 	ThinkingEnabled      bool `json:"thinking_enabled"`       // 是否启用了 thinking 模式
 	ThinkingBudgetTokens int  `json:"thinking_budget_tokens"` // thinking 模式的 budget tokens
@@ -115,6 +126,7 @@ type LogConfig struct {
 	LogRequestBody  string
 	LogResponseBody string
 	LogDirectory    string
+	ExcludePaths    []string
 }
 
 func NewLogger(config LogConfig) (*Logger, error) {
@@ -144,6 +156,11 @@ func NewLogger(config LogConfig) (*Logger, error) {
 }
 
 func (l *Logger) LogRequest(log *RequestLog) {
+	// 检查是否应该排除此路径的日志
+	if l.shouldExcludePath(log.Path) {
+		return
+	}
+	
 	// 总是记录到存储，方便Web界面查看
 	l.storage.SaveLog(log)
 
@@ -197,6 +214,20 @@ func (l *Logger) LogRequest(log *RequestLog) {
 			l.logger.WithFields(fields).Info("Request completed")
 		}
 	}
+}
+
+// shouldExcludePath checks if a path should be excluded from logging
+func (l *Logger) shouldExcludePath(path string) bool {
+	if len(l.config.ExcludePaths) == 0 {
+		return false
+	}
+	
+	for _, excludePath := range l.config.ExcludePaths {
+		if path == excludePath {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldLogRequest determines if a request should be logged to console based on configuration
@@ -298,13 +329,21 @@ func (l *Logger) UpdateRequestLog(log *RequestLog, req *http.Request, resp *http
 	}
 
 	log.ResponseBodySize = len(body)
-	if l.config.LogResponseBody != "none" && len(body) > 0 {
-		if l.config.LogResponseBody == "truncated" {
-			log.ResponseBody = utils.TruncateBody(string(body), 1024)
-		} else {
-			log.ResponseBody = string(body)
+	if len(body) > 0 {
+		sum := sha256.Sum256(body)
+		preview := body
+		truncated := false
+		if len(preview) > logBodyPreviewLimit {
+			preview = preview[:logBodyPreviewLimit]
+			truncated = true
+		}
+		log.ResponseBodyHash = hex.EncodeToString(sum[:])
+		log.ResponseBodyTruncated = truncated
+		if l.config.LogResponseBody != "none" {
+			log.ResponseBody = string(preview)
 		}
 	}
+	log.WasStreaming = log.IsStreaming
 
 	if err != nil {
 		log.Error = err.Error()
@@ -341,4 +380,16 @@ func (l *Logger) GetStats() (map[string]interface{}, error) {
 		return nil, fmt.Errorf("storage not available")
 	}
 	return l.storage.GetStats()
+}
+
+// UpdateConfig 更新日志配置（用于热更新）
+func (l *Logger) UpdateConfig(newConfig LogConfig) {
+	// 更新日志级别
+	level, err := logrus.ParseLevel(newConfig.Level)
+	if err == nil {
+		l.logger.SetLevel(level)
+	}
+	
+	// 更新配置
+	l.config = newConfig
 }

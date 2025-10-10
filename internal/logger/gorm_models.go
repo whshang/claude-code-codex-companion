@@ -28,6 +28,7 @@ type GormRequestLog struct {
 	ResponseBody     string `gorm:"column:response_body;type:text;default:''"`
 	ResponseBodySize int    `gorm:"column:response_body_size;default:0"`
 	IsStreaming      bool   `gorm:"column:is_streaming;default:false"`
+	WasStreaming     bool   `gorm:"column:was_streaming;default:false"`
 
 	// 模型和标签字段
 	Model               string `gorm:"column:model;size:100;default:''"`
@@ -53,11 +54,17 @@ type GormRequestLog struct {
 	OriginalResponseBody    string `gorm:"column:original_response_body;type:text;default:''"`
 
 	// 最终请求/响应字段
-	FinalRequestURL      string `gorm:"column:final_request_url;size:500;default:''"`
-	FinalRequestHeaders  string `gorm:"column:final_request_headers;type:text;default:'{}'"`
-	FinalRequestBody     string `gorm:"column:final_request_body;type:text;default:''"`
-	FinalResponseHeaders string `gorm:"column:final_response_headers;type:text;default:'{}'"`
-	FinalResponseBody    string `gorm:"column:final_response_body;type:text;default:''"`
+	FinalRequestURL       string `gorm:"column:final_request_url;size:500;default:''"`
+	FinalRequestHeaders   string `gorm:"column:final_request_headers;type:text;default:'{}'"`
+	FinalRequestBody      string `gorm:"column:final_request_body;type:text;default:''"`
+	FinalResponseHeaders  string `gorm:"column:final_response_headers;type:text;default:'{}'"`
+	FinalResponseBody     string `gorm:"column:final_response_body;type:text;default:''"`
+	RequestBodyHash       string `gorm:"column:request_body_hash;size:128;default:''"`
+	ResponseBodyHash      string `gorm:"column:response_body_hash;size:128;default:''"`
+	RequestBodyTruncated  bool   `gorm:"column:request_body_truncated;default:false"`
+	ResponseBodyTruncated bool   `gorm:"column:response_body_truncated;default:false"`
+	ConversionPath        string `gorm:"column:conversion_path;size:100;default:''"`
+	SupportsResponsesFlag string `gorm:"column:supports_responses_flag;size:20;default:''"`
 
 	// 新增：被拉黑端点相关字段
 	BlacklistCausingRequestIDs string     `gorm:"column:blacklist_causing_request_ids;type:text;default:'[]'"`
@@ -104,10 +111,17 @@ func ConvertToGormRequestLog(log *RequestLog) *GormRequestLog {
 		ResponseBody:               log.ResponseBody,
 		ResponseBodySize:           log.ResponseBodySize,
 		IsStreaming:                log.IsStreaming,
+		WasStreaming:               log.WasStreaming,
 		Model:                      log.Model,
 		Error:                      log.Error,
 		ContentTypeOverride:        log.ContentTypeOverride,
 		SessionID:                  log.SessionID,
+		RequestBodyHash:            log.RequestBodyHash,
+		ResponseBodyHash:           log.ResponseBodyHash,
+		RequestBodyTruncated:       log.RequestBodyTruncated,
+		ResponseBodyTruncated:      log.ResponseBodyTruncated,
+		ConversionPath:             log.ConversionPath,
+		SupportsResponsesFlag:      log.SupportsResponsesFlag,
 		OriginalModel:              log.OriginalModel,
 		RewrittenModel:             log.RewrittenModel,
 		ModelRewriteApplied:        log.ModelRewriteApplied,
@@ -163,6 +177,13 @@ func ConvertFromGormRequestLog(gormLog *GormRequestLog) *RequestLog {
 		ResponseBody:               gormLog.ResponseBody,
 		ResponseBodySize:           gormLog.ResponseBodySize,
 		IsStreaming:                gormLog.IsStreaming,
+		WasStreaming:               gormLog.WasStreaming,
+		RequestBodyHash:            gormLog.RequestBodyHash,
+		ResponseBodyHash:           gormLog.ResponseBodyHash,
+		RequestBodyTruncated:       gormLog.RequestBodyTruncated,
+		ResponseBodyTruncated:      gormLog.ResponseBodyTruncated,
+		ConversionPath:             gormLog.ConversionPath,
+		SupportsResponsesFlag:      gormLog.SupportsResponsesFlag,
 		Model:                      gormLog.Model,
 		Error:                      gormLog.Error,
 		ContentTypeOverride:        gormLog.ContentTypeOverride,

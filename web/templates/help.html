@@ -11,8 +11,9 @@
     <link href="/static/help.css" rel="stylesheet">
 </head>
 <body>
+    {{template "header.html" .}}
     <!-- Compact Hero Section -->
-    <div class="hero-section py-4" style="min-height: auto;">
+    <div class="hero-section py-4 bg-transparent" style="min-height: auto;">
         <div class="container">
             <div class="row align-items-center">
                 <div class="col-md-9">
@@ -20,16 +21,22 @@
                         <i class="fas fa-robot text-primary"></i>
                         <span data-t="cccc_help">CCCC 统一配置向导</span>
                     </h2>
-                    <p class="mb-2 lead" style="font-size: 1.1rem;">
-                        <span data-t="setup_guide_cccc">30秒完成 Claude Code 和 Codex 配置</span>
+                    <p class="mb-2 text-muted small">
+                        感谢 <a href="https://github.com/kxn/claude-code-companion" target="_blank" rel="noopener noreferrer">原项目</a> 与 <a href="https://toolify.ai/" target="_blank" rel="noopener noreferrer">Toolify 社区</a> 的贡献支持。<br />
+                        请确认已安装 Claude Code 或 Codex，并持有任一可用模型的 API 密钥。
                     </p>
-                    <p class="mb-2 text-muted small">感谢 Toolify 社区贡献零配置 Tool Calling 方案，并持续帮助改进日志与端点配置体验。</p>
-                    <div class="d-flex gap-2">
-                        <a href="/admin/" class="btn btn-sm btn-outline-light">
+                    <div class="d-flex flex-wrap gap-2">
+                        <a href="/admin/" class="btn btn-sm btn-outline-primary">
                             <i class="fas fa-cog"></i> 管理面板
                         </a>
-                        <a href="/admin/endpoints" class="btn btn-sm btn-outline-light">
+                        <a href="/admin/endpoints" class="btn btn-sm btn-outline-primary">
                             <i class="fas fa-server"></i> 端点配置
+                        </a>
+                        <a href="/admin/logs" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-history"></i> 请求日志
+                        </a>
+                        <a href="https://github.com/whshang/claude-code-codex-companion" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-primary">
+                            <i class="fab fa-github"></i> GitHub 项目
                         </a>
                     </div>
                 </div>
@@ -41,57 +48,6 @@
     </div>
 
     <div class="container">
-        <!-- Quick Status Check -->
-        <div class="row mb-3">
-            <div class="col-12">
-                <div class="alert alert-info py-2 mb-0">
-                    <div class="d-flex align-items-center">
-                        <i class="fas fa-info-circle me-2"></i>
-                        <span class="small">确保已安装 Claude Code 或 Codex，并拥有可用的 API 密钥</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- New Features Spotlight -->
-        <div class="row mb-3">
-            <div class="col-12">
-                <div class="alert alert-success py-2 mb-0">
-                    <div class="d-flex flex-column flex-lg-row align-items-lg-center">
-                        <div class="me-lg-3 fw-bold"><i class="fas fa-star me-2"></i>近期亮点</div>
-                        <div class="small">零配置工具调用增强、端点级 <code>count_tokens</code> 开关与本地估算、请求日志新增 Tool/Native/Enh 指标 —— 特别感谢 Toolify 的贡献。</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Quick Setup Section -->
-        <div class="row mb-4">
-            <div class="col-12">
-                <div class="card border-success">
-                    <div class="card-header bg-success text-white py-3">
-                        <h5 class="mb-0">
-                            <i class="fas fa-bolt"></i>
-                            快速操作
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="d-grid gap-2 d-md-flex justify-content-md-center">
-                            <a href="/admin/" class="btn btn-outline-primary flex-fill">
-                                <i class="fas fa-tachometer-alt"></i> 控制台
-                            </a>
-                            <a href="/admin/endpoints" class="btn btn-outline-info flex-fill">
-                                <i class="fas fa-list"></i> 端点列表
-                            </a>
-                            <a href="/admin/logs" class="btn btn-outline-warning flex-fill">
-                                <i class="fas fa-history"></i> 请求日志
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Configuration Options -->
         <div class="row mb-4">
             <div class="col-12">
@@ -211,7 +167,7 @@
                                     <li><strong>重写规则:</strong> 自定义请求/响应内容重写</li>
                             <li><strong>负载均衡:</strong> 多端点之间的负载分配策略</li>
                             <li><strong>故障转移:</strong> 主端点失败时自动切换策略</li>
-                            <li><strong>工具调用增强（零配置）:</strong> 客户端请求包含 <code>tools</code> 时自动注入提示并解析函数调用；支持端点级学习 <code>native_tool_support</code> 与增强模式 <code>tool_enhancement_mode</code>（auto/force/disable）。功能由 Toolify 社区协同打造，非流式已集成，流式（SSE）将于后续接入。详见 <code>docs/tool-calling.md</code></li>
+                            <li><strong>工具调用增强（零配置）:</strong> 客户端请求包含 <code>tools</code> 时自动注入提示并解析函数调用；支持端点级学习 <code>native_tool_support</code> 与增强模式 <code>tool_enhancement_mode</code>（auto/force/disable）。功能由 Toolify 社区协同打造，非流式已集成，流式（SSE）将于后续接入。详见 <code>docs/工具调用增强_Tool_Calling_Enhancement.md</code></li>
                             <li><strong>count_tokens 本地兜底:</strong> 针对不兼容供应商，可关闭端点级 <code>count_tokens</code> 支持；全部端点不支持时，CCCC 会返回标记 <code>proxy_estimated=true</code> 的轻量估算结果。</li>
                         </ul>
 
@@ -327,6 +283,24 @@ env_key = "OPENAI_API_KEY"
     <script src="/static/i18n.js"></script>
     <script src="/static/shared.js"></script>
     <script>
+        // Initialize common features when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeCommonFeatures();
+        });
+        
+        // Also try to initialize immediately if DOM is already loaded
+        if (document.readyState !== 'loading') {
+            initializeCommonFeatures();
+        }
+        
+        // Force update language dropdown after a short delay
+        setTimeout(function() {
+            if (typeof updateLanguageDropdown === 'function') {
+                updateLanguageDropdown();
+            }
+        }, 200);
+    </script>
+    <script>
         function copyToClipboard(elementId) {
             const element = document.getElementById(elementId);
             element.select();
@@ -354,6 +328,78 @@ env_key = "OPENAI_API_KEY"
 
             if (type === 'claude-code') {
                 filename = 'cccc-setup-claude-code.sh';
+                scriptContent = '#!/bin/bash\n' +
+                    '# CCCC Configuration Script for Claude Code\n' +
+                    'set -e\n' +
+                    'DEFAULT_BASE_URL="' + baseUrl + '"\n' +
+                    'CLAUDE_CONFIG_DIR="$HOME/.claude"\n' +
+                    'CLAUDE_SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"\n' +
+                    '\n' +
+                    'create_settings() {\n' +
+                    '    local base_url="$1"\n' +
+                    '    local api_key="$2"\n' +
+                    '    mkdir -p "$CLAUDE_CONFIG_DIR"\n' +
+                    '    cat > "$CLAUDE_SETTINGS_FILE" << EOF\n' +
+                    '{\n' +
+                    '  "env": {\n' +
+                    '    "ANTHROPIC_BASE_URL": "' + baseUrl + '",\n' +
+                    '    "ANTHROPIC_AUTH_TOKEN": "$api_key",\n' +
+                    '    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": 20000,\n' +
+                    '    "DISABLE_TELEMETRY": 1\n' +
+                    '  },\n' +
+                    '  "model": "sonnet"\n' +
+                    '}\n' +
+                    'EOF\n' +
+                    '    echo "Claude Code settings created successfully"\n' +
+                    '}\n' +
+                    '\n' +
+                    'main() {\n' +
+                    '    echo "CCCC Configuration for Claude Code"\n' +
+                    '    read -p "Enter API key: " api_key\n' +
+                    '    create_settings "' + baseUrl + '" "$api_key"\n' +
+                    '    echo "Configuration completed!"\n' +
+                    '}\n' +
+                    'main "$@"';
+
+            } else if (type === 'codex') {
+                filename = 'cccc-setup-codex.sh';
+                scriptContent = '#!/bin/bash\n' +
+                    '# CCCC Configuration Script for Codex\n' +
+                    'set -e\n' +
+                    'DEFAULT_BASE_URL="' + baseUrl + '"\n' +
+                    'mkdir -p "$HOME/.codex"\n' +
+                    'cat > "$HOME/.codex/config.toml" << EOF\n' +
+                    'model_provider = "cccc"\n' +
+                    'model = "gpt-5-codex"\n' +
+                    '[Model_providers.cccc]\n' +
+                    'name = "cccc"\n' +
+                    'base_url = "' + baseUrl + '/v1"\n' +
+                    'env_key = "OPENAI_API_KEY"\n' +
+                    'EOF\n' +
+                    'echo "Codex configuration completed!"';
+
+            } else {
+                filename = 'cccc-setup.sh';
+                scriptContent = '#!/bin/bash\n' +
+                    '# CCCC Unified Configuration Script\n' +
+                    'echo "Unified configuration for both Claude Code and Codex"\n' +
+                    'BASE_URL="' + baseUrl + '"\n' +
+                    'echo "Base URL: $BASE_URL"';
+            }
+
+            const blob = new Blob([scriptContent], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+
+            if (type === 'claude-code') {
+                filename = 'cccc-setup-claude-code.sh';
                 scriptContent = `#!/bin/bash
 
 # CCCC (Claude Code Codex Companion) Configuration Script for Claude Code
@@ -362,7 +408,7 @@ env_key = "OPENAI_API_KEY"
 set -e
 
 # Default values
-DEFAULT_BASE_URL="${baseUrl}"
+DEFAULT_BASE_URL="' + baseUrl + '"
 CLAUDE_CONFIG_DIR="$HOME/.claude"
 CLAUDE_SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
 
@@ -376,7 +422,7 @@ create_settings() {
     cat > "$CLAUDE_SETTINGS_FILE" << EOF
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "${base_url}",
+    "ANTHROPIC_BASE_URL": "' + baseUrl + '",
     "ANTHROPIC_AUTH_TOKEN": "$api_key",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": 20000,
     "DISABLE_TELEMETRY": 1,
@@ -440,7 +486,7 @@ main "$@"`;
 set -e
 
 # Default values
-DEFAULT_BASE_URL="${baseUrl}"
+DEFAULT_BASE_URL="' + baseUrl + '"
 
 # Function to create Codex configuration
 create_codex_config() {
@@ -458,7 +504,7 @@ model_reasoning_effort = "high"
 
 [Model_providers.cccc]
 name = "cccc"
-base_url = "${base_url}/v1"
+base_url = "' + baseUrl + '/v1"
 wire_api = "responses"
 env_key = "OPENAI_API_KEY"
 EOF
@@ -523,7 +569,7 @@ main "$@"`;
 set -e
 
 # Default values
-DEFAULT_BASE_URL="${baseUrl}"
+DEFAULT_BASE_URL="' + baseUrl + '"
 
 # Function to create Claude Code settings
 create_claude_settings() {
@@ -566,7 +612,7 @@ model_reasoning_effort = "high"
 
 [Model_providers.cccc]
 name = "cccc"
-base_url = "${base_url}/v1"
+base_url = "' + baseUrl + '/v1"
 wire_api = "responses"
 env_key = "OPENAI_API_KEY"
 EOF

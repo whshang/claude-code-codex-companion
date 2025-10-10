@@ -59,6 +59,7 @@ type Endpoint struct {
 	EnhancedProtection bool                       `json:"enhanced_protection,omitempty"`   // 官方帐号增强保护：allowed_warning时即禁用端点
 	SSEConfig          *config.SSEConfig          `json:"sse_config,omitempty"`            // SSE行为配置
 	OpenAIPreference   string                     `json:"openai_preference,omitempty"`     // OpenAI格式偏好："responses"|"chat_completions"|"auto"
+	SupportsResponses  *bool                      `json:"supports_responses,omitempty"`   // 显式声明 /responses 支持情况
 	// 原生工具调用支持（学习或手动设置）。nil 表示未知/未学习
 	NativeToolSupport *bool `json:"native_tool_support,omitempty"`
 	// 工具调用增强模式："auto"|"force"|"disable"
@@ -117,6 +118,23 @@ func NewEndpoint(cfg config.EndpointConfig) *Endpoint {
 		countTokensEnabled = *cfg.CountTokensEnabled
 	}
 
+	openAIPreference := cfg.OpenAIPreference
+	var nativeCodexFormat *bool
+	if cfg.SupportsResponses != nil {
+		val := *cfg.SupportsResponses
+		copyVal := val
+		nativeCodexFormat = &copyVal
+		if val {
+			if openAIPreference == "" || openAIPreference == "auto" {
+				openAIPreference = "responses"
+			}
+		} else {
+			if openAIPreference == "" || openAIPreference == "auto" {
+				openAIPreference = "chat_completions"
+			}
+		}
+	}
+
 	return &Endpoint{
 		ID:                  generateID(cfg.Name),
 		Name:                cfg.Name,
@@ -138,10 +156,12 @@ func NewEndpoint(cfg config.EndpointConfig) *Endpoint {
 		RateLimitStatus:     cfg.RateLimitStatus,
 		EnhancedProtection:  cfg.EnhancedProtection,
 		SSEConfig:           cfg.SSEConfig,
-		OpenAIPreference:    cfg.OpenAIPreference,
+		OpenAIPreference:    openAIPreference,
+		SupportsResponses:  cfg.SupportsResponses,
 		NativeToolSupport:   cfg.NativeToolSupport,
 		ToolEnhancementMode: cfg.ToolEnhancementMode,
 		CountTokensEnabled:  countTokensEnabled,
+		NativeCodexFormat:   nativeCodexFormat,
 		Status:              StatusActive,
 		LastCheck:           time.Now(),
 		RequestHistory:      utils.NewCircularBuffer(100, 140*time.Second),

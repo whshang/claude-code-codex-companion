@@ -65,6 +65,8 @@ logging:
     log_request_body: truncated    # none | truncated | full
     log_response_body: truncated   # none | truncated | full
     log_directory: ./logs
+    exclude_paths:                 # 不记录日志的路径列表
+        - /v1/messages/count_tokens
 
 validation:
     # 严格 Anthropic 格式校验和流式响应校验已永久启用
@@ -105,9 +107,9 @@ tagging:
 
 # I18n 多语言支持（实验性功能）
 i18n:
-    enabled: false
-    default_language: ""
-    locales_path: ""
+    enabled: true
+    default_language: "zh-cn"
+    locales_path: "./web/locales"
 
 # ============================================================================
 # 配置说明

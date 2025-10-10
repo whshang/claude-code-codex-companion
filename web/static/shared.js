@@ -583,11 +583,11 @@ async function checkForUpdates() {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
         
-        const response = await fetch('https://api.github.com/repos/kxn/claude-code-companion/releases/latest', {
+        const response = await fetch('https://api.github.com/repos/whshang/claude-code-codex-companion/releases/latest', {
             method: 'GET',
             headers: {
                 'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'Claude-Code-Companion-Version-Check'
+                'User-Agent': 'Claude-Code-Codex-Companion-Version-Check'
             },
             mode: 'cors',
             signal: controller.signal
@@ -656,7 +656,7 @@ async function checkForUpdates() {
 
 function showUpdateBadge(latestVersion) {
     try {
-        const githubLink = document.querySelector('a[href*="github.com/kxn/claude-code-companion"]');
+        const githubLink = document.querySelector('a[href*="github.com/whshang/claude-code-codex-companion"]');
         if (!githubLink) {
             console.debug('GitHub link not found, skipping update badge display');
             return;
@@ -687,7 +687,7 @@ function showUpdateBadge(latestVersion) {
 
 function hideUpdateBadge() {
     try {
-        const githubLink = document.querySelector('a[href*="github.com/kxn/claude-code-companion"]');
+        const githubLink = document.querySelector('a[href*="github.com/whshang/claude-code-codex-companion"]');
         if (!githubLink) {
             console.debug('GitHub link not found, nothing to hide');
             return;

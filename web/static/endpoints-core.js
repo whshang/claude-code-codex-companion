@@ -24,6 +24,18 @@ document.addEventListener('DOMContentLoaded', function() {
             showAddEndpointModal();
         } else if (action === 'show-endpoint-wizard') {
             showEndpointWizard();
+        } else if (action === 'set-supports') {
+            e.preventDefault();
+            e.stopPropagation();
+            const button = e.target.closest('[data-action="set-supports"]');
+            if (!button) {
+                return;
+            }
+            const endpointName = button.dataset.endpoint;
+            const mode = button.dataset.mode;
+            if (endpointName && mode) {
+                updateSupportsResponses(endpointName, mode, button);
+            }
         }
     });
 });
@@ -137,6 +149,71 @@ function updateEndpointRowStatus(row, endpoint) {
 function refreshTable() {
     // Reload endpoint data instead of refreshing the entire page
     loadEndpoints();
+}
+
+function buildSupportsUpdatePayload(endpoint, mode) {
+    const payload = {
+        enabled: endpoint.enabled,
+        tags: endpoint.tags ? [...endpoint.tags] : [],
+        proxy: endpoint.proxy ? { ...endpoint.proxy } : null,
+        header_overrides: endpoint.header_overrides ? { ...endpoint.header_overrides } : {},
+        parameter_overrides: endpoint.parameter_overrides ? { ...endpoint.parameter_overrides } : {},
+        supports_responses: mode === 'native' ? true : mode === 'convert' ? false : null,
+    };
+
+    if (endpoint.model_rewrite) {
+        payload.model_rewrite = JSON.parse(JSON.stringify(endpoint.model_rewrite));
+    }
+    if (typeof endpoint.count_tokens_enabled === 'boolean') {
+        payload.count_tokens_enabled = endpoint.count_tokens_enabled;
+    }
+
+    return payload;
+}
+
+function updateSupportsResponses(endpointName, mode, triggerButton) {
+    const endpoint = currentEndpoints.find(ep => ep.name === endpointName);
+    if (!endpoint) {
+        showAlert(`端点 ${endpointName} 不存在`, 'danger');
+        return;
+    }
+
+    const payload = buildSupportsUpdatePayload(endpoint, mode);
+    const newValue = mode === 'native' ? true : mode === 'convert' ? false : null;
+
+    if (triggerButton) {
+        triggerButton.setAttribute('disabled', 'disabled');
+        triggerButton.classList.add('loading');
+    }
+
+    apiRequest(`/admin/api/endpoints/${encodeURIComponent(endpointName)}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    })
+        .then(async response => {
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.error) {
+                const message = data.error || `HTTP ${response.status}`;
+                throw new Error(message);
+            }
+            endpoint.supports_responses = newValue;
+            const modeLabel = mode === 'native' ? '显式设置为原生响应' : mode === 'convert' ? '显式设置为强制转换' : '恢复自动探测';
+            showAlert(`${endpointName}: ${modeLabel}`, 'success');
+            loadEndpoints();
+        })
+        .catch(error => {
+            console.error('Failed to update supports_responses:', error);
+            showAlert(`更新 /responses 策略失败：${error.message}`, 'danger');
+        })
+        .finally(() => {
+            if (triggerButton) {
+                triggerButton.classList.remove('loading');
+                triggerButton.removeAttribute('disabled');
+            }
+        });
 }
 
 // Show endpoint wizard modal

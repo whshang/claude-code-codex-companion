@@ -16,7 +16,7 @@ func (s *AdminServer) saveEndpointsToConfig(endpointConfigs []config.EndpointCon
 }
 
 // createEndpointConfigFromRequest 从请求创建端点配置，自动设置优先级
-func createEndpointConfigFromRequest(name, urlAnthropic, urlOpenAI, authType, authValue string, enabled bool, priority int, tags []string, proxy *config.ProxyConfig, oauthConfig *config.OAuthConfig, headerOverrides map[string]string, parameterOverrides map[string]string, countTokensEnabled *bool) config.EndpointConfig {
+func createEndpointConfigFromRequest(name, urlAnthropic, urlOpenAI, authType, authValue string, enabled bool, priority int, tags []string, proxy *config.ProxyConfig, oauthConfig *config.OAuthConfig, headerOverrides map[string]string, parameterOverrides map[string]string, countTokensEnabled *bool, supportsResponses *bool) config.EndpointConfig {
 	return config.EndpointConfig{
 		Name:               name,
 		URLAnthropic:       urlAnthropic,
@@ -31,6 +31,7 @@ func createEndpointConfigFromRequest(name, urlAnthropic, urlOpenAI, authType, au
 		HeaderOverrides:    headerOverrides,
 		ParameterOverrides: parameterOverrides,
 		CountTokensEnabled: countTokensEnabled,
+		SupportsResponses:  supportsResponses,
 	}
 }
 

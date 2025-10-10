@@ -156,10 +156,15 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 			// 这样确保 assistant 和 tool 消息紧挨着
 			for _, tr := range toolResults {
 				if tr.ToolUseID == "" {
-					// 如果没有 tool_use_id，尝试退化策略：用工具名匹配最新 id
-					// 这需要 Claude Code 侧把名字塞在 content[0].text 或外部上下文；这里尽量保守
-					// 因上下文不可靠，这里严格要求 tool_use_id 存在：
-					return nil, nil, errors.New("user.tool_result is missing tool_use_id")
+					// 尝试通过工具名匹配最近一次生成的 call id
+					if tr.Name != "" {
+						if fallbackID, exists := latestCallIDByName[tr.Name]; exists && fallbackID != "" {
+							tr.ToolUseID = fallbackID
+						}
+					}
+					if tr.ToolUseID == "" {
+						return nil, nil, errors.New("user.tool_result is missing tool_use_id")
+					}
 				}
 
 				// 提取 tool_result 的内容

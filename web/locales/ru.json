@@ -12,6 +12,7 @@
     "navigation_taggers": "Тегеры",
     "navigation_request_logs": "Монитор Запросов",
     "navigation_settings": "Настройки",
+    "navigation_help": "Справка",
     "total_endpoints": "Общее количество конечных точек",
     "active_endpoints": "Активные конечные точки",
     "total_requests": "Общее количество запросов",

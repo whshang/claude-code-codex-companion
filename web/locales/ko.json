@@ -12,6 +12,7 @@
     "navigation_taggers": "태거",
     "navigation_request_logs": "요청 모니터",
     "navigation_settings": "설정",
+    "navigation_help": "도움말",
     "total_endpoints": "총 엔드포인트",
     "active_endpoints": "활성 엔드포인트",
     "total_requests": "총 요청 수",

@@ -18,6 +18,7 @@
             <a class="nav-link {{if eq .CurrentPage "taggers"}}active{{end}}" href="/admin/taggers"><span data-t="navigation_taggers">标记器</span></a>
             <a class="nav-link {{if eq .CurrentPage "logs"}}active{{end}}" href="/admin/logs"><span data-t="navigation_request_logs">请求日志</span></a>
             <a class="nav-link {{if eq .CurrentPage "settings"}}active{{end}}" href="/admin/settings"><span data-t="navigation_settings">系统设置</span></a>
+            <a class="nav-link {{if eq .CurrentPage "help"}}active{{end}}" href="/"><span data-t="navigation_help">帮助</span></a>
             <div class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle" href="#" id="languageDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false" data-current-lang="{{.CurrentLanguage}}">
                     <span id="currentLanguageFlag"></span>
@@ -29,7 +30,7 @@
                     {{end}}
                 </ul>
             </div>
-            <a class="nav-link" href="https://github.com/kxn/claude-code-companion" target="_blank" data-t-title="github_repository_title" title="GitHub 仓库">
+            <a class="nav-link" href="https://github.com/whshang/claude-code-codex-companion" target="_blank" data-t-title="github_repository_title" title="GitHub 仓库">
                 <i class="fab fa-github"></i>
             </a>
         </div>

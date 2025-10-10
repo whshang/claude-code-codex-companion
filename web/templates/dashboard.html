@@ -61,6 +61,78 @@
         </div>
 
         <div class="row">
+            <div class="col-lg-6 col-md-12 mb-3">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">/responses 配置 &amp; 学习状态</h5>
+                        <small class="text-muted">当前端点配置</small>
+                    </div>
+                    <div class="card-body">
+                        <h6 class="text-uppercase text-muted small">配置（config.yaml / Admin 手动）</h6>
+                        <div class="d-flex flex-wrap gap-2 mb-3">
+                            <span class="badge bg-success">原生 {{index .SupportsConfigCounts "native"}}</span>
+                            <span class="badge bg-warning text-dark">强制转换 {{index .SupportsConfigCounts "convert"}}</span>
+                            <span class="badge bg-secondary">自动探测 {{index .SupportsConfigCounts "auto"}}</span>
+                        </div>
+
+                        <h6 class="text-uppercase text-muted small">学习结果（最近一次探测）</h6>
+                        <div class="d-flex flex-wrap gap-2 mb-3">
+                            <span class="badge bg-success">原生 {{index .SupportsLearnedCounts "native"}}</span>
+                            <span class="badge bg-warning text-dark">转换 {{index .SupportsLearnedCounts "converted"}}</span>
+                            <span class="badge bg-secondary">未知 {{index .SupportsLearnedCounts "unknown"}}</span>
+                        </div>
+
+                        <p class="mb-0 text-muted small">提示：配置与学习状态不一致的端点建议复查是否需要显式声明或回滚。</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6 col-md-12 mb-3">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">/responses 降级频次（近24小时）</h5>
+                        <small class="text-muted">合计 {{.TotalDowngrades}}</small>
+                    </div>
+                    <div class="card-body">
+                        {{if gt (len .DowngradeStats) 0}}
+                        <div class="table-responsive mb-3">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>端点</th>
+                                        <th class="text-end">降级次数</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .DowngradeStats}}
+                                    <tr>
+                                        <td>{{.Label}}</td>
+                                        <td class="text-end">{{.Count}}</td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                        {{else}}
+                        <p class="text-muted mb-3">近24小时未记录到 /responses → /chat/completions 的降级。</p>
+                        {{end}}
+
+                        <h6 class="text-uppercase text-muted small">supports_responses_flag（近24小时）</h6>
+                        {{if gt (len .SupportsFlagCounts) 0}}
+                        <div class="d-flex flex-wrap gap-2">
+                            {{range .SupportsFlagCounts}}
+                            <span class="badge bg-light text-dark border">{{.Label}} {{.Count}}</span>
+                            {{end}}
+                        </div>
+                        {{else}}
+                        <p class="text-muted mb-0">暂无标记数据。</p>
+                        {{end}}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
             <div class="col-12">
                 <div class="card">
                     <div class="card-header">

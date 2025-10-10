@@ -47,6 +47,8 @@ document.getElementById('endpointForm').reset();
     
     // Clear max tokens field name configuration
     document.getElementById('max-tokens-field-name').value = '';
+	const supportsResponsesSelect = document.getElementById('supports-responses');
+	if (supportsResponsesSelect) supportsResponsesSelect.value = '';
     const nativeToolSelect = document.getElementById('native-tool-support');
     if (nativeToolSelect) nativeToolSelect.value = '';
     const toolEnhMode = document.getElementById('tool-enhancement-mode');
@@ -63,6 +65,8 @@ document.getElementById('endpointForm').reset();
     // Reset to basic configuration tab
     resetModalTabs();
     
+	updateSupportsRuntimeIndicator('unknown', '');
+
     endpointModal.show();
 }
 
@@ -76,6 +80,7 @@ function showEditEndpointModal(endpointName) {
     editingEndpointName = endpointName;
     originalAuthValue = endpoint.auth_value;
     isAuthVisible = false;
+	const supportsResponsesSelect = document.getElementById('supports-responses');
     
     document.getElementById('endpointModalTitle').textContent = T('edit_endpoint', '编辑端点');
     
@@ -135,6 +140,11 @@ function showEditEndpointModal(endpointName) {
     const maxTokensFieldName = endpoint.max_tokens_field_name || '';
     document.getElementById('max-tokens-field-name').value = maxTokensFieldName;
     // Load tool settings
+	if (supportsResponsesSelect) {
+		if (endpoint.supports_responses === true) supportsResponsesSelect.value = 'true';
+		else if (endpoint.supports_responses === false) supportsResponsesSelect.value = 'false';
+		else supportsResponsesSelect.value = '';
+	}
 	if (endpoint.native_tool_support !== undefined && endpoint.native_tool_support !== null) {
 		document.getElementById('native-tool-support').value = String(!!endpoint.native_tool_support);
 	} else {
@@ -145,6 +155,13 @@ function showEditEndpointModal(endpointName) {
 	if (countTokensCheckbox) {
 		countTokensCheckbox.checked = endpoint.count_tokens_enabled !== false;
 	}
+
+	const runtimeState = endpoint.native_codex_format === true
+		? 'native'
+		: endpoint.native_codex_format === false
+			? 'converted'
+			: 'unknown';
+	updateSupportsRuntimeIndicator(runtimeState, endpoint.openai_preference || '');
     
     // Load enhanced protection configuration
     const enhancedProtection = endpoint.enhanced_protection || false;
@@ -184,6 +201,33 @@ function resetModalTabs() {
         advanced2Tab.setAttribute('aria-selected', 'false');
         advanced2Pane.classList.remove('show', 'active');
     }
+}
+
+function updateSupportsRuntimeIndicator(state, preference) {
+	const indicator = document.getElementById('supports-runtime-indicator');
+	const note = document.getElementById('supports-runtime-note');
+	if (!indicator || !note) {
+		return;
+	}
+
+	let badgeClass = 'bg-secondary';
+	let text = '当前学习：未知';
+	if (state === 'native') {
+		badgeClass = 'bg-success';
+		text = '当前学习：原生';
+	} else if (state === 'converted') {
+		badgeClass = 'bg-warning text-dark';
+		text = '当前学习：转换';
+	}
+
+	indicator.className = `badge ${badgeClass}`;
+	indicator.textContent = text;
+
+	if (preference && preference.length > 0) {
+		note.textContent = `当前 openai_preference: ${preference}`;
+	} else {
+		note.textContent = '根据最近一次请求自动更新';
+	}
 }
 
 function saveEndpoint() {
@@ -240,6 +284,7 @@ function saveEndpoint() {
     const tagsInput = document.getElementById('endpoint-tags').value.trim();
     const tags = tagsInput ? tagsInput.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
 
+	const supportsResponsesSelect = document.getElementById('supports-responses');
 	const data = {
 		name: document.getElementById('endpoint-name').value,
 		url_anthropic: urlAnthropic || undefined, // Anthropic URL
@@ -257,6 +302,11 @@ function saveEndpoint() {
 		enhanced_protection: document.getElementById('enhanced-protection-enabled').checked, // New: enhanced protection for official accounts
 		count_tokens_enabled: document.getElementById('count-tokens-enabled').checked
 	};
+	if (supportsResponsesSelect) {
+		if (supportsResponsesSelect.value === 'true') data.supports_responses = true;
+		else if (supportsResponsesSelect.value === 'false') data.supports_responses = false;
+		else data.supports_responses = null;
+	}
     
     // Add OAuth config if present
     if (oauthConfig) {

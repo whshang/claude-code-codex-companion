@@ -1,6 +1,7 @@
 package i18n
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -35,6 +36,9 @@ func (t *Translator) ProcessHTML(html string, lang Language, getTranslation func
 	// Pattern to match: data-t="key">content</tag>
 	fullPattern := regexp.MustCompile(`(<[^>]*data-t="([^"]+)"[^>]*>)([^<]*)(</[^>]+>)`)
 	matches := fullPattern.FindAllStringSubmatch(result, -1)
+	
+	// Debug: log pattern matching
+	fmt.Printf("Translation processing: lang=%s, matches=%d\n", lang, len(matches))
 	
 	for _, match := range matches {
 		if len(match) >= 5 {

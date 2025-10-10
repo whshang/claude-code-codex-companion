@@ -9,7 +9,7 @@ import (
 var (
 	// Default values for i18n parameters
 	LangQueryParam = "lang"
-	LangCookieName = "language"  
+	LangCookieName = "claude_proxy_lang"  
 	LangHeaderName = "Accept-Language"
 )
 

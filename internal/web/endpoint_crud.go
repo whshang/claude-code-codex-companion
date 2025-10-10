@@ -68,6 +68,7 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 		NativeToolSupport   *bool               `json:"native_tool_support,omitempty"`   // 新增：原生工具调用支持（可选）
 		ToolEnhancementMode string              `json:"tool_enhancement_mode,omitempty"` // 新增：工具调用增强模式（可选）
 		CountTokensEnabled  *bool               `json:"count_tokens_enabled,omitempty"`  // 新增：是否允许 /count_tokens
+		SupportsResponses   *bool               `json:"supports_responses,omitempty"`    // 新增：显式声明 /responses 支持
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -169,7 +170,7 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 	newEndpoint := createEndpointConfigFromRequest(
 		request.Name, request.URLAnthropic, request.URLOpenAI,
 		request.AuthType, request.AuthValue,
-		request.Enabled, maxPriority+1, request.Tags, request.Proxy, request.OAuthConfig, request.HeaderOverrides, request.ParameterOverrides, countTokensPtr)
+		request.Enabled, maxPriority+1, request.Tags, request.Proxy, request.OAuthConfig, request.HeaderOverrides, request.ParameterOverrides, countTokensPtr, request.SupportsResponses)
 	// 设置可选的工具相关配置
 	newEndpoint.NativeToolSupport = request.NativeToolSupport
 	if request.ToolEnhancementMode != "" {
@@ -216,6 +217,7 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 		NativeToolSupport   *bool                      `json:"native_tool_support,omitempty"`
 		ToolEnhancementMode string                     `json:"tool_enhancement_mode,omitempty"`
 		CountTokensEnabled  *bool                      `json:"count_tokens_enabled,omitempty"`
+		SupportsResponses   *bool                      `json:"supports_responses,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -368,6 +370,7 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 				*ptr = *request.CountTokensEnabled
 				currentEndpoints[i].CountTokensEnabled = ptr
 			}
+			currentEndpoints[i].SupportsResponses = request.SupportsResponses
 			// 如果没有model_rewrite字段，保持原有配置不变
 
 			found = true

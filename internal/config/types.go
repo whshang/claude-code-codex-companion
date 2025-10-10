@@ -49,6 +49,8 @@ type EndpointConfig struct {
 	ToolEnhancementMode string `yaml:"tool_enhancement_mode,omitempty" json:"tool_enhancement_mode,omitempty"`
 	// 新增：是否允许使用 /count_tokens 接口（默认开启）
 	CountTokensEnabled *bool `yaml:"count_tokens_enabled,omitempty" json:"count_tokens_enabled,omitempty"`
+	// 新增：显式声明是否原生支持 /responses 接口（true 表示支持，false 表示需要转换）
+	SupportsResponses *bool `yaml:"supports_responses,omitempty" json:"supports_responses,omitempty"`
 }
 
 // 新增：SSE行为配置结构
@@ -88,11 +90,12 @@ type ModelRewriteRule struct {
 }
 
 type LoggingConfig struct {
-	Level           string `yaml:"level"`
-	LogRequestTypes string `yaml:"log_request_types"`
-	LogRequestBody  string `yaml:"log_request_body"`
-	LogResponseBody string `yaml:"log_response_body"`
-	LogDirectory    string `yaml:"log_directory"`
+	Level           string   `yaml:"level"`
+	LogRequestTypes string   `yaml:"log_request_types"`
+	LogRequestBody  string   `yaml:"log_request_body"`
+	LogResponseBody string   `yaml:"log_response_body"`
+	LogDirectory    string   `yaml:"log_directory"`
+	ExcludePaths    []string `yaml:"exclude_paths,omitempty"` // 新增：不记录日志的路径列表
 }
 
 type ValidationConfig struct {

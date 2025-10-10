@@ -145,6 +145,62 @@ function rebuildTable(endpoints) {
         // Proxy auth note already shown in proxyDisplay
         const configDisplay = chips.join(' ');
 
+        const supportsConfig = endpoint.supports_responses;
+        const activeSupportsMode = supportsConfig === true ? 'native' : supportsConfig === false ? 'convert' : 'auto';
+
+        const renderSupportsButton = (mode, tooltip, icon) => {
+            const isActive = activeSupportsMode === mode;
+            const baseClass = isActive ? 'btn btn-primary btn-sm' : 'btn btn-outline-secondary btn-sm';
+            return `<button type="button" class="${baseClass}" data-action="set-supports" data-endpoint="${escapeHtml(endpoint.name)}" data-mode="${mode}" data-bs-toggle="tooltip" title="${tooltip}"><i class="fas ${icon}"></i></button>`;
+        };
+
+        let configBadge;
+        if (supportsConfig === true) {
+            configBadge = '<span class="badge bg-success" data-bs-toggle="tooltip" title="显式声明：始终视为原生支持 /responses">配置: 原生</span>';
+        } else if (supportsConfig === false) {
+            configBadge = '<span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="显式声明：始终转换为 /chat/completions">配置: 转换</span>';
+        } else {
+            configBadge = '<span class="badge bg-secondary" data-bs-toggle="tooltip" title="显式声明：自动探测并按学习结果切换">配置: 自动</span>';
+        }
+
+        const nativeFormat = endpoint.native_codex_format;
+        let runtimeBadge;
+        if (nativeFormat === true) {
+            runtimeBadge = '<span class="badge bg-success" data-bs-toggle="tooltip" title="最近探测结果：端点返回原生 /responses">学习: 原生</span>';
+        } else if (nativeFormat === false) {
+            runtimeBadge = '<span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="最近探测结果：端点需转换为 /chat/completions">学习: 转换</span>';
+        } else {
+            runtimeBadge = '<span class="badge bg-secondary" data-bs-toggle="tooltip" title="尚未探测或缺少近期请求">学习: 待探测</span>';
+        }
+
+        const prefValue = (endpoint.openai_preference || 'auto');
+        let prefLabel = 'Auto';
+        prefTip = 'OpenAI 偏好：auto（自动探测并学习）';
+        if (prefValue === 'responses') {
+            prefLabel = 'Responses';
+            prefTip = 'OpenAI 偏好：responses（优先请求 /v1/responses）';
+        } else if (prefValue === 'chat_completions') {
+            prefLabel = 'Chat';
+            prefTip = 'OpenAI 偏好：chat_completions（直接请求 /v1/chat/completions）';
+        }
+        const preferenceBadge = `<span class="badge bg-info" data-bs-toggle="tooltip" title="${prefTip}">偏好: ${prefLabel}</span>`;
+
+        const responseCellHTML = `
+            <div class="supports-responses-cell">
+                <div class="mb-2 d-flex flex-wrap gap-1">
+                    ${configBadge}
+                    ${runtimeBadge}
+                    ${preferenceBadge}
+                </div>
+                <div class="btn-group btn-group-sm" role="group" aria-label="supports responses toggle">
+                    ${renderSupportsButton('auto', '自动探测：保持代理自适应策略', 'fa-sync')}
+                    ${renderSupportsButton('native', '锁定原生：始终请求 /responses', 'fa-plug')}
+                    ${renderSupportsButton('convert', '强制转换：始终请求 /chat/completions', 'fa-random')}
+                </div>
+                <small class="text-muted d-block mt-1">配置影响后续请求；学习状态来自最近健康检查</small>
+            </div>
+        `;
+
 
         row.innerHTML = `
             <td class="drag-handle text-center">
@@ -159,7 +215,7 @@ function rebuildTable(endpoints) {
             <td>${tagsDisplay}</td>
             <td>${configDisplay}</td>
             <td class="response-cell">
-                <span class="text-muted">-</span>
+                ${responseCellHTML}
             </td>
             <td data-cell-type="status">${profileBadgesHTML}</td>
             <td class="action-buttons">

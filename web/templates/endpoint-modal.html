@@ -272,6 +272,28 @@
 
                         <!-- Advanced Configuration Tab (合并高级参数1和2) -->
                         <div class="tab-pane fade" id="advanced-tab-pane" role="tabpanel" aria-labelledby="advanced-tab">
+                            <div class="mb-4">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-code-branch"></i> <span>/responses 兼容策略</span>
+                                    </h6>
+                                </div>
+                                <div class="row mb-3">
+                                    <div class="col-6">
+                                        <label for="supports-responses" class="form-label">/responses 支持声明</label>
+                                        <select class="form-select" id="supports-responses">
+                                            <option value="">自动探测（推荐）</option>
+                                            <option value="true">始终视为原生支持（直接请求 /responses）</option>
+                                            <option value="false">始终转换为 /chat/completions</option>
+                                        </select>
+                                        <small class="form-text text-muted">留空表示由代理自动学习，适合大多数场景</small>
+                                        <div class="mt-2" id="supports-runtime-wrapper">
+                                            <span class="badge bg-secondary" id="supports-runtime-indicator">当前学习：未知</span>
+                                            <small class="text-muted d-block" id="supports-runtime-note">根据最近一次请求自动更新</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- 工具调用增强配置 -->
                             <div class="mb-4">
                                 <div class="d-flex justify-content-between align-items-center mb-3">

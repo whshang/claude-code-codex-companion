@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -16,11 +17,118 @@ import (
 	"claude-code-codex-companion/internal/conversion"
 	"claude-code-codex-companion/internal/endpoint"
 	"claude-code-codex-companion/internal/tagging"
+	"claude-code-codex-companion/internal/toolcall"
 	"claude-code-codex-companion/internal/utils"
 	"claude-code-codex-companion/internal/validator"
 
 	"github.com/gin-gonic/gin"
 )
+
+const responseCaptureLimit = 64 * 1024
+const conversionStageSeparator = "|"
+
+const requestProcessingCacheKey = "request_processing_cache"
+
+type cachedConversion struct {
+	body []byte
+	err  error
+}
+
+type modelRewriteCache struct {
+	originalModel  string
+	rewrittenModel string
+	body           []byte
+}
+
+type requestProcessingCache struct {
+	originalBody            []byte
+	toolsComputed           bool
+	tools                   []toolcall.Tool
+	conversions             map[string]cachedConversion
+	modelRewrites           map[string]*modelRewriteCache
+	toolEnhancementComputed bool
+	toolEnhancementResult   *toolcall.EnhanceResult
+	toolEnhancementTrigger  string
+	toolEnhancementErr      error
+}
+
+func getRequestProcessingCache(c *gin.Context, originalBody []byte) *requestProcessingCache {
+	if val, exists := c.Get(requestProcessingCacheKey); exists {
+		if cache, ok := val.(*requestProcessingCache); ok && cache != nil {
+			return cache
+		}
+	}
+	cache := &requestProcessingCache{
+		originalBody:  originalBody,
+		conversions:   make(map[string]cachedConversion),
+		modelRewrites: make(map[string]*modelRewriteCache),
+	}
+	c.Set(requestProcessingCacheKey, cache)
+	return cache
+}
+
+func (rc *requestProcessingCache) GetOrExtractTools(body []byte) []toolcall.Tool {
+	if rc.toolsComputed {
+		return rc.tools
+	}
+	rc.tools = extractToolsFromClientRequest(body)
+	rc.toolsComputed = true
+	return rc.tools
+}
+
+func (rc *requestProcessingCache) conversionMapKey(key string, body []byte) string {
+	sum := md5.Sum(body)
+	return key + ":" + hex.EncodeToString(sum[:])
+}
+
+func (rc *requestProcessingCache) GetConvertedBody(key string, body []byte, converter func([]byte) ([]byte, error)) ([]byte, error) {
+	if rc.conversions == nil {
+		rc.conversions = make(map[string]cachedConversion)
+	}
+	mapKey := rc.conversionMapKey(key, body)
+	if cached, ok := rc.conversions[mapKey]; ok {
+		return cached.body, cached.err
+	}
+	converted, err := converter(body)
+	rc.conversions[mapKey] = cachedConversion{body: converted, err: err}
+	return converted, err
+}
+
+func (rc *requestProcessingCache) StoreModelRewrite(endpointName string, body []byte, originalModel, rewrittenModel string) {
+	if rc.modelRewrites == nil {
+		rc.modelRewrites = make(map[string]*modelRewriteCache)
+	}
+	var bodyCopy []byte
+	if len(body) > 0 {
+		bodyCopy = make([]byte, len(body))
+		copy(bodyCopy, body)
+	}
+	rc.modelRewrites[endpointName] = &modelRewriteCache{
+		originalModel:  originalModel,
+		rewrittenModel: rewrittenModel,
+		body:           bodyCopy,
+	}
+}
+
+func (rc *requestProcessingCache) GetModelRewrite(endpointName string) (*modelRewriteCache, bool) {
+	if rc.modelRewrites == nil {
+		return nil, false
+	}
+	entry, ok := rc.modelRewrites[endpointName]
+	return entry, ok
+}
+
+func (rc *requestProcessingCache) GetToolEnhancement(compute func() (*toolcall.EnhanceResult, string, error)) (*toolcall.EnhanceResult, string, error) {
+	if rc.toolEnhancementComputed {
+		return rc.toolEnhancementResult, rc.toolEnhancementTrigger, rc.toolEnhancementErr
+	}
+	result, trigger, err := compute()
+	rc.toolEnhancementComputed = true
+	rc.toolEnhancementResult = result
+	rc.toolEnhancementTrigger = trigger
+	rc.toolEnhancementErr = err
+	return result, trigger, err
+}
 
 func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path string, requestBody []byte, requestID string, startTime time.Time, taggedRequest *tagging.TaggedRequest, attemptNumber int) (bool, bool) {
 	// 检查是否为 count_tokens 请求到 OpenAI 端点
@@ -67,6 +175,10 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		clientRequestFormat = string(formatDetection.Format)
 	}
 	endpointRequestFormat := clientRequestFormat
+	conversionStages := []string{}
+	if inboundPath == "/responses" && ep.EndpointType == "openai" {
+		updateSupportsResponsesContext(c, ep)
+	}
 
 	// 🔧 Bug修复：提前处理 Codex /responses 路径转换
 	// 对于配置了 chat_completions 偏好的端点，立即转换路径
@@ -100,6 +212,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		tags = taggedRequest.Tags
 	}
 
+	processingCache := getRequestProcessingCache(c, requestBody)
+
 	// 创建HTTP请求用于模型重写处理
 	tempReq, err := http.NewRequest(c.Request.Method, targetURL, bytes.NewReader(requestBody))
 	if err != nil {
@@ -107,6 +221,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		// 记录创建请求失败的日志
 		duration := time.Since(endpointStartTime)
 		createRequestError := fmt.Sprintf("Failed to create request: %v", err)
+		setConversionContext(c, conversionStages)
 		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, requestBody, c, nil, nil, nil, duration, fmt.Errorf(createRequestError), false, tags, "", "", "", attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(createRequestError))
@@ -123,40 +238,58 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	}
 
 	// 应用模型重写（如果配置了）
-	originalModel, rewrittenModel, err := s.modelRewriter.RewriteRequestWithTags(tempReq, ep.ModelRewrite, ep.Tags, clientType)
-	if err != nil {
-		s.logger.Error("Model rewrite failed", err)
-		// 记录模型重写失败的日志
-		duration := time.Since(endpointStartTime)
-		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, requestBody, c, nil, nil, nil, duration, err, false, tags, "", "", "", attemptNumber)
-		// 设置错误信息到context中
-		c.Set("last_error", err)
-		c.Set("last_status_code", 0)
-		return false, false
-	}
-
-	// 如果进行了模型重写，获取重写后的请求体
 	var finalRequestBody []byte
-	if originalModel != "" && rewrittenModel != "" {
-		finalRequestBody, err = io.ReadAll(tempReq.Body)
-		if err != nil {
-			s.logger.Error("Failed to read rewritten request body", err)
+	var originalModel string
+	var rewrittenModel string
+	if cachedRewrite, ok := processingCache.GetModelRewrite(ep.Name); ok && cachedRewrite != nil {
+		originalModel = cachedRewrite.originalModel
+		rewrittenModel = cachedRewrite.rewrittenModel
+		if len(cachedRewrite.body) > 0 {
+			finalRequestBody = make([]byte, len(cachedRewrite.body))
+			copy(finalRequestBody, cachedRewrite.body)
+		} else {
+			finalRequestBody = requestBody
+		}
+	} else {
+		var rewriteErr error
+		originalModel, rewrittenModel, rewriteErr = s.modelRewriter.RewriteRequestWithTags(tempReq, ep.ModelRewrite, ep.Tags, clientType)
+		if rewriteErr != nil {
+			s.logger.Error("Model rewrite failed", rewriteErr)
+			// 记录模型重写失败的日志
 			duration := time.Since(endpointStartTime)
-			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
+			setConversionContext(c, conversionStages)
+			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, requestBody, c, nil, nil, nil, duration, rewriteErr, false, tags, "", "", "", attemptNumber)
 			// 设置错误信息到context中
-			c.Set("last_error", err)
+			c.Set("last_error", rewriteErr)
 			c.Set("last_status_code", 0)
 			return false, false
 		}
-	} else {
-		finalRequestBody = requestBody // 使用原始请求体
+
+		if originalModel != "" && rewrittenModel != "" {
+			finalRequestBody, rewriteErr = io.ReadAll(tempReq.Body)
+			if rewriteErr != nil {
+				s.logger.Error("Failed to read rewritten request body", rewriteErr)
+				duration := time.Since(endpointStartTime)
+				setConversionContext(c, conversionStages)
+				setConversionContext(c, conversionStages)
+				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, rewriteErr, false, tags, "", originalModel, rewrittenModel, attemptNumber)
+				// 设置错误信息到context中
+				c.Set("last_error", rewriteErr)
+				c.Set("last_status_code", 0)
+				return false, false
+			}
+		} else {
+			finalRequestBody = requestBody
+		}
+
+		processingCache.StoreModelRewrite(ep.Name, finalRequestBody, originalModel, rewrittenModel)
 	}
 
 	// === Tool Calling: zero-config prompt injection (client format) ===
 	// 自动启用：当客户端请求包含 tools 时，为任何上游模型注入系统提示以获得工具调用能力
 	if s.toolEnhancer != nil && formatDetection != nil {
 		// 仅当请求中包含 tools 时才尝试增强
-		if tools := extractToolsFromClientRequest(requestBody); len(tools) > 0 {
+		if tools := processingCache.GetOrExtractTools(requestBody); len(tools) > 0 {
 			// 决策：根据端点配置决定是否注入
 			// disable: 不注入；force: 一定注入；auto: 若明确支持原生工具则不注入，否则注入
 			injectAllowed := true
@@ -171,7 +304,9 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				}
 			}
 			if injectAllowed {
-				result, triggerSignal, err := s.toolEnhancer.EnhanceRequest(tools, nil)
+				result, triggerSignal, err := processingCache.GetToolEnhancement(func() (*toolcall.EnhanceResult, string, error) {
+					return s.toolEnhancer.EnhanceRequest(tools, nil)
+				})
 				if err == nil && result != nil && result.ShouldEnhance {
 					// 注入 system 提示到客户端格式（在格式转换之前）
 					updated, injErr := injectSystemPromptToClientRequest(finalRequestBody, string(formatDetection.Format), result.SystemPrompt)
@@ -335,6 +470,11 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			"original_size":  len(requestBody),
 			"converted_size": len(convertedBody),
 		})
+		if clientRequestFormat == "anthropic" && actualEndpointFormat == "openai" {
+			addConversionStage(&conversionStages, "request:anthropic->openai")
+		} else if clientRequestFormat == "openai" && actualEndpointFormat == "anthropic" {
+			addConversionStage(&conversionStages, "request:openai->anthropic")
+		}
 
 		// 重新构建targetURL，因为路径可能已经改变
 		targetURL = ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
@@ -445,7 +585,9 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			effectivePath = "/chat/completions"
 			targetURL = ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
 		}
-		convertedBody, err := s.convertCodexToOpenAI(finalRequestBody)
+		convertedBody, err := processingCache.GetConvertedBody("codex_to_openai", finalRequestBody, func(body []byte) ([]byte, error) {
+			return s.convertCodexToOpenAI(body)
+		})
 		if err != nil {
 			s.logger.Debug("Failed to convert Codex format to OpenAI", map[string]interface{}{
 				"error": err.Error(),
@@ -453,6 +595,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			// 不返回错误，继续使用原始请求体
 		} else if convertedBody != nil {
 			finalRequestBody = convertedBody
+			addConversionStage(&conversionStages, "request:responses->chat_completions")
 			s.logger.Info("Codex format converted to OpenAI format", map[string]interface{}{
 				"path": effectivePath,
 			})
@@ -468,7 +611,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 
 			// After converting to OpenAI chat format, re-inject tool system prompt if tools present
 			if s.toolEnhancer != nil {
-				if tools := extractToolsFromClientRequest(requestBody); len(tools) > 0 {
+				if tools := processingCache.GetOrExtractTools(requestBody); len(tools) > 0 {
 					injectAllowed := true
 					switch strings.ToLower(ep.ToolEnhancementMode) {
 					case "disable":
@@ -481,7 +624,9 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 						}
 					}
 					if injectAllowed {
-						if result, triggerSignal, err := s.toolEnhancer.EnhanceRequest(tools, nil); err == nil && result != nil && result.ShouldEnhance {
+						if result, triggerSignal, err := processingCache.GetToolEnhancement(func() (*toolcall.EnhanceResult, string, error) {
+							return s.toolEnhancer.EnhanceRequest(tools, nil)
+						}); err == nil && result != nil && result.ShouldEnhance {
 							if updated, injErr := injectSystemPromptToClientRequest(finalRequestBody, "openai", result.SystemPrompt); injErr == nil && len(updated) > 0 {
 								finalRequestBody = updated
 								c.Set("tool_trigger_signal", triggerSignal)
@@ -571,6 +716,29 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		}
 	}
 
+	currentPath := effectivePath
+	currentRequestBody := finalRequestBody
+	var cachedConvertedCodexBody []byte
+	maxInlineAttempts := 4
+	attemptCounter := 0
+
+attemptLoop:
+	attemptCounter++
+	if attemptCounter > maxInlineAttempts {
+		s.logger.Error("Exceeded inline retry attempts for endpoint", nil, map[string]interface{}{
+			"endpoint":    ep.Name,
+			"request_id":  requestID,
+			"client_path": inboundPath,
+		})
+		c.Set("last_error", fmt.Errorf("proxy retry limit reached"))
+		c.Set("last_status_code", 0)
+		return false, true
+	}
+
+	effectivePath = currentPath
+	finalRequestBody = currentRequestBody
+	targetURL = ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
+
 	// 创建最终的HTTP请求
 	req, err := http.NewRequest(c.Request.Method, targetURL, bytes.NewReader(finalRequestBody))
 	if err != nil {
@@ -578,6 +746,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		// 记录创建请求失败的日志
 		duration := time.Since(endpointStartTime)
 		createRequestError := fmt.Sprintf("Failed to create final request: %v", err)
+		setConversionContext(c, conversionStages)
 		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, fmt.Errorf(createRequestError), false, tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(createRequestError))
@@ -723,6 +892,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	if err != nil {
 		s.logger.Error("Failed to create proxy client for endpoint", err)
 		duration := time.Since(endpointStartTime)
+		setConversionContext(c, conversionStages)
+		setConversionContext(c, conversionStages)
 		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, nil, nil, duration, err, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", err)
@@ -740,9 +911,23 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			})
 			falseValue := false
 			ep.NativeCodexFormat = &falseValue
-			if convertedBody, convertErr := s.convertCodexToOpenAI(requestBody); convertErr == nil && convertedBody != nil {
-				// 递归重试到 /chat/completions
-				return s.proxyToEndpoint(c, ep, "/chat/completions", convertedBody, requestID, startTime, taggedRequest, attemptNumber)
+			updateSupportsResponsesContext(c, ep)
+			if cachedConvertedCodexBody == nil {
+				if convertedBody, convertErr := processingCache.GetConvertedBody("codex_to_openai", requestBody, func(body []byte) ([]byte, error) {
+					return s.convertCodexToOpenAI(body)
+				}); convertErr == nil && convertedBody != nil {
+					cachedConvertedCodexBody = convertedBody
+				} else if convertErr != nil {
+					s.logger.Error("Failed to convert Codex format to OpenAI after network error", convertErr)
+				}
+			}
+			if cachedConvertedCodexBody != nil {
+				currentPath = "/chat/completions"
+				currentRequestBody = cachedConvertedCodexBody
+				codexNeedsConversion = true
+				actuallyUsingOpenAIURL = true
+				addConversionStage(&conversionStages, "request:responses->chat_completions")
+				goto attemptLoop
 			}
 			// 转换失败则继续按原逻辑记录并交给上层重试其他端点
 		}
@@ -788,6 +973,10 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				decompressedBody = body
 			}
 
+			setConversionContext(c, conversionStages)
+			setConversionContext(c, conversionStages)
+			setConversionContext(c, conversionStages)
+			setConversionContext(c, conversionStages)
 			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 			c.Set("last_error", fmt.Errorf("authentication failed, switching to x-api-key"))
 			c.Set("last_status_code", resp.StatusCode)
@@ -833,8 +1022,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				// 关闭原始响应体
 				resp.Body.Close()
 
-				// Token刷新成功，递归重试相同的endpoint（重新走完整的请求流程）
-				return s.proxyToEndpoint(c, ep, path, requestBody, requestID, startTime, taggedRequest, attemptNumber)
+				// Token刷新成功，重新执行当前端点逻辑
+				goto attemptLoop
 			}
 		} else {
 			s.logger.Debug(fmt.Sprintf("OAuth token refresh already attempted for endpoint %s in this request, not retrying", ep.Name))
@@ -860,7 +1049,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		if (resp.StatusCode >= 400 && resp.StatusCode < 600 && resp.StatusCode != 401 && resp.StatusCode != 403) &&
 			actuallyUsingOpenAIURL &&
 			inboundPath == "/responses" &&
-			ep.NativeCodexFormat == nil {
+			ep.NativeCodexFormat == nil &&
+			shouldMarkResponsesUnsupported(resp.StatusCode, decompressedBody) {
 
 			s.logger.Info("Received error on first /responses request - endpoint requires OpenAI format", map[string]interface{}{
 				"endpoint":    ep.Name,
@@ -873,6 +1063,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			// 标记该端点不支持原生 Codex 格式，需要转换
 			falseValue := false
 			ep.NativeCodexFormat = &falseValue
+			updateSupportsResponsesContext(c, ep)
 
 			// 🎓 持久化学习结果：标记端点需要使用 chat_completions 格式
 			if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
@@ -881,14 +1072,20 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			}
 
 			// 转换 Codex 格式到 OpenAI 格式
-			convertedBody, convertErr := s.convertCodexToOpenAI(requestBody)
-			if convertErr != nil {
-				s.logger.Error("Failed to convert Codex format to OpenAI for retry", convertErr)
-				// 转换失败，记录日志并尝试下一个端点
-				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
-				c.Set("last_error", fmt.Errorf("format conversion failed: %v", convertErr))
-				c.Set("last_status_code", resp.StatusCode)
-				return false, true
+			if cachedConvertedCodexBody == nil {
+				convertedBody, convertErr := processingCache.GetConvertedBody("codex_to_openai", requestBody, func(body []byte) ([]byte, error) {
+					return s.convertCodexToOpenAI(body)
+				})
+				if convertErr != nil {
+					s.logger.Error("Failed to convert Codex format to OpenAI for retry", convertErr)
+					// 转换失败，记录日志并尝试下一个端点
+					s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
+					c.Set("last_error", fmt.Errorf("format conversion failed: %v", convertErr))
+					c.Set("last_status_code", resp.StatusCode)
+					return false, true
+				}
+				cachedConvertedCodexBody = convertedBody
+				addConversionStage(&conversionStages, "request:responses->chat_completions")
 			}
 
 			s.logger.Info("Auto-converted to OpenAI format, retrying request", map[string]interface{}{
@@ -898,10 +1095,11 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			// 关闭原响应
 			resp.Body.Close()
 
-			// 用转换后的请求体重试（递归调用，会使用新的 NativeCodexFormat 配置）
-			// 同时切换到 /chat/completions 路径
-			// 注意：持久化会在重试成功后的 success 分支执行
-			return s.proxyToEndpoint(c, ep, "/chat/completions", convertedBody, requestID, startTime, taggedRequest, attemptNumber)
+			currentPath = "/chat/completions"
+			currentRequestBody = cachedConvertedCodexBody
+			codexNeedsConversion = true
+			actuallyUsingOpenAIURL = true
+			goto attemptLoop
 		}
 
 		// 优先级2: 检查是否为业务错误（端点正常返回了错误信息）
@@ -976,13 +1174,15 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				// 移除已学习的不支持参数
 				cleanedBody, wasModified := s.autoRemoveUnsupportedParams(finalRequestBody, ep)
 				if wasModified {
-					// 使用清理后的请求体递归重试当前端点
 					s.logger.Debug("Retrying request after removing learned unsupported parameters")
-					return s.proxyToEndpoint(c, ep, path, cleanedBody, requestID, startTime, taggedRequest, attemptNumber)
+					currentRequestBody = cleanedBody
+					resp.Body.Close()
+					goto attemptLoop
 				}
 			}
 		}
 
+		setConversionContext(c, conversionStages)
 		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 		s.logger.Debug(fmt.Sprintf("HTTP error %d from endpoint %s, trying next endpoint", resp.StatusCode, ep.Name))
 		// 设置状态码到context中，供重试逻辑使用
@@ -991,18 +1191,51 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		return false, true
 	}
 
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
+	originalContentType := resp.Header.Get("Content-Type")
+	isStreamingResponse := strings.Contains(strings.ToLower(originalContentType), "text/event-stream")
+	if isStreamingResponse {
+		return s.handleStreamingResponse(
+			c,
+			resp,
+			req,
+			ep,
+			requestID,
+			path,
+			inboundPath,
+			requestBody,
+			finalRequestBody,
+			originalModel,
+			rewrittenModel,
+			tags,
+			endpointRequestFormat,
+			actualEndpointFormat,
+			formatDetection,
+			shouldConvertAnthropicResponseToOpenAI,
+			actuallyUsingOpenAIURL,
+			isCountTokensRequest,
+			endpointStartTime,
+			attemptNumber,
+			clientRequestFormat,
+			&conversionStages,
+		)
+	}
+
+	var responseBodyBuffer bytes.Buffer
+	decompressedCapture := newLimitedBuffer(responseCaptureLimit)
+	teeReader := io.TeeReader(resp.Body, decompressedCapture)
+	if _, err := responseBodyBuffer.ReadFrom(teeReader); err != nil {
 		s.logger.Error("Failed to read response body", err)
 		// 记录读取响应体失败的日志
 		duration := time.Since(endpointStartTime)
 		readError := fmt.Sprintf("Failed to read response body: %v", err)
+		setConversionContext(c, conversionStages)
 		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, nil, duration, fmt.Errorf(readError), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(readError))
 		c.Set("last_status_code", resp.StatusCode)
 		return false, false
 	}
+	responseBody := responseBodyBuffer.Bytes()
 
 	// 解压响应体仅用于日志记录和验证
 	contentEncoding := resp.Header.Get("Content-Encoding")
@@ -1012,6 +1245,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		// 记录解压响应体失败的日志
 		duration := time.Since(endpointStartTime)
 		decompressError := fmt.Sprintf("Failed to decompress response body: %v", err)
+		setConversionContext(c, conversionStages)
 		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, responseBody, duration, fmt.Errorf(decompressError), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(decompressError))
@@ -1134,9 +1368,10 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			shouldSkip := s.config.Blacklist.BusinessErrorSafe
 			errorType := "business error"
 
-			s.logger.Info(fmt.Sprintf("Endpoint %s returned %s (not endpoint failure): %v (blacklist_safe=%v)", ep.Name, errorType, err, shouldSkip))
 			duration := time.Since(endpointStartTime)
 			errorLog := fmt.Sprintf("%s: %v", errorType, err)
+			setConversionContext(c, conversionStages)
+			s.logger.Info(fmt.Sprintf("Endpoint %s returned %s (not endpoint failure): %v (blacklist_safe=%v)", ep.Name, errorType, err, shouldSkip))
 			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, fmt.Errorf(errorLog), isStreaming, tags, "", originalModel, rewrittenModel, attemptNumber)
 
 			// 工具调用错误监控：若请求包含 tools 参数且返回业务错误，则学习并强制启用增强，防止伪“支持”导致失败
@@ -1169,9 +1404,10 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 
 		// 如果是usage统计验证失败，尝试下一个endpoint
 		if strings.Contains(err.Error(), "invalid usage stats") {
-			s.logger.Info(fmt.Sprintf("Usage validation failed for endpoint %s: %v", ep.Name, err))
 			duration := time.Since(endpointStartTime)
 			errorLog := fmt.Sprintf("Usage validation failed: %v", err)
+			setConversionContext(c, conversionStages)
+			s.logger.Info(fmt.Sprintf("Usage validation failed for endpoint %s: %v", ep.Name, err))
 			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, append(decompressedBody, []byte(errorLog)...), duration, fmt.Errorf(errorLog), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 			// 设置错误信息到context中
 			c.Set("last_error", fmt.Errorf(errorLog))
@@ -1184,9 +1420,10 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			shouldSkip := s.config.Blacklist.SSEValidationSafe
 			errorType := "SSE validation error"
 
-			s.logger.Info(fmt.Sprintf("Endpoint %s returned %s: %v (blacklist_safe=%v)", ep.Name, errorType, err, shouldSkip))
 			duration := time.Since(endpointStartTime)
 			errorLog := fmt.Sprintf("%s: %v", errorType, err)
+			setConversionContext(c, conversionStages)
+			s.logger.Info(fmt.Sprintf("Endpoint %s returned %s: %v (blacklist_safe=%v)", ep.Name, errorType, err, shouldSkip))
 			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, append(decompressedBody, []byte(errorLog)...), duration, fmt.Errorf(errorLog), s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 
 			// 根据配置决定是否跳过健康统计
@@ -1201,9 +1438,10 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		}
 
 		// 验证失败，尝试下一个端点
-		s.logger.Info(fmt.Sprintf("Response validation failed for endpoint %s, trying next endpoint: %v", ep.Name, err))
 		duration := time.Since(endpointStartTime)
 		validationError := fmt.Sprintf("Response validation failed: %v", err)
+		setConversionContext(c, conversionStages)
+		s.logger.Info(fmt.Sprintf("Response validation failed for endpoint %s, trying next endpoint: %v", ep.Name, err))
 		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, fmt.Errorf(validationError), isStreaming, tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(validationError))
@@ -1236,6 +1474,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		if err != nil {
 			s.logger.Error("Failed to convert Anthropic response to OpenAI format", err)
 		} else {
+			addConversionStage(&conversionStages, "response:openai->anthropic")
 			convertedResponseBody = converted
 			actuallyUsingOpenAIURL = true
 
@@ -1344,6 +1583,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	// 清除错误信息（成功情况）
 	c.Set("last_error", nil)
 	c.Set("last_status_code", resp.StatusCode)
+	setConversionContext(c, conversionStages)
+	updateSupportsResponsesContext(c, ep)
 
 	duration := time.Since(endpointStartTime)
 	// 创建日志条目，记录修改前后的完整数据
@@ -1352,6 +1593,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	requestLog.Tags = tags
 	requestLog.ContentTypeOverride = overrideInfo
 	requestLog.AttemptNumber = attemptNumber
+	requestLog.IsStreaming = isStreaming
+	requestLog.WasStreaming = isStreaming
 
 	// 设置 thinking 信息
 	if thinkingInfo, exists := c.Get("thinking_info"); exists {
@@ -1372,6 +1615,11 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			requestLog.DetectedBy = detection.DetectedBy
 		}
 	}
+	if len(conversionStages) > 0 {
+		requestLog.FormatConverted = true
+		requestLog.ConversionPath = strings.Join(conversionStages, conversionStageSeparator)
+	}
+	requestLog.SupportsResponsesFlag = getSupportsResponsesFlag(ep)
 
 	// 工具调用增强监控信息
 	if val, exists := c.Get("tool_enhanced"); exists {
@@ -1421,11 +1669,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	requestLog.OriginalRequestHeaders = utils.HeadersToMap(c.Request.Header)
 	if len(requestBody) > 0 {
 		if s.config.Logging.LogRequestBody != "none" {
-			if s.config.Logging.LogRequestBody == "truncated" {
-				requestLog.OriginalRequestBody = utils.TruncateBody(string(requestBody), 1024)
-			} else {
-				requestLog.OriginalRequestBody = string(requestBody)
-			}
+			preview, _, _ := buildBodySnapshot(requestBody)
+			requestLog.OriginalRequestBody = preview
 		}
 	}
 
@@ -1433,24 +1678,30 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	requestLog.FinalRequestURL = req.URL.String()
 	requestLog.FinalRequestHeaders = utils.HeadersToMap(req.Header)
 	if len(finalRequestBody) > 0 {
+		preview, hash, truncated := buildBodySnapshot(finalRequestBody)
 		if s.config.Logging.LogRequestBody != "none" {
-			if s.config.Logging.LogRequestBody == "truncated" {
-				requestLog.FinalRequestBody = utils.TruncateBody(string(finalRequestBody), 1024)
-			} else {
-				requestLog.FinalRequestBody = string(finalRequestBody)
-			}
+			requestLog.FinalRequestBody = preview
 		}
+		requestLog.RequestBody = requestLog.FinalRequestBody
+		requestLog.RequestBodyHash = hash
+		requestLog.RequestBodyTruncated = truncated
+		requestLog.RequestBodySize = len(finalRequestBody)
+	} else if len(requestBody) > 0 {
+		preview, hash, truncated := buildBodySnapshot(requestBody)
+		if s.config.Logging.LogRequestBody != "none" && requestLog.OriginalRequestBody == "" {
+			requestLog.OriginalRequestBody = preview
+		}
+		requestLog.RequestBody = requestLog.OriginalRequestBody
+		requestLog.RequestBodyHash = hash
+		requestLog.RequestBodyTruncated = truncated
 	}
 
 	// 记录上游原始响应数据
 	requestLog.OriginalResponseHeaders = utils.HeadersToMap(resp.Header)
 	if len(decompressedBody) > 0 {
 		if s.config.Logging.LogResponseBody != "none" {
-			if s.config.Logging.LogResponseBody == "truncated" {
-				requestLog.OriginalResponseBody = utils.TruncateBody(string(decompressedBody), 1024)
-			} else {
-				requestLog.OriginalResponseBody = string(decompressedBody)
-			}
+			preview, _, _ := buildBodySnapshot(decompressedBody)
+			requestLog.OriginalResponseBody = preview
 		}
 	}
 
@@ -1465,11 +1716,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	requestLog.FinalResponseHeaders = finalHeaders
 	if len(finalResponseBody) > 0 {
 		if s.config.Logging.LogResponseBody != "none" {
-			if s.config.Logging.LogResponseBody == "truncated" {
-				requestLog.FinalResponseBody = utils.TruncateBody(string(finalResponseBody), 1024)
-			} else {
-				requestLog.FinalResponseBody = string(finalResponseBody)
-			}
+			preview, _, _ := buildBodySnapshot(finalResponseBody)
+			requestLog.FinalResponseBody = preview
 		}
 	}
 
@@ -1487,9 +1735,13 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 
 	// 设置兼容性字段
 	requestLog.RequestHeaders = requestLog.FinalRequestHeaders
-	requestLog.RequestBody = requestLog.OriginalRequestBody
-	requestLog.ResponseHeaders = requestLog.OriginalResponseHeaders
-	requestLog.ResponseBody = requestLog.OriginalResponseBody
+	if requestLog.RequestBody == "" {
+		requestLog.RequestBody = requestLog.OriginalRequestBody
+	}
+	requestLog.ResponseHeaders = requestLog.FinalResponseHeaders
+	if requestLog.ResponseBody == "" {
+		requestLog.ResponseBody = requestLog.FinalResponseBody
+	}
 
 	// 设置模型信息
 	if len(requestBody) > 0 {
@@ -1512,14 +1764,14 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	}
 
 	// 更新基本字段
-	s.logger.UpdateRequestLog(requestLog, req, resp, decompressedBody, duration, nil)
-	requestLog.IsStreaming = isStreaming
+	s.logger.UpdateRequestLog(requestLog, req, resp, finalResponseBody, duration, nil)
 	s.logger.LogRequest(requestLog)
 
 	// 🔍 自动探测成功：如果是首次 /responses 请求且成功，标记为支持原生 Codex 格式
 	if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil {
 		trueValue := true
 		ep.NativeCodexFormat = &trueValue
+		updateSupportsResponsesContext(c, ep)
 		s.logger.Info("Auto-detected: endpoint natively supports Codex format", map[string]interface{}{
 			"endpoint": ep.Name,
 		})
@@ -1596,6 +1848,537 @@ func (s *Server) autoRemoveUnsupportedParams(requestBody []byte, ep *endpoint.En
 	}
 
 	return modifiedBody, true
+}
+
+type teeCaptureWriter struct {
+	dest      io.Writer
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func newTeeCaptureWriter(dest io.Writer, limit int) *teeCaptureWriter {
+	return &teeCaptureWriter{dest: dest, limit: limit}
+}
+
+func (t *teeCaptureWriter) Write(p []byte) (int, error) {
+	if !t.truncated {
+		remaining := t.limit - t.buf.Len()
+		if remaining > 0 {
+			if len(p) > remaining {
+				t.buf.Write(p[:remaining])
+				t.truncated = true
+			} else {
+				t.buf.Write(p)
+			}
+		} else {
+			t.truncated = true
+		}
+	}
+	return t.dest.Write(p)
+}
+
+func (t *teeCaptureWriter) Bytes() []byte {
+	return t.buf.Bytes()
+}
+
+func (t *teeCaptureWriter) Truncated() bool {
+	return t.truncated
+}
+
+type limitedBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func newLimitedBuffer(limit int) *limitedBuffer {
+	return &limitedBuffer{limit: limit}
+}
+
+func (l *limitedBuffer) Write(p []byte) (int, error) {
+	if !l.truncated {
+		remaining := l.limit - l.buf.Len()
+		if remaining > 0 {
+			if len(p) > remaining {
+				l.buf.Write(p[:remaining])
+				l.truncated = true
+			} else {
+				l.buf.Write(p)
+			}
+		} else {
+			l.truncated = true
+		}
+	}
+	return len(p), nil
+}
+
+func (l *limitedBuffer) Bytes() []byte {
+	return l.buf.Bytes()
+}
+
+func (l *limitedBuffer) Truncated() bool {
+	return l.truncated
+}
+
+func addConversionStage(stages *[]string, stage string) {
+	if stages == nil || stage == "" {
+		return
+	}
+	if len(*stages) > 0 && (*stages)[len(*stages)-1] == stage {
+		return
+	}
+	*stages = append(*stages, stage)
+}
+
+func setConversionContext(c *gin.Context, stages []string) {
+	if c == nil {
+		return
+	}
+	if len(stages) == 0 {
+		c.Set("conversion_path", "")
+		return
+	}
+	c.Set("conversion_path", strings.Join(stages, conversionStageSeparator))
+}
+
+func getSupportsResponsesFlag(ep *endpoint.Endpoint) string {
+	if ep == nil {
+		return ""
+	}
+	if ep.NativeCodexFormat == nil {
+		return "unknown"
+	}
+	if *ep.NativeCodexFormat {
+		return "native"
+	}
+	return "converted"
+}
+
+func updateSupportsResponsesContext(c *gin.Context, ep *endpoint.Endpoint) {
+	if c == nil {
+		return
+	}
+	flag := getSupportsResponsesFlag(ep)
+	if flag != "" {
+		c.Set("supports_responses_flag", flag)
+	}
+}
+
+func shouldMarkResponsesUnsupported(status int, body []byte) bool {
+	switch status {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return true
+	case http.StatusBadRequest:
+		// inspect payload for unsupported hints
+		var messageCandidates []string
+		if len(body) > 0 {
+			var payload map[string]interface{}
+			if err := json.Unmarshal(body, &payload); err == nil {
+				if msg, ok := payload["message"].(string); ok {
+					messageCandidates = append(messageCandidates, msg)
+				}
+				if errField, ok := payload["error"]; ok {
+					switch v := errField.(type) {
+					case string:
+						messageCandidates = append(messageCandidates, v)
+					case map[string]interface{}:
+						if msg, ok := v["message"].(string); ok {
+							messageCandidates = append(messageCandidates, msg)
+						}
+					}
+				}
+			}
+
+			for _, candidate := range messageCandidates {
+				if containsResponsesUnsupportedHint(candidate) {
+					return true
+				}
+			}
+
+			// fallback to body preview search
+			bodyPreview := body
+			if len(bodyPreview) > 4096 {
+				bodyPreview = bodyPreview[:4096]
+			}
+			if containsResponsesUnsupportedHint(string(bodyPreview)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func containsResponsesUnsupportedHint(text string) bool {
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	keywords := []string{
+		"unknown path",
+		"unsupported",
+		"not supported",
+		"no route",
+		"invalid path",
+		"unknown endpoint",
+		"unrecognized endpoint",
+		"no such route",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) handleStreamingResponse(
+	c *gin.Context,
+	resp *http.Response,
+	req *http.Request,
+	ep *endpoint.Endpoint,
+	requestID string,
+	path string,
+	inboundPath string,
+	requestBody []byte,
+	finalRequestBody []byte,
+	originalModel string,
+	rewrittenModel string,
+	tags []string,
+	endpointRequestFormat string,
+	actualEndpointFormat string,
+	formatDetection *utils.FormatDetectionResult,
+	shouldConvertAnthropicResponseToOpenAI bool,
+	actuallyUsingOpenAIURL bool,
+	isCountTokensRequest bool,
+	endpointStartTime time.Time,
+	attemptNumber int,
+	clientRequestFormat string,
+	conversionStages *[]string,
+) (bool, bool) {
+	contentEncoding := resp.Header.Get("Content-Encoding")
+	var reader io.Reader = resp.Body
+	var gzipReader *gzip.Reader
+	if s.validator.IsGzipContent(contentEncoding) {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			duration := time.Since(endpointStartTime)
+			errMsg := fmt.Errorf("failed to init gzip reader: %w", err)
+			if conversionStages != nil {
+				setConversionContext(c, *conversionStages)
+			}
+			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, nil, duration, errMsg, true, tags, "", originalModel, rewrittenModel, attemptNumber)
+			c.Set("last_error", errMsg)
+			c.Set("last_status_code", resp.StatusCode)
+			return false, false
+		}
+		gzipReader = gz
+		reader = gz
+	}
+	if gzipReader != nil {
+		defer gzipReader.Close()
+	}
+
+	originalCapture := newLimitedBuffer(responseCaptureLimit)
+	reader = io.TeeReader(reader, originalCapture)
+
+	isCodexClient := formatDetection != nil && formatDetection.ClientType == utils.ClientCodex
+	convertChatToResponses := actuallyUsingOpenAIURL && isCodexClient
+	convertAnthropicToOpenAI := shouldConvertAnthropicResponseToOpenAI
+	if conversionStages != nil {
+		if convertAnthropicToOpenAI {
+			addConversionStage(conversionStages, "response:anthropic->openai")
+		}
+		if convertChatToResponses {
+			addConversionStage(conversionStages, "response:chat_completions->responses")
+		}
+	}
+
+	validationEndpointType := ep.EndpointType
+	if actualEndpointFormat != "" {
+		validationEndpointType = actualEndpointFormat
+	}
+
+	// 复制上游响应头（除去长度与编码）
+	c.Status(resp.StatusCode)
+	for key, values := range resp.Header {
+		keyLower := strings.ToLower(key)
+		switch keyLower {
+		case "content-length", "content-encoding":
+			continue
+		case "content-type":
+			continue
+		default:
+			for _, value := range values {
+				c.Header(key, value)
+			}
+		}
+	}
+
+	c.Header("Content-Type", "text/event-stream; charset=utf-8")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("Content-Length", "")
+	c.Header("Content-Encoding", "")
+
+	if ep.ShouldMonitorRateLimit() {
+		if err := s.processRateLimitHeaders(ep, resp.Header, requestID); err != nil {
+			s.logger.Error("Failed to process rate limit headers", err)
+		}
+	}
+
+	captureWriter := newTeeCaptureWriter(c.Writer, responseCaptureLimit)
+	var streamErr error
+
+	if convertAnthropicToOpenAI {
+		streamErr = conversion.StreamAnthropicSSEToOpenAI(reader, captureWriter)
+		actuallyUsingOpenAIURL = true
+	} else if convertChatToResponses {
+		streamErr = conversion.StreamChatCompletionsToResponses(reader, captureWriter)
+	} else {
+		_, streamErr = io.Copy(captureWriter, reader)
+	}
+
+	if streamErr != nil {
+		duration := time.Since(endpointStartTime)
+		errMsg := fmt.Errorf("streaming response failed: %w", streamErr)
+		if conversionStages != nil {
+			setConversionContext(c, *conversionStages)
+		}
+		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, originalCapture.Bytes(), duration, errMsg, true, tags, "", originalModel, rewrittenModel, attemptNumber)
+		c.Set("last_error", errMsg)
+		c.Set("last_status_code", resp.StatusCode)
+		return false, false
+	}
+
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	finalSample := captureWriter.Bytes()
+	originalSample := originalCapture.Bytes()
+
+	if captureWriter.Truncated() {
+		s.logger.Debug("Streaming response capture truncated", map[string]interface{}{
+			"endpoint":   ep.Name,
+			"request_id": requestID,
+		})
+	}
+
+	if !captureWriter.Truncated() && len(finalSample) > 0 {
+		if err := s.validator.ValidateResponseWithPath(finalSample, true, validationEndpointType, path, ep.GetURLForFormat(endpointRequestFormat)); err != nil {
+			shouldSkip := validator.IsBusinessError(err) && s.config.Blacklist.BusinessErrorSafe
+			if shouldSkip {
+				s.logger.Info(fmt.Sprintf("Streaming response validation returned business error for endpoint %s: %v", ep.Name, err))
+			} else {
+				s.logger.Info(fmt.Sprintf("Streaming response validation failed for endpoint %s, trying next endpoint: %v", ep.Name, err))
+			}
+			duration := time.Since(endpointStartTime)
+			if conversionStages != nil {
+				setConversionContext(c, *conversionStages)
+			}
+			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, finalSample, duration, err, true, tags, "", originalModel, rewrittenModel, attemptNumber)
+			c.Set("last_error", err)
+			c.Set("last_status_code", resp.StatusCode)
+			if shouldSkip {
+				return false, true
+			}
+			return false, true
+		}
+	}
+
+	overrideInfo := ""
+	if len(finalSample) > 0 {
+		if _, info := s.validator.SmartDetectContentType(finalSample, "text/event-stream; charset=utf-8", resp.StatusCode); info != "" {
+			overrideInfo = info
+		}
+	}
+
+	duration := time.Since(endpointStartTime)
+	if conversionStages != nil {
+		setConversionContext(c, *conversionStages)
+	}
+	updateSupportsResponsesContext(c, ep)
+	requestLog := s.logger.CreateRequestLog(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path)
+	requestLog.RequestBodySize = len(requestBody)
+	requestLog.Tags = tags
+	requestLog.ContentTypeOverride = overrideInfo
+	requestLog.AttemptNumber = attemptNumber
+	requestLog.IsStreaming = true
+	requestLog.WasStreaming = true
+
+	if thinkingInfo, exists := c.Get("thinking_info"); exists {
+		if info, ok := thinkingInfo.(*utils.ThinkingInfo); ok && info != nil {
+			requestLog.ThinkingEnabled = info.Enabled
+			requestLog.ThinkingBudgetTokens = info.BudgetTokens
+		}
+	}
+
+	if formatDetection != nil {
+		requestLog.ClientType = string(formatDetection.ClientType)
+		requestLog.RequestFormat = string(formatDetection.Format)
+		requestLog.TargetFormat = ep.EndpointType
+		requestLog.FormatConverted = convertAnthropicToOpenAI || convertChatToResponses
+		requestLog.DetectionConfidence = formatDetection.Confidence
+		requestLog.DetectedBy = formatDetection.DetectedBy
+	}
+	if conversionStages != nil && len(*conversionStages) > 0 {
+		requestLog.FormatConverted = true
+		requestLog.ConversionPath = strings.Join(*conversionStages, conversionStageSeparator)
+	}
+	requestLog.SupportsResponsesFlag = getSupportsResponsesFlag(ep)
+
+	if val, exists := c.Get("tool_enhanced"); exists {
+		if applied, ok := val.(bool); ok {
+			requestLog.ToolEnhancementApplied = applied
+		}
+	}
+	if val, exists := c.Get("tool_enhancement_mode_effective"); exists {
+		if mode, ok := val.(string); ok {
+			requestLog.ToolEnhancementMode = mode
+		}
+	}
+	if val, exists := c.Get("tool_call_count"); exists {
+		if count, ok := val.(int); ok {
+			requestLog.ToolCallCount = count
+			if count > 0 {
+				requestLog.ToolCallsDetected = true
+			}
+		}
+	}
+	if val, exists := c.Get("tool_call_detected"); exists {
+		if detected, ok := val.(bool); ok {
+			requestLog.ToolCallsDetected = detected || requestLog.ToolCallsDetected
+		}
+	}
+	if val, exists := c.Get("tool_native_support_value"); exists {
+		switch v := val.(type) {
+		case bool:
+			b := v
+			requestLog.ToolNativeSupport = &b
+		case *bool:
+			requestLog.ToolNativeSupport = v
+		}
+	} else if ep.NativeToolSupport != nil {
+		requestLog.ToolNativeSupport = ep.NativeToolSupport
+	}
+	if requestLog.ToolEnhancementMode == "" {
+		effectiveMode := ep.ToolEnhancementMode
+		if effectiveMode == "" {
+			effectiveMode = "auto"
+		}
+		requestLog.ToolEnhancementMode = effectiveMode
+	}
+
+	requestLog.OriginalRequestURL = c.Request.URL.String()
+	requestLog.OriginalRequestHeaders = utils.HeadersToMap(c.Request.Header)
+	if len(requestBody) > 0 {
+		if s.config.Logging.LogRequestBody != "none" {
+			preview, _, _ := buildBodySnapshot(requestBody)
+			requestLog.OriginalRequestBody = preview
+		}
+	}
+
+	requestLog.FinalRequestURL = req.URL.String()
+	requestLog.FinalRequestHeaders = utils.HeadersToMap(req.Header)
+	if len(finalRequestBody) > 0 {
+		preview, hash, truncated := buildBodySnapshot(finalRequestBody)
+		if s.config.Logging.LogRequestBody != "none" {
+			requestLog.FinalRequestBody = preview
+		}
+		requestLog.RequestBody = requestLog.FinalRequestBody
+		requestLog.RequestBodyHash = hash
+		requestLog.RequestBodyTruncated = truncated
+		requestLog.RequestBodySize = len(finalRequestBody)
+	} else if len(requestBody) > 0 {
+		preview, hash, truncated := buildBodySnapshot(requestBody)
+		if s.config.Logging.LogRequestBody != "none" && requestLog.OriginalRequestBody == "" {
+			requestLog.OriginalRequestBody = preview
+		}
+		if requestLog.RequestBody == "" {
+			requestLog.RequestBody = requestLog.OriginalRequestBody
+		}
+		requestLog.RequestBodyHash = hash
+		requestLog.RequestBodyTruncated = truncated
+	}
+
+	requestLog.OriginalResponseHeaders = utils.HeadersToMap(resp.Header)
+	if len(originalSample) > 0 && s.config.Logging.LogResponseBody != "none" {
+		preview, _, _ := buildBodySnapshot(originalSample)
+		requestLog.OriginalResponseBody = preview
+	}
+
+	finalHeaders := make(map[string]string)
+	for key := range resp.Header {
+		values := c.Writer.Header().Values(key)
+		if len(values) > 0 {
+			finalHeaders[key] = values[0]
+		}
+	}
+	requestLog.FinalResponseHeaders = finalHeaders
+	if len(finalSample) > 0 && s.config.Logging.LogResponseBody != "none" {
+		preview, _, _ := buildBodySnapshot(finalSample)
+		requestLog.FinalResponseBody = preview
+	}
+
+	requestLog.RequestHeaders = requestLog.FinalRequestHeaders
+	if requestLog.RequestBody == "" {
+		requestLog.RequestBody = requestLog.OriginalRequestBody
+	}
+	requestLog.ResponseHeaders = requestLog.FinalResponseHeaders
+	if requestLog.ResponseBody == "" {
+		requestLog.ResponseBody = requestLog.FinalResponseBody
+	}
+
+	if len(requestBody) > 0 {
+		extractedModel := utils.ExtractModelFromRequestBody(string(requestBody))
+		if originalModel != "" {
+			requestLog.Model = originalModel
+			requestLog.OriginalModel = originalModel
+		} else {
+			requestLog.Model = extractedModel
+			requestLog.OriginalModel = extractedModel
+		}
+		if rewrittenModel != "" {
+			requestLog.RewrittenModel = rewrittenModel
+			requestLog.ModelRewriteApplied = rewrittenModel != requestLog.OriginalModel
+		}
+		requestLog.SessionID = utils.ExtractSessionIDFromRequestBody(string(requestBody))
+	}
+
+	s.logger.UpdateRequestLog(requestLog, req, resp, finalSample, duration, nil)
+	s.logger.LogRequest(requestLog)
+
+	if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil && !convertChatToResponses {
+		trueValue := true
+		ep.NativeCodexFormat = &trueValue
+		updateSupportsResponsesContext(c, ep)
+		s.logger.Info("Auto-detected: endpoint natively supports Codex format", map[string]interface{}{
+			"endpoint": ep.Name,
+		})
+		if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
+			ep.OpenAIPreference = "responses"
+			s.PersistEndpointLearning(ep)
+		}
+	}
+
+	if formatDetection != nil && formatDetection.ClientType == utils.ClientCodex && ep.EndpointType == "openai" {
+		if inboundPath == "/responses" && !convertChatToResponses {
+			s.updateEndpointCodexSupport(ep, true)
+		}
+	} else if formatDetection != nil && formatDetection.ClientType == utils.ClientClaudeCode && ep.EndpointType == "anthropic" {
+		s.updateEndpointCodexSupport(ep, false)
+	}
+
+	if isCountTokensRequest {
+		ep.MarkCountTokensSupport(true)
+	}
+
+	c.Set("last_error", nil)
+	c.Set("last_status_code", resp.StatusCode)
+
+	return true, false
 }
 
 func (s *Server) applyParameterOverrides(requestBody []byte, parameterOverrides map[string]string) ([]byte, error) {
@@ -1855,129 +2638,32 @@ func (s *Server) processRateLimitHeaders(ep *endpoint.Endpoint, headers http.Hea
 	return nil
 }
 
+// requestHasTools 检查请求体中是否包含 tools 参数
+func (s *Server) requestHasTools(requestBody []byte) bool {
+	var reqMap map[string]interface{}
+	if err := json.Unmarshal(requestBody, &reqMap); err != nil {
+		return false
+	}
+	
+	if tools, ok := reqMap["tools"].([]interface{}); ok && len(tools) > 0 {
+		return true
+	}
+	
+	return false
+}
+
 // convertChatCompletionsToResponsesSSE 将 OpenAI /chat/completions SSE 格式转换为 /responses API 格式
 // Codex 客户端使用 /responses API，期望的事件格式为：
 //   - {"type": "response.created", "response": {...}}
 //   - {"type": "response.output_text.delta", "delta": "..."}
 //   - {"type": "response.completed", "response": {...}}
 func (s *Server) convertChatCompletionsToResponsesSSE(body []byte) []byte {
-	bodyStr := string(body)
-	lines := strings.Split(bodyStr, "\n")
-
-	var convertedLines []string
-	responseID := ""
-	model := ""
-	created := int64(0)
-	hasStarted := false
-
-	for _, line := range lines {
-		// SSE 格式：data: {...}
-		if !strings.HasPrefix(line, "data: ") {
-			convertedLines = append(convertedLines, line)
-			continue
-		}
-
-		dataStr := strings.TrimPrefix(line, "data: ")
-		dataStr = strings.TrimSpace(dataStr)
-
-		// 跳过 [DONE] 标记，稍后添加 response.completed
-		if dataStr == "[DONE]" {
-			continue
-		}
-
-		// 解析 JSON
-		var chunk map[string]interface{}
-		if err := json.Unmarshal([]byte(dataStr), &chunk); err != nil {
-			convertedLines = append(convertedLines, line)
-			continue
-		}
-
-		// 提取基本信息
-		if id, ok := chunk["id"].(string); ok && responseID == "" {
-			responseID = id
-		}
-		if m, ok := chunk["model"].(string); ok && model == "" {
-			model = m
-		}
-		if c, ok := chunk["created"].(float64); ok && created == 0 {
-			created = int64(c)
-		}
-
-		// 获取 choices 数组
-		choices, ok := chunk["choices"].([]interface{})
-		if !ok || len(choices) == 0 {
-			continue
-		}
-
-		choice := choices[0].(map[string]interface{})
-		delta, hasDelta := choice["delta"].(map[string]interface{})
-		finishReason, _ := choice["finish_reason"].(string)
-
-		// 第一个事件：response.created
-		if !hasStarted {
-			hasStarted = true
-			event := map[string]interface{}{
-				"type": "response.created",
-				"response": map[string]interface{}{
-					"id":      responseID,
-					"object":  "response",
-					"created": created,
-					"model":   model,
-					"status":  "in_progress",
-				},
-			}
-			eventJSON, _ := json.Marshal(event)
-			convertedLines = append(convertedLines, "data: "+string(eventJSON))
-			convertedLines = append(convertedLines, "")
-		}
-
-		// 内容增量事件：response.output_text.delta
-		if hasDelta {
-			if role, hasRole := delta["role"]; hasRole && role != "" {
-				// 角色变化，忽略或处理
-				_ = role
-			}
-
-			if content, hasContent := delta["content"].(string); hasContent && content != "" {
-				event := map[string]interface{}{
-					"type":        "response.output_text.delta",
-					"delta":       content,
-					"response_id": responseID,
-				}
-				eventJSON, _ := json.Marshal(event)
-				convertedLines = append(convertedLines, "data: "+string(eventJSON))
-				convertedLines = append(convertedLines, "")
-			}
-		}
-
-		// 结束事件：response.completed
-		if finishReason != "" {
-			event := map[string]interface{}{
-				"type": "response.completed",
-				"response": map[string]interface{}{
-					"id":            responseID,
-					"object":        "response",
-					"created":       created,
-					"model":         model,
-					"status":        "completed",
-					"finish_reason": finishReason,
-				},
-			}
-			eventJSON, _ := json.Marshal(event)
-			convertedLines = append(convertedLines, "data: "+string(eventJSON))
-			convertedLines = append(convertedLines, "")
-		}
+	var buf bytes.Buffer
+	if err := conversion.StreamChatCompletionsToResponses(bytes.NewReader(body), &buf); err != nil {
+		s.logger.Error("Failed to convert chat completions SSE to responses format", err)
+		return body
 	}
-
-	result := strings.Join(convertedLines, "\n")
-
-	s.logger.Debug("Converted chat completions SSE to Responses API format", map[string]interface{}{
-		"original_size":  len(body),
-		"converted_size": len(result),
-		"response_id":    responseID,
-	})
-
-	return []byte(result)
+	return buf.Bytes()
 }
 
 // convertChatCompletionToResponse 将 OpenAI /chat/completions 非流式响应转换为 Codex /responses 格式

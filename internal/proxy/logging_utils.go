@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +15,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const logBodyPreviewLimit = 2048
+
+func buildBodySnapshot(data []byte) (string, string, bool) {
+	if len(data) == 0 {
+		return "", "", false
+	}
+	sum := sha256.Sum256(data)
+	preview := data
+	truncated := false
+	if len(preview) > logBodyPreviewLimit {
+		preview = preview[:logBodyPreviewLimit]
+		truncated = true
+	}
+	return string(preview), hex.EncodeToString(sum[:]), truncated
+}
 
 // sendFailureResponse 发送失败响应
 func (s *Server) sendFailureResponse(c *gin.Context, requestID string, startTime time.Time, requestBody []byte, requestTags []string, attemptedCount int, errorMsg, errorType string) {
@@ -38,15 +56,15 @@ func (s *Server) sendFailureResponse(c *gin.Context, requestID string, startTime
 		// 提取 Session ID
 		requestLog.SessionID = utils.ExtractSessionIDFromRequestBody(string(requestBody))
 
+		preview, hash, truncated := buildBodySnapshot(requestBody)
+		requestLog.RequestBodyHash = hash
+		requestLog.RequestBodyTruncated = truncated
+
 		// 根据配置记录请求体内容
 		if s.config.Logging.LogRequestBody != "none" {
-			if s.config.Logging.LogRequestBody == "truncated" {
-				requestLog.OriginalRequestBody = utils.TruncateBody(string(requestBody), 1024)
-			} else {
-				requestLog.OriginalRequestBody = string(requestBody)
-			}
+			requestLog.OriginalRequestBody = preview
 			// 同时设置RequestBody字段用于向后兼容
-			requestLog.RequestBody = requestLog.OriginalRequestBody
+			requestLog.RequestBody = preview
 		}
 	}
 
@@ -134,6 +152,8 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 	requestLog.Tags = tags
 	requestLog.ContentTypeOverride = contentTypeOverride
 	requestLog.AttemptNumber = attemptNumber
+	requestLog.IsStreaming = isStreaming
+	requestLog.WasStreaming = isStreaming
 
 	// 设置 thinking 信息
 	if c != nil {
@@ -196,26 +216,23 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 	}
 
 	if len(originalRequestBody) > 0 {
+		preview, hash, truncated := buildBodySnapshot(originalRequestBody)
+		requestLog.RequestBodyHash = hash
+		requestLog.RequestBodyTruncated = truncated
 		if s.config.Logging.LogRequestBody != "none" {
-			if s.config.Logging.LogRequestBody == "truncated" {
-				requestLog.OriginalRequestBody = utils.TruncateBody(string(originalRequestBody), 1024)
-				requestLog.RequestBody = requestLog.OriginalRequestBody
-			} else {
-				requestLog.OriginalRequestBody = string(originalRequestBody)
-				requestLog.RequestBody = requestLog.OriginalRequestBody
-			}
+			requestLog.OriginalRequestBody = preview
+			requestLog.RequestBody = preview
 		}
 	}
 
 	// 记录最终请求体（如果不同于原始请求体）
 	if len(finalRequestBody) > 0 && !bytes.Equal(originalRequestBody, finalRequestBody) {
+		preview, hash, truncated := buildBodySnapshot(finalRequestBody)
 		if s.config.Logging.LogRequestBody != "none" {
-			if s.config.Logging.LogRequestBody == "truncated" {
-				requestLog.FinalRequestBody = utils.TruncateBody(string(finalRequestBody), 1024)
-			} else {
-				requestLog.FinalRequestBody = string(finalRequestBody)
-			}
+			requestLog.FinalRequestBody = preview
 		}
+		requestLog.RequestBodyHash = hash
+		requestLog.RequestBodyTruncated = truncated
 	}
 
 	// 设置最终请求数据（发送给上游的数据）
@@ -230,13 +247,13 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 				// 重新设置请求体供后续使用
 				req.Body = io.NopCloser(bytes.NewReader(finalBody))
 
+				preview, hash, truncated := buildBodySnapshot(finalBody)
 				if s.config.Logging.LogRequestBody != "none" {
-					if s.config.Logging.LogRequestBody == "truncated" {
-						requestLog.FinalRequestBody = utils.TruncateBody(string(finalBody), 1024)
-					} else {
-						requestLog.FinalRequestBody = string(finalBody)
-					}
+					requestLog.FinalRequestBody = preview
+					requestLog.RequestBody = preview
 				}
+				requestLog.RequestBodyHash = hash
+				requestLog.RequestBodyTruncated = truncated
 			}
 		}
 	} else if c != nil {
@@ -249,14 +266,25 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 		requestLog.OriginalResponseHeaders = utils.HeadersToMap(resp.Header)
 		requestLog.ResponseHeaders = requestLog.OriginalResponseHeaders
 		if len(responseBody) > 0 {
+			preview, hash, truncated := buildBodySnapshot(responseBody)
 			if s.config.Logging.LogResponseBody != "none" {
-				if s.config.Logging.LogResponseBody == "truncated" {
-					requestLog.OriginalResponseBody = utils.TruncateBody(string(responseBody), 1024)
-					requestLog.ResponseBody = requestLog.OriginalResponseBody
-				} else {
-					requestLog.OriginalResponseBody = string(responseBody)
-					requestLog.ResponseBody = requestLog.OriginalResponseBody
-				}
+				requestLog.OriginalResponseBody = preview
+				requestLog.ResponseBody = preview
+			}
+			requestLog.ResponseBodyHash = hash
+			requestLog.ResponseBodyTruncated = truncated
+		}
+	}
+
+	if c != nil {
+		if val, exists := c.Get("conversion_path"); exists {
+			if cp, ok := val.(string); ok {
+				requestLog.ConversionPath = cp
+			}
+		}
+		if val, exists := c.Get("supports_responses_flag"); exists {
+			if flag, ok := val.(string); ok {
+				requestLog.SupportsResponsesFlag = flag
 			}
 		}
 	}
@@ -322,14 +350,14 @@ func (s *Server) logBlacklistedEndpointRequest(requestID string, ep *endpoint.En
 	if len(requestBody) > 0 {
 		requestLog.Model = utils.ExtractModelFromRequestBody(string(requestBody))
 		requestLog.SessionID = utils.ExtractSessionIDFromRequestBody(string(requestBody))
+		requestLog.RequestBodySize = len(requestBody)
+		preview, hash, truncated := buildBodySnapshot(requestBody)
+		requestLog.RequestBodyHash = hash
+		requestLog.RequestBodyTruncated = truncated
 
 		if s.config.Logging.LogRequestBody != "none" {
-			if s.config.Logging.LogRequestBody == "truncated" {
-				requestLog.OriginalRequestBody = utils.TruncateBody(string(requestBody), 1024)
-			} else {
-				requestLog.OriginalRequestBody = string(requestBody)
-			}
-			requestLog.RequestBody = requestLog.OriginalRequestBody
+			requestLog.OriginalRequestBody = preview
+			requestLog.RequestBody = preview
 		}
 	}
 

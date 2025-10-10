@@ -45,6 +45,7 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 		LogRequestBody:  cfg.Logging.LogRequestBody,
 		LogResponseBody: cfg.Logging.LogResponseBody,
 		LogDirectory:    cfg.Logging.LogDirectory,
+		ExcludePaths:    cfg.Logging.ExcludePaths,
 	}
 
 	log, err := logger.NewLogger(logConfig)
@@ -236,6 +237,17 @@ func (s *Server) updateLoggingConfig(newLogging config.LoggingConfig) error {
 	s.config.Logging.LogRequestTypes = newLogging.LogRequestTypes
 	s.config.Logging.LogRequestBody = newLogging.LogRequestBody
 	s.config.Logging.LogResponseBody = newLogging.LogResponseBody
+	s.config.Logging.ExcludePaths = newLogging.ExcludePaths
+	
+	// 更新logger的配置
+	s.logger.UpdateConfig(logger.LogConfig{
+		Level:           newLogging.Level,
+		LogRequestTypes: newLogging.LogRequestTypes,
+		LogRequestBody:  newLogging.LogRequestBody,
+		LogResponseBody: newLogging.LogResponseBody,
+		LogDirectory:    newLogging.LogDirectory,
+		ExcludePaths:    newLogging.ExcludePaths,
+	})
 
 	return nil
 }
@@ -325,6 +337,10 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 	nativeToolSupport := ep.NativeToolSupport
 	toolEnhMode := ep.ToolEnhancementMode
 	countTokensEnabled := ep.CountTokensEnabled
+	supportsResponses := ep.NativeCodexFormat
+	if supportsResponses == nil {
+		ep.SupportsResponses = nil
+	}
 
 	// 调用 AdminServer 的持久化方法
 	// 只有在学习到新信息时才持久化
@@ -359,26 +375,12 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 
 	// 2. 检查 OpenAI 格式偏好是否需要持久化
 	if openAIPreference != "" && openAIPreference != "auto" {
-		// 检查配置中是否已经有这个偏好设置
 		s.configMutex.Lock()
 		configPreference := ""
 		for i := range s.config.Endpoints {
 			if s.config.Endpoints[i].Name == ep.Name {
 				configPreference = s.config.Endpoints[i].OpenAIPreference
 				break
-			}
-
-			// 3. 持久化原生工具调用支持（当有学习结果或明确设置时）
-			if nativeToolSupport != nil {
-				s.logger.Info(fmt.Sprintf("🧩 Learning: Detected native tool support=%v for endpoint '%s'", *nativeToolSupport, ep.Name), nil)
-				if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
-					cfg.NativeToolSupport = nativeToolSupport
-					return nil
-				}); err != nil {
-					s.logger.Error(fmt.Sprintf("Failed to persist native tool support for endpoint '%s'", ep.Name), err)
-				} else {
-					needsPersist = true
-				}
 			}
 		}
 		s.configMutex.Unlock()
@@ -400,7 +402,71 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 		}
 	}
 
-	// 4. count_tokens 可用性（仅在需要时持久化）
+	// 3. 持久化原生工具调用支持（当有学习结果或明确设置时）
+	if nativeToolSupport != nil {
+		var configToolSupportValue bool
+		configToolSupportSet := false
+		s.configMutex.Lock()
+		for i := range s.config.Endpoints {
+			if s.config.Endpoints[i].Name == ep.Name {
+				if s.config.Endpoints[i].NativeToolSupport != nil {
+					configToolSupportValue = *s.config.Endpoints[i].NativeToolSupport
+					configToolSupportSet = true
+				}
+				break
+			}
+		}
+		s.configMutex.Unlock()
+
+		if !configToolSupportSet || configToolSupportValue != *nativeToolSupport {
+			s.logger.Info(fmt.Sprintf("🧩 Learning: Detected native tool support=%v for endpoint '%s'", *nativeToolSupport, ep.Name), nil)
+			if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
+				cfg.NativeToolSupport = nativeToolSupport
+				return nil
+			}); err != nil {
+				s.logger.Error(fmt.Sprintf("Failed to persist native tool support for endpoint '%s'", ep.Name), err)
+			} else {
+				needsPersist = true
+			}
+		}
+	}
+
+	// 4. 持久化对 /responses 支持的学习结果
+	if supportsResponses != nil {
+		var configSupportsValue bool
+		configSupportsSet := false
+		s.configMutex.Lock()
+		for i := range s.config.Endpoints {
+			if s.config.Endpoints[i].Name == ep.Name {
+				if s.config.Endpoints[i].SupportsResponses != nil {
+					configSupportsValue = *s.config.Endpoints[i].SupportsResponses
+					configSupportsSet = true
+				}
+				break
+			}
+		}
+		s.configMutex.Unlock()
+
+		if !configSupportsSet || configSupportsValue != *supportsResponses {
+			s.logger.Info(fmt.Sprintf("🧭 Learning: Detected supports_responses=%v for endpoint '%s'", *supportsResponses, ep.Name), nil)
+			supported := *supportsResponses
+			if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
+				ptr := new(bool)
+				*ptr = supported
+				cfg.SupportsResponses = ptr
+				return nil
+			}); err != nil {
+				s.logger.Error(fmt.Sprintf("Failed to persist supports_responses for endpoint '%s'", ep.Name), err)
+			} else {
+				s.logger.Info(fmt.Sprintf("✓ Persisted supports_responses=%v for endpoint '%s'", supported, ep.Name), nil)
+				needsPersist = true
+				copyVal := supported
+				ep.SupportsResponses = &copyVal
+			}
+		}
+	}
+
+	// 5. count_tokens 可用性（仅在需要时持久化）
 	if !countTokensEnabled {
 		if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
 			if cfg.CountTokensEnabled != nil && *cfg.CountTokensEnabled == countTokensEnabled {
@@ -422,7 +488,7 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 		s.logger.Info(fmt.Sprintf("🎓 Successfully persisted learned configuration for endpoint '%s'", ep.Name), nil)
 	}
 
-	// 5. 工具增强模式（如果被设置，持久化）
+	// 6. 工具增强模式（如果被设置，持久化）
 	if toolEnhMode != "" {
 		if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
 			cfg.ToolEnhancementMode = toolEnhMode

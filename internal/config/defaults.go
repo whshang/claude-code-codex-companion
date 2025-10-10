@@ -47,6 +47,7 @@ type DefaultValues struct {
 		LogResponseBody string
 		LogDirectory    string
 		BodyTruncateSize int
+		ExcludePaths    []string
 	}
 
 	// 端点配置默认值
@@ -197,6 +198,7 @@ var Default = DefaultValues{
 		LogResponseBody string
 		LogDirectory    string
 		BodyTruncateSize int
+		ExcludePaths    []string
 	}{
 		Level:                         "info",
 		LogRequestTypes:               "all",
@@ -204,6 +206,7 @@ var Default = DefaultValues{
 		LogResponseBody:               "none",
 		LogDirectory:                  "./logs",
 		BodyTruncateSize:              1000,
+		ExcludePaths:                 []string{"/v1/messages/count_tokens"}, // 默认过滤token计数请求
 	},
 
 	Endpoint: struct {

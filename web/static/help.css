@@ -41,10 +41,10 @@
 }
 
 .hero-section {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 3rem 0;
-    margin-bottom: 2rem;
+    background: none;
+    color: inherit;
+    padding: 2rem 0;
+    margin-bottom: 1.5rem;
 }
 
 /* Client selection cards */

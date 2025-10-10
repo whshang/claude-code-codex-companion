@@ -110,11 +110,7 @@ func (p *FunctionCallParser) parseFunctionCallBlocks(callsContent string) ([]Too
 	callPattern := regexp.MustCompile(`<function_call>([\s\S]*?)</function_call>`)
 	callMatches := callPattern.FindAllStringSubmatch(callsContent, -1)
 
-	if len(callMatches) == 0 {
-		return nil, nil
-	}
-
-	toolCalls := make([]ToolCall, 0, len(callMatches))
+	toolCalls := make([]ToolCall, 0)
 
 	for i, match := range callMatches {
 		block := match[1]
@@ -154,7 +150,69 @@ func (p *FunctionCallParser) parseFunctionCallBlocks(callsContent string) ([]Too
 		toolCalls = append(toolCalls, toolCall)
 	}
 
+	// Support <invoke name="tool"> ... </invoke> format (Toolify-style)
+	invokePattern := regexp.MustCompile(`<invoke\s+[^>]*name="([^"]+)"[^>]*>([\s\S]*?)</invoke>`)
+	invokeMatches := invokePattern.FindAllStringSubmatch(callsContent, -1)
+	for _, match := range invokeMatches {
+		toolName := strings.TrimSpace(match[1])
+		if toolName == "" {
+			continue
+		}
+		argsMap, err := p.parseInvokeArgs(match[2])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse invoke args for tool %s: %w", toolName, err)
+		}
+		argsJSON, err := json.Marshal(argsMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal invoke args for tool %s: %w", toolName, err)
+		}
+		toolCalls = append(toolCalls, ToolCall{
+			ID:    fmt.Sprintf("call_%s", uuid.New().String()),
+			Type:  "function",
+			Index: len(toolCalls),
+			Function: ToolCallFunction{
+				Name:          toolName,
+				Arguments:     argsMap,
+				ArgumentsJSON: string(argsJSON),
+			},
+		})
+	}
+
+	if len(toolCalls) == 0 {
+		return nil, nil
+	}
+
 	return toolCalls, nil
+}
+
+// parseInvokeArgs extracts parameters from <invoke> blocks
+func (p *FunctionCallParser) parseInvokeArgs(block string) (map[string]interface{}, error) {
+	args := make(map[string]interface{})
+
+	paramPattern := regexp.MustCompile(`<parameter\s+[^>]*name="([^"]+)"[^>]*>([\s\S]*?)</parameter>`)
+	matches := paramPattern.FindAllStringSubmatch(block, -1)
+	for _, match := range matches {
+		key := strings.TrimSpace(match[1])
+		if key == "" {
+			continue
+		}
+		value := strings.TrimSpace(match[2])
+		args[key] = p.coerceValue(value)
+	}
+
+	// Also handle <args>...</args> style nested content inside invoke
+	argsPattern := regexp.MustCompile(`<args>([\s\S]*?)</args>`)
+	if nested := argsPattern.FindStringSubmatch(block); nested != nil {
+		nestedArgs, err := p.parseArgs(nested[0])
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range nestedArgs {
+			args[k] = v
+		}
+	}
+
+	return args, nil
 }
 
 // parseArgs extracts arguments from <args> block

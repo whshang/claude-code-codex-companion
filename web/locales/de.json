@@ -12,6 +12,7 @@
     "navigation_taggers": "Tagger",
     "navigation_request_logs": "Anfrage-Monitor",
     "navigation_settings": "Einstellungen",
+    "navigation_help": "Hilfe",
     "total_endpoints": "Gesamt-Endpoints",
     "active_endpoints": "Aktive Endpoints",
     "total_requests": "Gesamtanfragen",

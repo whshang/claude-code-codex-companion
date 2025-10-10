@@ -12,6 +12,7 @@
     "navigation_taggers": "标记器",
     "navigation_request_logs": "请求日志",
     "navigation_settings": "系统设置",
+    "navigation_help": "帮助",
     "total_endpoints": "端点总数",
     "active_endpoints": "活跃端点",
     "total_requests": "请求总数",

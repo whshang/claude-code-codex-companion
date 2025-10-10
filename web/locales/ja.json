@@ -12,6 +12,7 @@
     "navigation_taggers": "タガー",
     "navigation_request_logs": "リクエストモニター",
     "navigation_settings": "設定",
+    "navigation_help": "ヘルプ",
     "total_endpoints": "総エンドポイント数",
     "active_endpoints": "アクティブエンドポイント",
     "total_requests": "総リクエスト数",

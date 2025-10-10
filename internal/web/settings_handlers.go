@@ -197,10 +197,10 @@ func (s *AdminServer) handleHelpPage(c *gin.Context) {
 		})
 	}
 
-	c.HTML(200, "help.html", data)
+	s.renderHTML(c, "help.html", data)
 
 	if s.logger != nil {
-		s.logger.Info("c.HTML call completed successfully", nil)
+		s.logger.Info("renderHTML call completed successfully", nil)
 	}
 	return
 
