@@ -40,19 +40,23 @@ func (p *FunctionCallParser) Parse(response string, triggerSignal string) (*Pars
 	// Extract content after trigger signal
 	contentAfterSignal := cleaned[lastSignalPos:]
 
-	// Extract <function_calls> block
+	var toolCalls []ToolCall
+
+	// Extract <function_calls> block（标准XML格式）
 	callsPattern := regexp.MustCompile(`<function_calls>([\s\S]*?)</function_calls>`)
 	callsMatch := callsPattern.FindStringSubmatch(contentAfterSignal)
-	if callsMatch == nil {
-		return &ParseResult{IsToolCall: false, TextContent: response}, nil
-	}
-
-	callsContent := callsMatch[1]
-
-	// Parse individual <function_call> blocks
-	toolCalls, err := p.parseFunctionCallBlocks(callsContent)
-	if err != nil {
-		return nil, err
+	var err error
+	if callsMatch != nil {
+		toolCalls, err = p.parseFunctionCallBlocks(callsMatch[1])
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// 尝试解析 legacy Toolify 风格 <Function=xxx> 块
+		toolCalls, err = p.parseLegacyFunctionBlocks(contentAfterSignal)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if len(toolCalls) == 0 {
@@ -180,6 +184,58 @@ func (p *FunctionCallParser) parseFunctionCallBlocks(callsContent string) ([]Too
 
 	if len(toolCalls) == 0 {
 		return nil, nil
+	}
+
+	return toolCalls, nil
+}
+
+// parseLegacyFunctionBlocks 解析 <Function=xxx>...</Function=xxx> legacy 格式
+func (p *FunctionCallParser) parseLegacyFunctionBlocks(content string) ([]ToolCall, error) {
+	// (?is) 模式：?i 忽略大小写，?s 让 . 匹配换行
+	functionPattern := regexp.MustCompile(`(?is)<function=([^>]+)>(.*?)</function=\s*\1>`)
+	functionMatches := functionPattern.FindAllStringSubmatch(content, -1)
+	if len(functionMatches) == 0 {
+		return nil, nil
+	}
+
+	toolCalls := make([]ToolCall, 0, len(functionMatches))
+	paramPattern := regexp.MustCompile(`(?is)<parameter=([^>]+)>(.*?)</parameter>`)
+
+	for idx, match := range functionMatches {
+		rawName := strings.TrimSpace(match[1])
+		if rawName == "" {
+			continue
+		}
+
+		// Toolify 有时会把工具名写成 Function=ToolName 或 Function=tool.toolName
+		toolName := rawName
+
+		args := make(map[string]interface{})
+		parameters := paramPattern.FindAllStringSubmatch(match[2], -1)
+		for _, param := range parameters {
+			key := strings.TrimSpace(param[1])
+			if key == "" {
+				continue
+			}
+			value := strings.TrimSpace(param[2])
+			args[key] = p.coerceValue(value)
+		}
+
+		argsJSON, err := json.Marshal(args)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal legacy args for tool %s: %w", toolName, err)
+		}
+
+		toolCalls = append(toolCalls, ToolCall{
+			ID:    fmt.Sprintf("call_%s", uuid.New().String()),
+			Type:  "function",
+			Index: idx,
+			Function: ToolCallFunction{
+				Name:          toolName,
+				Arguments:     args,
+				ArgumentsJSON: string(argsJSON),
+			},
+		})
 	}
 
 	return toolCalls, nil
