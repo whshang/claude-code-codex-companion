@@ -405,18 +405,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		// requestIsAnthropic 和 requestIsOpenAI 已在上面定义
 		endpointIsOpenAI := (actualEndpointFormat == "openai")
 
-		// Anthropic格式请求 + OpenAI URL = 需要转换
-		if requestIsAnthropic && endpointIsOpenAI {
-			needsConversion = true
-			endpointRequestFormat = "openai"
-		}
-
-		// OpenAI格式请求 + Anthropic URL = 需要转换（用于仅配置 Anthropic URL 时兼容 OpenAI 客户端）
-		if requestIsOpenAI && actualEndpointFormat == "anthropic" {
-			needsConversion = true
-			shouldConvertAnthropicResponseToOpenAI = true
-			endpointRequestFormat = "anthropic"
-		}
+undefined
 
 		s.logger.Debug("Format conversion decision", map[string]interface{}{
 			"request_format":         formatDetection.Format,

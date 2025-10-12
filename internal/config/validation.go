@@ -435,7 +435,23 @@ func validateEndpoint(endpoint EndpointConfig, index int) error {
 
 	// 新格式：至少需要一个URL（url_anthropic或url_openai）
 	if endpoint.URLAnthropic == "" && endpoint.URLOpenAI == "" {
-		return fmt.Errorf("endpoint %d: at least one URL must be provided (url_anthropic or url_openai)", index)
+		return fmt.Errorf("endpoint %d (%s): at least one URL must be provided (url_anthropic or url_openai)", index, endpoint.Name)
+	}
+
+	// 配置警告：检测可能的配置错误
+	// 警告1：配置了 endpoint_type=openai 但缺少 url_openai
+	if endpoint.EndpointType == "openai" && endpoint.URLOpenAI == "" {
+		fmt.Printf("[WARNING] Endpoint %d (%s): endpoint_type='openai' but url_openai is empty. This endpoint will NOT serve OpenAI/Codex requests.\n", index, endpoint.Name)
+	}
+
+	// 警告2：配置了 endpoint_type=anthropic 但缺少 url_anthropic
+	if endpoint.EndpointType == "anthropic" && endpoint.URLAnthropic == "" {
+		fmt.Printf("[WARNING] Endpoint %d (%s): endpoint_type='anthropic' but url_anthropic is empty. This endpoint will NOT serve Claude/Anthropic requests.\n", index, endpoint.Name)
+	}
+
+	// 警告3：配置了 openai_preference 但缺少 url_openai
+	if endpoint.OpenAIPreference != "" && endpoint.URLOpenAI == "" {
+		fmt.Printf("[WARNING] Endpoint %d (%s): openai_preference='%s' but url_openai is empty. This setting will be ignored.\n", index, endpoint.Name, endpoint.OpenAIPreference)
 	}
 
 	if endpoint.AuthType != "" && endpoint.AuthType != "api_key" && endpoint.AuthType != "auth_token" && endpoint.AuthType != "oauth" && endpoint.AuthType != "auto" {
