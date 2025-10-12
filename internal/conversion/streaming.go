@@ -1,12 +1,12 @@
 package conversion
 
 import (
-	"bufio"
-	"encoding/json"
-	"fmt"
-	"io"
-	"strings"
-	"time"
+    "bufio"
+    "encoding/json"
+    "fmt"
+    "io"
+    "strings"
+    "time"
 )
 
 const (
@@ -14,12 +14,126 @@ const (
 	defaultScannerMaxCapacity = 2 * 1024 * 1024
 )
 
-// StreamChatCompletionsToResponses 将 OpenAI Chat Completions SSE 流转换为 Codex Responses SSE 流。
-// 🔧 关键发现：Codex 完全兼容 Chat Completions SSE 格式，只需确保流正确结束
+// StreamChatCompletionsToResponses 将 OpenAI Chat Completions SSE 转为 Codex Responses SSE
+// 策略：
+// - 纯文本增量：转换为 response.output_text.delta，并在开始发 response.created，结束发 response.completed
+// - 含 tool_calls 的增量：直接透传原始 Chat Completions chunk，避免把函数参数当成文本注入
 func StreamChatCompletionsToResponses(r io.Reader, w io.Writer) error {
-	// 直接透传所有内容，Codex 原生支持 Chat Completions SSE
-	_, err := io.Copy(w, r)
-	return err
+    scanner := bufio.NewScanner(r)
+    scanner.Buffer(make([]byte, defaultScannerBuffer), defaultScannerMaxCapacity)
+
+    var responseID string
+    var model string
+    var createdEmitted bool
+    var completedEmitted bool
+
+    // 发出 Responses 事件
+    writeEvent := func(event string, payload map[string]interface{}) error {
+        if _, ok := payload["model"]; !ok && model != "" {
+            payload["model"] = model
+        }
+        b, err := json.Marshal(payload)
+        if err != nil {
+            return err
+        }
+        if event != "" {
+            if _, err := io.WriteString(w, "event: "+event+"\n"); err != nil {
+                return err
+            }
+        }
+        if _, err := io.WriteString(w, "data: "+string(b)+"\n\n"); err != nil {
+            return err
+        }
+        return nil
+    }
+
+    emitCreatedIfNeeded := func() error {
+        if createdEmitted || responseID == "" || model == "" {
+            return nil
+        }
+        createdEmitted = true
+        return writeEvent("response.created", map[string]interface{}{
+            "type":   "response.created",
+            "response": map[string]interface{}{
+                "id":    responseID,
+                "model": model,
+            },
+        })
+    }
+
+    emitCompleted := func() error {
+        if completedEmitted {
+            return nil
+        }
+        completedEmitted = true
+        if err := emitCreatedIfNeeded(); err != nil { return err }
+        return writeEvent("response.completed", map[string]interface{}{
+            "type": "response.completed",
+            "response": map[string]interface{}{
+                "id":    responseID,
+                "model": model,
+            },
+        })
+    }
+
+    for scanner.Scan() {
+        line := scanner.Text()
+        trimmed := strings.TrimSpace(line)
+
+        if !strings.HasPrefix(trimmed, "data: ") {
+            continue
+        }
+        dataContent := strings.TrimSpace(strings.TrimPrefix(trimmed, "data: "))
+
+        if dataContent == "[DONE]" {
+            if err := emitCompleted(); err != nil { return err }
+            if _, err := io.WriteString(w, "data: [DONE]\n\n"); err != nil { return err }
+            continue
+        }
+
+        // 解析 Chat Completions chunk
+        var chunk OpenAIStreamChunk
+        if err := json.Unmarshal([]byte(dataContent), &chunk); err != nil {
+            // 无法解析则直接透传（容错）
+            if _, err2 := io.WriteString(w, "data: "+dataContent+"\n\n"); err2 != nil { return err2 }
+            continue
+        }
+        if chunk.Model != "" { model = chunk.Model }
+        if chunk.ID != "" && responseID == "" { responseID = chunk.ID }
+
+        // 如果包含 tool_calls，直接透传整个chunk，避免把函数参数当文本
+        hasToolCalls := false
+        for _, ch := range chunk.Choices {
+            if len(ch.Delta.ToolCalls) > 0 { hasToolCalls = true; break }
+        }
+        if hasToolCalls {
+            // 先确保 created 发出（避免客户端等待 response.created）
+            if err := emitCreatedIfNeeded(); err != nil { return err }
+            if _, err := io.WriteString(w, "data: "+dataContent+"\n\n"); err != nil { return err }
+            continue
+        }
+
+        // 文本增量 → response.output_text.delta
+        if err := emitCreatedIfNeeded(); err != nil { return err }
+        for _, ch := range chunk.Choices {
+            if text, ok := ch.Delta.Content.(string); ok && text != "" {
+                if err := writeEvent("response.output_text.delta", map[string]interface{}{
+                    "type":        "response.output_text.delta",
+                    "delta":       text,
+                    "response_id": responseID,
+                }); err != nil { return err }
+            }
+        }
+    }
+
+    if err := scanner.Err(); err != nil {
+        return err
+    }
+
+    if !completedEmitted {
+        if err := emitCompleted(); err != nil { return err }
+    }
+    return nil
 }
 
 type anthropicStreamState struct {

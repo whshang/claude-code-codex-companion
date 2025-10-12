@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -92,6 +92,52 @@
                                         <option value="truncated" {{if eq .Config.Logging.LogResponseBody "truncated"}}selected{{end}} data-t="truncated">截断</option>
                                         <option value="full" {{if eq .Config.Logging.LogResponseBody "full"}}selected{{end}} data-t="full">完整</option>
                                     </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <h6 data-t="endpoint_blacklist_configuration">端点拉黑配置</h6>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="blacklistEnabled" {{if .Config.Blacklist.Enabled}}checked{{end}}>
+                                        <label class="form-check-label" for="blacklistEnabled" data-t="enable_blacklist">启用端点拉黑功能</label>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="autoBlacklist" {{if .Config.Blacklist.AutoBlacklist}}checked{{end}}>
+                                        <label class="form-check-label" for="autoBlacklist" data-t="auto_blacklist">自动拉黑失败端点</label>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="businessErrorSafe" {{if .Config.Blacklist.BusinessErrorSafe}}checked{{end}}>
+                                        <label class="form-check-label" for="businessErrorSafe" data-t="business_error_safe">业务错误不触发拉黑</label>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="configErrorSafe" {{if .Config.Blacklist.ConfigErrorSafe}}checked{{end}}>
+                                        <label class="form-check-label" for="configErrorSafe" data-t="config_error_safe">配置错误触发拉黑</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="serverErrorSafe" {{if .Config.Blacklist.ServerErrorSafe}}checked{{end}}>
+                                        <label class="form-check-label" for="serverErrorSafe" data-t="server_error_safe">服务器错误触发拉黑</label>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="sseValidationSafe" {{if .Config.Blacklist.SSEValidationSafe}}checked{{end}}>
+                                        <label class="form-check-label" for="sseValidationSafe" data-t="sse_validation_safe">SSE验证错误不触发拉黑</label>
+                                    </div>
                                 </div>
                             </div>
                         </div>

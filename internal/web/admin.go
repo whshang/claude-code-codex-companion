@@ -313,6 +313,9 @@ func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 		})
 	}
 
+	// 注册国际化中间件（确保在其他路由配置之前）
+	router.Use(s.i18nMiddleware())
+
 	router.SetHTMLTemplate(templates)
 	
 	// 设置静态文件服务器（使用嵌入的文件系统）
@@ -507,7 +510,6 @@ func (s *AdminServer) handleDatabaseDiagnostics(c *gin.Context) {
 	
 	c.JSON(http.StatusOK, diagnostics)
 }
-
 
 
 

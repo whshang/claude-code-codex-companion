@@ -1,8 +1,8 @@
 package i18n
 
 import (
+    "fmt"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"path/filepath"
 	"sync"
@@ -15,14 +15,14 @@ import (
 type TranslationCache struct {
 	// Cache for processed HTML templates
 	templateCache map[string]map[Language]string
-	
+
 	// Cache for individual translations
 	translationCache map[string]map[Language]string
-	
+
 	// Cache TTL and cleanup
 	ttl         time.Duration
 	lastCleanup time.Time
-	
+
 	mu sync.RWMutex
 }
 
@@ -52,7 +52,7 @@ func NewManager(config *Config) (*Manager, error) {
 	if config == nil {
 		config = DefaultConfig()
 	}
-	
+
 	manager := &Manager{
 		config:       config,
 		detector:     NewDetector(config.DefaultLanguage),
@@ -60,18 +60,18 @@ func NewManager(config *Config) (*Manager, error) {
 		cache:        NewTranslationCache(30 * time.Minute), // 30 minute cache TTL
 		translations: make(map[Language]map[string]string),
 	}
-	
+
 	// Initialize processor chain after manager is created
 	manager.processorChain = NewProcessorChain(manager)
-	
+
 	// Load translation files
 	if err := manager.loadTranslations(); err != nil {
 		return nil, fmt.Errorf("failed to load translations: %w", err)
 	}
-	
+
 	// Set as global manager
 	SetGlobalManager(manager)
-	
+
 	return manager, nil
 }
 
@@ -80,9 +80,9 @@ func (m *Manager) loadTranslations() error {
 	if !m.config.Enabled {
 		return nil
 	}
-	
+
 	supportedLangs := []Language{LanguageEn, LanguageZhCN, LanguageDe, LanguageEs, LanguageIt, LanguageJa, LanguageKo, LanguagePt, LanguageRu}
-	
+
 	for _, lang := range supportedLangs {
 		filename := filepath.Join(m.config.LocalesPath, string(lang)+".json")
 		translations, err := m.loadTranslationFile(filename)
@@ -91,10 +91,10 @@ func (m *Manager) loadTranslations() error {
 			m.translations[lang] = make(map[string]string)
 			continue
 		}
-		
+
 		m.translations[lang] = translations
 	}
-	
+
 	return nil
 }
 
@@ -102,7 +102,7 @@ func (m *Manager) loadTranslations() error {
 func (m *Manager) loadTranslationFile(filename string) (map[string]string, error) {
 	// Extract just the filename from full path
 	baseFilename := filepath.Base(filename)
-	
+
 	// Try to read from embedded assets first
 	data, err := webres.ReadLocaleFile(baseFilename)
 	if err != nil {
@@ -112,7 +112,7 @@ func (m *Manager) loadTranslationFile(filename string) (map[string]string, error
 			return nil, err
 		}
 	}
-	
+
 	// Parse the JSON structure that includes meta and translations
 	var fileContent struct {
 		Meta struct {
@@ -123,11 +123,11 @@ func (m *Manager) loadTranslationFile(filename string) (map[string]string, error
 		} `json:"meta"`
 		Translations map[string]string `json:"translations"`
 	}
-	
+
 	if err := json.Unmarshal(data, &fileContent); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
-	
+
 	return fileContent.Translations, nil
 }
 
@@ -156,21 +156,21 @@ func (m *Manager) GetTranslation(text string, lang Language) string {
 	if !m.config.Enabled {
 		return text
 	}
-	
+
 	// If it's the default language, return original text
 	if lang == m.config.DefaultLanguage {
 		return text
 	}
-	
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	if langTranslations, exists := m.translations[lang]; exists {
 		if translation, found := langTranslations[text]; found {
 			return translation
 		}
 	}
-	
+
 	// Fallback to original text
 	return text
 }
@@ -179,10 +179,10 @@ func (m *Manager) GetTranslation(text string, lang Language) string {
 func (m *Manager) ReloadTranslations() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Clear existing translations
 	m.translations = make(map[Language]map[string]string)
-	
+
 	// Reload translations
 	return m.loadTranslations()
 }
@@ -191,11 +191,11 @@ func (m *Manager) ReloadTranslations() error {
 func (m *Manager) AddTranslation(lang Language, original, translation string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.translations[lang] == nil {
 		m.translations[lang] = make(map[string]string)
 	}
-	
+
 	m.translations[lang][original] = translation
 }
 
@@ -234,7 +234,7 @@ func (m *Manager) GetLanguageInfo(lang Language) map[string]string {
 func (m *Manager) GetAllTranslations() map[Language]map[string]string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	// Return a copy to avoid race conditions
 	result := make(map[Language]map[string]string)
 	for lang, translations := range m.translations {
@@ -243,7 +243,7 @@ func (m *Manager) GetAllTranslations() map[Language]map[string]string {
 			result[lang][key] = value
 		}
 	}
-	
+
 	return result
 }
 
@@ -259,21 +259,21 @@ func (m *Manager) ProcessContent(content string, lang Language, ctx Context) (st
 	if !m.config.Enabled {
 		return content, nil
 	}
-	
+
 	// Check cache first
 	if cached := m.getCachedContent(content, lang); cached != "" {
 		return cached, nil
 	}
-	
+
 	// Process through chain
 	result, err := m.processorChain.Process(content, lang, ctx)
 	if err != nil {
 		return content, err
 	}
-	
+
 	// Cache the result
 	m.setCachedContent(content, lang, result)
-	
+
 	return result, nil
 }
 
@@ -293,13 +293,13 @@ func (m *Manager) ValidateContent(content string) []ProcessorValidationError {
 func (m *Manager) getCachedContent(content string, lang Language) string {
 	m.cache.mu.RLock()
 	defer m.cache.mu.RUnlock()
-	
+
 	if langCache, exists := m.cache.templateCache[content]; exists {
 		if result, found := langCache[lang]; found {
 			return result
 		}
 	}
-	
+
 	return ""
 }
 
@@ -307,13 +307,13 @@ func (m *Manager) getCachedContent(content string, lang Language) string {
 func (m *Manager) setCachedContent(content string, lang Language, result string) {
 	m.cache.mu.Lock()
 	defer m.cache.mu.Unlock()
-	
+
 	if m.cache.templateCache[content] == nil {
 		m.cache.templateCache[content] = make(map[Language]string)
 	}
-	
+
 	m.cache.templateCache[content][lang] = result
-	
+
 	// Perform periodic cleanup
 	if time.Since(m.cache.lastCleanup) > m.cache.ttl {
 		go m.cleanupCache()
@@ -324,7 +324,7 @@ func (m *Manager) setCachedContent(content string, lang Language, result string)
 func (m *Manager) cleanupCache() {
 	m.cache.mu.Lock()
 	defer m.cache.mu.Unlock()
-	
+
 	// Simple cleanup: clear all cache periodically
 	// In production, implement proper LRU or TTL-based cleanup
 	if time.Since(m.cache.lastCleanup) > m.cache.ttl*2 {
@@ -338,7 +338,7 @@ func (m *Manager) cleanupCache() {
 func (m *Manager) ClearCache() {
 	m.cache.mu.Lock()
 	defer m.cache.mu.Unlock()
-	
+
 	m.cache.templateCache = make(map[string]map[Language]string)
 	m.cache.translationCache = make(map[string]map[Language]string)
 	m.cache.lastCleanup = time.Now()
@@ -351,21 +351,21 @@ func (m *Manager) GetTranslationWithKey(key string, lang Language) string {
 	if !m.config.Enabled {
 		return key
 	}
-	
+
 	// If it's the default language, return key as-is for lookup
 	if lang == m.config.DefaultLanguage {
 		return key
 	}
-	
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	if langTranslations, exists := m.translations[lang]; exists {
 		if translation, found := langTranslations[key]; found {
 			return translation
 		}
 	}
-	
+
 	// Return key if no translation found
 	return key
 }

@@ -192,6 +192,9 @@ func (s *Server) HotUpdateConfig(newConfig *config.Config) error {
 	// 更新验证器配置
 	s.updateValidatorConfig(newConfig.Validation)
 
+	// 更新黑名单配置
+	s.updateBlacklistConfig(newConfig.Blacklist)
+
 	// 更新内存中的配置（需要锁保护，因为可能与其他配置更新并发）
 	s.configMutex.Lock()
 	s.config = newConfig
@@ -256,6 +259,11 @@ func (s *Server) updateLoggingConfig(newLogging config.LoggingConfig) error {
 func (s *Server) updateValidatorConfig(newValidation config.ValidationConfig) {
 	s.validator = validator.NewResponseValidator()
 	s.config.Validation = newValidation
+}
+
+// updateBlacklistConfig updates blacklist configuration
+func (s *Server) updateBlacklistConfig(newBlacklist config.BlacklistConfig) {
+	s.config.Blacklist = newBlacklist
 }
 
 // saveConfigToFile 将当前配置保存到文件（线程安全）

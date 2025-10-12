@@ -170,12 +170,12 @@ type TaggingConfig struct {
 
 // 端点拉黑配置结构
 type BlacklistConfig struct {
-	Enabled           bool `yaml:"enabled"`             // 是否启用端点拉黑功能
-	AutoBlacklist     bool `yaml:"auto_blacklist"`      // 是否自动拉黑失败的端点
-	BusinessErrorSafe bool `yaml:"business_error_safe"` // 业务错误是否安全（不触发拉黑）
-	ConfigErrorSafe   bool `yaml:"config_error_safe"`   // 配置错误是否安全（不触发拉黑）
-	ServerErrorSafe   bool `yaml:"server_error_safe"`   // 服务器错误是否安全（不触发拉黑）
-	SSEValidationSafe bool `yaml:"sse_validation_safe"` // SSE验证错误是否安全（不触发拉黑）
+	Enabled           bool `yaml:"enabled" json:"enabled"`                         // 是否启用端点拉黑功能
+	AutoBlacklist     bool `yaml:"auto_blacklist" json:"auto_blacklist"`           // 是否自动拉黑失败的端点
+	BusinessErrorSafe bool `yaml:"business_error_safe" json:"business_error_safe"` // 业务错误是否安全（不触发拉黑）
+	ConfigErrorSafe   bool `yaml:"config_error_safe" json:"config_error_safe"`     // 配置错误是否安全（不触发拉黑）
+	ServerErrorSafe   bool `yaml:"server_error_safe" json:"server_error_safe"`     // 服务器错误是否安全（不触发拉黑）
+	SSEValidationSafe bool `yaml:"sse_validation_safe" json:"sse_validation_safe"` // SSE验证错误是否安全（不触发拉黑）
 }
 
 type TaggerConfig struct {
