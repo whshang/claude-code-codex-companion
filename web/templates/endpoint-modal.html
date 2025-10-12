@@ -292,6 +292,15 @@
                                             <small class="text-muted d-block" id="supports-runtime-note">根据最近一次请求自动更新</small>
                                         </div>
                                     </div>
+                                    <div class="col-6">
+                                        <label for="openai-preference" class="form-label">OpenAI 首选格式</label>
+                                        <select class="form-select" id="openai-preference">
+                                            <option value="auto">自动检测并学习（推荐）</option>
+                                            <option value="responses">优先尝试 /responses（原生 Responses）</option>
+                                            <option value="chat_completions">直接使用 /chat/completions（旧格式）</option>
+                                        </select>
+                                        <small class="form-text text-muted">设置Codex客户端首选路径；仍可在运行时根据探测结果自动回退</small>
+                                    </div>
                                 </div>
                             </div>
                             <!-- 工具调用增强配置 -->

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"claude-code-codex-companion/internal/config"
+	"claude-code-codex-companion/internal/conversion"
 	"claude-code-codex-companion/internal/endpoint"
 	"claude-code-codex-companion/internal/health"
 	"claude-code-codex-companion/internal/i18n"
@@ -36,6 +37,9 @@ type Server struct {
 
 	// Tool Calling enhancer (auto-enabled when tools provided by client)
 	toolEnhancer *toolcall.Enhancer
+
+	// Conversion manager for format adaptation
+	conversionManager *conversion.ConversionManager
 }
 
 func NewServer(cfg *config.Config, configFilePath string, version string) (*Server, error) {
@@ -90,6 +94,12 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 	// 创建管理界面服务器（永远启用）
 	adminServer := web.NewAdminServer(cfg, endpointManager, taggingManager, log, configFilePath, version, i18nManager)
 
+	manager := conversion.NewConversionManager(log, conversion.ManagerConfig{
+		Mode:              conversion.ConversionMode(cfg.Conversion.AdapterMode),
+		FailbackThreshold: cfg.Conversion.FailbackThreshold,
+		ValidateSwitch:    cfg.Conversion.ValidateModeSwitch,
+	})
+
 	server := &Server{
 		config:          cfg,
 		endpointManager: endpointManager,
@@ -111,6 +121,9 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 		MaxSize: 100,
 		TTL:     ttl,
 	})
+
+	server.conversionManager = manager
+	adminServer.SetConversionManager(manager)
 
 	// 设置持久化回调，让AdminServer可以被Server调用
 	adminServer.SetPersistenceCallbacks(server)
@@ -200,6 +213,16 @@ func (s *Server) HotUpdateConfig(newConfig *config.Config) error {
 	s.config = newConfig
 	s.configMutex.Unlock()
 
+	if s.conversionManager != nil {
+		if err := s.conversionManager.ApplyConfig(conversion.ManagerConfig{
+			Mode:              conversion.ConversionMode(newConfig.Conversion.AdapterMode),
+			FailbackThreshold: newConfig.Conversion.FailbackThreshold,
+			ValidateSwitch:    newConfig.Conversion.ValidateModeSwitch,
+		}); err != nil {
+			s.logger.Error("Failed to apply conversion configuration during hot update", err)
+		}
+	}
+
 	s.logger.Info("Configuration hot update completed successfully")
 	return nil
 }
@@ -241,7 +264,7 @@ func (s *Server) updateLoggingConfig(newLogging config.LoggingConfig) error {
 	s.config.Logging.LogRequestBody = newLogging.LogRequestBody
 	s.config.Logging.LogResponseBody = newLogging.LogResponseBody
 	s.config.Logging.ExcludePaths = newLogging.ExcludePaths
-	
+
 	// 更新logger的配置
 	s.logger.UpdateConfig(logger.LogConfig{
 		Level:           newLogging.Level,

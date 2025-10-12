@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"claude-code-codex-companion/internal/config"
+	"claude-code-codex-companion/internal/conversion"
 	"claude-code-codex-companion/internal/endpoint"
 	"claude-code-codex-companion/internal/i18n"
 	"claude-code-codex-companion/internal/logger"
@@ -28,17 +29,18 @@ type PersistenceHandler interface {
 }
 
 type AdminServer struct {
-	config              *config.Config
-	endpointManager     *endpoint.Manager
-	taggingManager      *tagging.Manager
-	logger              *logger.Logger
-	configFilePath      string
-	hotUpdateHandler    HotUpdateHandler
-	persistenceHandler  PersistenceHandler
-	version             string
-	i18nManager         *i18n.Manager
-	csrfManager         *security.CSRFManager
-	startTime           time.Time
+	config             *config.Config
+	endpointManager    *endpoint.Manager
+	taggingManager     *tagging.Manager
+	logger             *logger.Logger
+	configFilePath     string
+	hotUpdateHandler   HotUpdateHandler
+	persistenceHandler PersistenceHandler
+	version            string
+	i18nManager        *i18n.Manager
+	csrfManager        *security.CSRFManager
+	startTime          time.Time
+	conversionManager  *conversion.ConversionManager
 }
 
 func NewAdminServer(cfg *config.Config, endpointManager *endpoint.Manager, taggingManager *tagging.Manager, log *logger.Logger, configFilePath string, version string, i18nManager *i18n.Manager) *AdminServer {
@@ -65,6 +67,11 @@ func (s *AdminServer) SetPersistenceCallbacks(handler PersistenceHandler) {
 	s.persistenceHandler = handler
 }
 
+// SetConversionManager sets the conversion manager for runtime mode control
+func (s *AdminServer) SetConversionManager(manager *conversion.ConversionManager) {
+	s.conversionManager = manager
+}
+
 // PersistAuthType 持久化端点的认证类型（通过 PersistenceHandler）
 func (s *AdminServer) PersistAuthType(ep *endpoint.Endpoint, authType string) {
 	if s.persistenceHandler != nil {
@@ -83,6 +90,85 @@ func (s *AdminServer) PersistOpenAIPreference(ep *endpoint.Endpoint, preference 
 		// 调用持久化处理器
 		s.persistenceHandler.PersistEndpointLearning(ep)
 	}
+}
+
+func (s *AdminServer) handleGetConversionMode(c *gin.Context) {
+	if s.conversionManager == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "conversion manager not configured"})
+		return
+	}
+
+	mode := s.conversionManager.GetConfiguredMode()
+	effective := s.conversionManager.GetEffectiveMode()
+
+	c.JSON(http.StatusOK, gin.H{
+		"mode":                 string(mode),
+		"effective_mode":       string(effective),
+		"failback_threshold":   s.config.Conversion.FailbackThreshold,
+		"validate_mode_switch": s.config.Conversion.ValidateModeSwitch,
+	})
+}
+
+func (s *AdminServer) handleUpdateConversionMode(c *gin.Context) {
+	if s.conversionManager == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "conversion manager not configured"})
+		return
+	}
+
+	var req struct {
+		Mode              string `json:"mode"`
+		FailbackThreshold *int   `json:"failback_threshold"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	modeStr := strings.TrimSpace(req.Mode)
+	if modeStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mode is required"})
+		return
+	}
+
+	failback := s.config.Conversion.FailbackThreshold
+	if req.FailbackThreshold != nil {
+		if *req.FailbackThreshold <= 0 || *req.FailbackThreshold > 100 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failback_threshold must be between 1 and 100"})
+			return
+		}
+		failback = *req.FailbackThreshold
+	}
+
+	managerCfg := conversion.ManagerConfig{
+		Mode:              conversion.ConversionMode(strings.ToLower(modeStr)),
+		FailbackThreshold: failback,
+		ValidateSwitch:    s.config.Conversion.ValidateModeSwitch,
+	}
+
+	if err := s.conversionManager.ApplyConfig(managerCfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 更新配置快照
+	s.config.Conversion.AdapterMode = string(s.conversionManager.GetConfiguredMode())
+	s.config.Conversion.FailbackThreshold = failback
+
+	c.JSON(http.StatusOK, gin.H{
+		"mode":           string(s.conversionManager.GetConfiguredMode()),
+		"effective_mode": string(s.conversionManager.GetEffectiveMode()),
+		"stats":          s.conversionManager.GetStats(),
+	})
+}
+
+func (s *AdminServer) handleGetConversionStats(c *gin.Context) {
+	if s.conversionManager == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "conversion manager not configured"})
+		return
+	}
+
+	c.JSON(http.StatusOK, s.conversionManager.GetStats())
 }
 
 // renderHTML renders template with i18n support
@@ -134,21 +220,21 @@ func (s *AdminServer) renderHTML(c *gin.Context, templateName string, data map[s
 		}
 		return
 	}
-	
+
 	// For non-default languages, we need to post-process
 	// Create a custom writer that captures the output
 	originalWriter := c.Writer
 	captureWriter := &captureResponseWriter{ResponseWriter: originalWriter}
 	c.Writer = captureWriter
-	
+
 	// Render template
 	c.HTML(200, templateName, data)
-	
+
 	// Process the captured HTML through translator
 	html := captureWriter.GetHTML()
 	translator := s.i18nManager.GetTranslator()
 	translatedHTML := translator.ProcessHTML(html, lang, s.i18nManager.GetTranslation)
-	
+
 	// Write the translated HTML to original writer
 	c.Writer = originalWriter
 	c.Writer.Write([]byte(translatedHTML))
@@ -172,7 +258,7 @@ func (w *captureResponseWriter) GetHTML() string {
 // getBaseTemplateData returns common template data for all pages
 func (s *AdminServer) getBaseTemplateData(c *gin.Context, currentPage string) map[string]interface{} {
 	lang := s.i18nManager.GetDetector().DetectLanguage(c)
-	
+
 	// Build available languages data
 	availableLanguages := make([]map[string]interface{}, 0)
 	for _, availableLang := range s.i18nManager.GetAvailableLanguages() {
@@ -183,7 +269,7 @@ func (s *AdminServer) getBaseTemplateData(c *gin.Context, currentPage string) ma
 			"name": langInfo["name"],
 		})
 	}
-	
+
 	return map[string]interface{}{
 		"Version":            s.version,
 		"CurrentPage":        currentPage,
@@ -282,7 +368,7 @@ func (s *AdminServer) updateConfigWithRollback(updateFunc func() error, rollback
 	if err := updateFunc(); err != nil {
 		return err
 	}
-	
+
 	// 保存配置到文件
 	if err := config.SaveConfig(s.config, s.configFilePath); err != nil {
 		// 保存失败，尝试回滚
@@ -291,7 +377,7 @@ func (s *AdminServer) updateConfigWithRollback(updateFunc func() error, rollback
 		}
 		return fmt.Errorf("failed to save configuration: %v", err)
 	}
-	
+
 	return nil
 }
 
@@ -317,7 +403,7 @@ func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 	router.Use(s.i18nMiddleware())
 
 	router.SetHTMLTemplate(templates)
-	
+
 	// 设置静态文件服务器（使用嵌入的文件系统）
 	staticFS, err := webres.GetStaticFS()
 	if err != nil {
@@ -345,12 +431,12 @@ func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 
 	// 注册 API 路由，添加UTF-8字符集中间件和CSRF防护
 	api := router.Group("/admin/api")
-	api.Use(s.utf8JsonMiddleware()) // 添加UTF-8中间件
+	api.Use(s.utf8JsonMiddleware())     // 添加UTF-8中间件
 	api.Use(s.csrfManager.Middleware()) // 添加CSRF防护
 	{
 		// CSRF token端点（GET请求，不需要CSRF验证）
 		api.GET("/csrf-token", s.handleGetCSRFToken)
-		
+
 		api.GET("/endpoints", s.handleGetEndpoints)
 		api.PUT("/endpoints", s.handleUpdateEndpoints)
 		api.POST("/endpoints", s.handleCreateEndpoint)
@@ -367,15 +453,20 @@ func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 		api.POST("/endpoints/test-all", s.handleTestAllEndpoints)
 		api.GET("/endpoints/test-all-stream", s.handleTestAllEndpointsStream)
 
+		// 转换模式管理
+		api.GET("/conversion/mode", s.handleGetConversionMode)
+		api.PUT("/conversion/mode", s.handleUpdateConversionMode)
+		api.GET("/conversion/stats", s.handleGetConversionStats)
+
 		// 端点向导路由
 		s.registerEndpointWizardRoutes(api)
-		
+
 		api.GET("/taggers", s.handleGetTaggers)
 		api.POST("/taggers", s.handleCreateTagger)
 		api.PUT("/taggers/:name", s.handleUpdateTagger)
 		api.DELETE("/taggers/:name", s.handleDeleteTagger)
 		api.GET("/tags", s.handleGetTags)
-		
+
 		api.GET("/logs", s.handleGetLogs)
 		api.POST("/logs/cleanup", s.handleCleanupLogs)
 		api.GET("/logs/stats", s.handleGetLogStats)
@@ -384,7 +475,7 @@ func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 		api.GET("/config", s.handleGetConfig)
 		api.GET("/settings", s.handleGetSettings)
 		api.PUT("/settings", s.handleUpdateSettings)
-		
+
 		// 翻译API
 		api.GET("/translations", s.handleGetTranslations)
 	}
@@ -395,7 +486,7 @@ func (s *AdminServer) utf8JsonMiddleware() gin.HandlerFunc {
 	return gin.HandlerFunc(func(c *gin.Context) {
 		// 处理请求
 		c.Next()
-		
+
 		// 如果响应是JSON，确保Content-Type包含UTF-8字符集
 		contentType := c.Writer.Header().Get("Content-Type")
 		if contentType == "application/json" {
@@ -417,8 +508,8 @@ func (s *AdminServer) i18nMiddleware() gin.HandlerFunc {
 		i18n.SetLanguageToContext(c, lang)
 
 		// Only apply translation for /admin/ pages
-		if strings.HasPrefix(c.Request.URL.Path, "/admin/") && 
-		   !strings.HasPrefix(c.Request.URL.Path, "/admin/api/") {
+		if strings.HasPrefix(c.Request.URL.Path, "/admin/") &&
+			!strings.HasPrefix(c.Request.URL.Path, "/admin/api/") {
 			// Override HTML response to process translations
 			originalWriter := c.Writer
 			c.Writer = &translatingResponseWriter{
@@ -461,7 +552,7 @@ func (s *AdminServer) handleGetCSRFToken(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"csrf_token": token,
 	})
@@ -473,33 +564,33 @@ func (s *AdminServer) handleGetTranslations(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{})
 		return
 	}
-	
+
 	// Get all translations from the manager
 	allTranslations := s.i18nManager.GetAllTranslations()
-	
+
 	// Format the response for client consumption
 	response := make(map[string]map[string]string)
 	for lang, translations := range allTranslations {
 		response[string(lang)] = translations
 	}
-	
+
 	c.JSON(http.StatusOK, response)
 }
 
 // handleDatabaseDiagnostics 数据库诊断信息
 func (s *AdminServer) handleDatabaseDiagnostics(c *gin.Context) {
 	diagnostics := make(map[string]interface{})
-	
+
 	// 获取数据库健康状态
 	diagnostics["health"] = s.logger.GetDatabaseHealth()
-	
+
 	// 获取数据库统计信息
 	if stats, err := s.logger.GetStats(); err != nil {
 		diagnostics["stats_error"] = err.Error()
 	} else {
 		diagnostics["stats"] = stats
 	}
-	
+
 	// 获取存储类型信息
 	storage := s.logger.GetStorage()
 	if storage != nil {
@@ -507,10 +598,6 @@ func (s *AdminServer) handleDatabaseDiagnostics(c *gin.Context) {
 	} else {
 		diagnostics["storage_type"] = "unknown"
 	}
-	
+
 	c.JSON(http.StatusOK, diagnostics)
 }
-
-
-
-

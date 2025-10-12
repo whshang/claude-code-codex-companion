@@ -59,7 +59,7 @@ func (s *Server) processRequestTags(req *http.Request) *tagging.TaggedRequest {
 func (s *Server) selectEndpointForRequest(taggedRequest *tagging.TaggedRequest, requestFormat string, clientType string) (*endpoint.Endpoint, error) {
 	if taggedRequest != nil && len(taggedRequest.Tags) > 0 {
 		// 使用tag和格式匹配选择endpoint
-		selectedEndpoint, err := s.endpointManager.GetEndpointWithTagsAndFormat(taggedRequest.Tags, requestFormat)
+		selectedEndpoint, err := s.endpointManager.GetEndpointWithTagsFormatAndClient(taggedRequest.Tags, requestFormat, clientType)
 		s.logger.Debug(fmt.Sprintf("Request tagged with: %v, format: %s, client: %s, selected endpoint: %s",
 			taggedRequest.Tags,
 			requestFormat,
@@ -67,8 +67,8 @@ func (s *Server) selectEndpointForRequest(taggedRequest *tagging.TaggedRequest, 
 			func() string { if selectedEndpoint != nil { return selectedEndpoint.Name } else { return "none" } }()))
 		return selectedEndpoint, err
 	} else {
-		// 使用格式匹配选择endpoint
-		selectedEndpoint, err := s.endpointManager.GetEndpointWithFormat(requestFormat)
+		// 使用格式和客户端匹配选择endpoint
+		selectedEndpoint, err := s.endpointManager.GetEndpointWithFormatAndClient(requestFormat, clientType)
 		s.logger.Debug(fmt.Sprintf("Request has no tags, format: %s, client: %s, using format-based endpoint selection", requestFormat, clientType))
 		return selectedEndpoint, err
 	}

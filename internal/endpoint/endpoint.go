@@ -321,23 +321,58 @@ func (e *Endpoint) GetFullURL(path string) string {
 	return e.GetFullURLWithFormat(path, "")
 }
 
+// HasURLForFormat 检查端点是否配置了指定格式的URL
+// requestFormat: "anthropic" | "openai"
+func (e *Endpoint) HasURLForFormat(requestFormat string) bool {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	switch requestFormat {
+	case "anthropic":
+		return e.URLAnthropic != ""
+	case "openai":
+		return e.URLOpenAI != ""
+	default:
+		// 未知格式或未指定，检查是否至少有一个URL
+		return e.URLAnthropic != "" || e.URLOpenAI != ""
+	}
+}
+
 // GetFullURLWithFormat 根据请求格式构建完整URL
+// 严格按 requestFormat 匹配对应家族的URL，不做跨家族回退
+// 如果对应家族URL为空，返回空字符串（调用方应检查并跳过该端点）
 func (e *Endpoint) GetFullURLWithFormat(path string, requestFormat string) string {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
 
-	// 获取对应格式的URL
+	// 获取对应格式的URL - 严格匹配，不跨家族
 	baseURL := ""
 
-	if requestFormat == "anthropic" && e.URLAnthropic != "" {
-		baseURL = e.URLAnthropic
-	} else if requestFormat == "openai" && e.URLOpenAI != "" {
-		baseURL = e.URLOpenAI
-	} else if e.URLAnthropic != "" {
-		// 默认策略：优先Anthropic
-		baseURL = e.URLAnthropic
+	if requestFormat == "anthropic" {
+		// Anthropic 请求只使用 Anthropic URL
+		if e.URLAnthropic != "" {
+			baseURL = e.URLAnthropic
+		} else {
+			// 无 Anthropic URL，返回空字符串
+			return ""
+		}
+	} else if requestFormat == "openai" {
+		// OpenAI 请求只使用 OpenAI URL
+		if e.URLOpenAI != "" {
+			baseURL = e.URLOpenAI
+		} else {
+			// 无 OpenAI URL，返回空字符串
+			return ""
+		}
 	} else {
-		baseURL = e.URLOpenAI
+		// 未指定格式或格式未知 - 使用传统的优先级策略（向后兼容）
+		if e.URLAnthropic != "" {
+			baseURL = e.URLAnthropic
+		} else if e.URLOpenAI != "" {
+			baseURL = e.URLOpenAI
+		} else {
+			return ""
+		}
 	}
 
 	// 智能添加/v1前缀（如果用户没有配置）

@@ -175,26 +175,39 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		clientRequestFormat = string(formatDetection.Format)
 	}
 	endpointRequestFormat := clientRequestFormat
+
+	// 早期检查：如果端点没有对应格式的URL，快速跳过
+	if clientRequestFormat != "" && !ep.HasURLForFormat(clientRequestFormat) {
+		s.logger.Debug("Skipping endpoint: no URL for request format", map[string]interface{}{
+			"endpoint":       ep.Name,
+			"request_format": clientRequestFormat,
+			"url_anthropic":  ep.URLAnthropic != "",
+			"url_openai":     ep.URLOpenAI != "",
+		})
+		c.Set("skip_health_record", true)
+		c.Set("last_error", fmt.Errorf("endpoint %s has no URL for format %s", ep.Name, clientRequestFormat))
+		c.Set("last_status_code", http.StatusBadGateway)
+		return false, true // 尝试下一个端点
+	}
+
 	conversionStages := []string{}
 	if inboundPath == "/responses" && ep.EndpointType == "openai" {
 		updateSupportsResponsesContext(c, ep)
 	}
 
-	// 🔧 Bug修复：提前处理 Codex /responses 路径转换
-	// 对于配置了 chat_completions 偏好的端点，立即转换路径
-	if inboundPath == "/responses" && endpointRequestFormat == "openai" {
-		if ep.OpenAIPreference == "chat_completions" {
-			effectivePath = "/chat/completions"
-			s.logger.Debug("Early path conversion for OpenAI endpoint with chat_completions preference", map[string]interface{}{
-				"endpoint":   ep.Name,
-				"inbound":    "/responses",
-				"effective":  "/chat/completions",
-				"preference": ep.OpenAIPreference,
-			})
-		}
-	}
-
 	targetURL := ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
+	// 检查 GetFullURLWithFormat 返回的URL是否为空
+	if targetURL == "" {
+		s.logger.Debug("Skipping endpoint: GetFullURLWithFormat returned empty URL", map[string]interface{}{
+			"endpoint":       ep.Name,
+			"path":           effectivePath,
+			"request_format": endpointRequestFormat,
+		})
+		c.Set("skip_health_record", true)
+		c.Set("last_error", fmt.Errorf("endpoint %s returned empty URL", ep.Name))
+		c.Set("last_status_code", http.StatusBadGateway)
+		return false, true
+	}
 
 	// 记录工具增强默认上下文，便于日志输出
 	effectiveToolMode := strings.ToLower(ep.ToolEnhancementMode)
@@ -340,7 +353,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	// 格式转换（在模型重写之后）
 	// 关键修复：只有当请求格式与端点格式不匹配时才需要转换
 	var conversionContext *conversion.ConversionContext
-	// 判断是否需要格式转换
+    // 判断是否需要格式转换
 	// 关键修复：根据实际使用的URL来判断端点格式，而不是endpoint_type
 	needsConversion := false
 	actualEndpointFormat := ""
@@ -349,28 +362,47 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	shouldConvertAnthropicResponseToOpenAI := false
 
 	if formatDetection != nil && formatDetection.Format != utils.FormatUnknown {
-		// 确定实际使用的URL类型
-		// 更准确的URL类型判断逻辑
-		if clientRequestFormat == "anthropic" && ep.URLAnthropic != "" {
-			// Anthropic请求且有Anthropic URL → 使用Anthropic格式
-			actualEndpointFormat = "anthropic"
-		} else if clientRequestFormat == "openai" && ep.URLOpenAI != "" {
-			// OpenAI请求且有OpenAI URL → 使用OpenAI格式
-			actualEndpointFormat = "openai"
-		} else if ep.URLAnthropic != "" {
-			// 优先使用Anthropic URL
-			actualEndpointFormat = "anthropic"
-		} else if ep.URLOpenAI != "" {
-			// 使用OpenAI URL
-			actualEndpointFormat = "openai"
+		// 确定实际使用的URL类型 - 严格匹配，不跨家族
+		requestIsAnthropic := (formatDetection.Format == utils.FormatAnthropic)
+		requestIsOpenAI := (formatDetection.Format == utils.FormatOpenAI)
+
+		if requestIsAnthropic {
+			// Anthropic 请求：仅当有 Anthropic URL 时才使用
+			if ep.URLAnthropic != "" {
+				actualEndpointFormat = "anthropic"
+			} else {
+				// 没有 Anthropic URL，这个端点不能服务 Anthropic 请求
+				// 该端点应该已经在早期检查中被跳过
+				s.logger.Debug("Anthropic request but no Anthropic URL", map[string]interface{}{
+					"endpoint": ep.Name,
+				})
+				actualEndpointFormat = "anthropic" // 设置为期望的格式，后续会报错
+			}
+		} else if requestIsOpenAI {
+			// OpenAI 请求：仅当有 OpenAI URL 时才使用
+			if ep.URLOpenAI != "" {
+				actualEndpointFormat = "openai"
+			} else {
+				// 没有 OpenAI URL，这个端点不能服务 OpenAI 请求
+				// 该端点应该已经在早期检查中被跳过
+				s.logger.Debug("OpenAI request but no OpenAI URL", map[string]interface{}{
+					"endpoint": ep.Name,
+				})
+				actualEndpointFormat = "openai" // 设置为期望的格式，后续会报错
+			}
 		} else {
-			// 不应该到达这里，作为保险
-			actualEndpointFormat = "openai"
+			// 未知格式：使用传统优先级策略（向后兼容）
+			if ep.URLAnthropic != "" {
+				actualEndpointFormat = "anthropic"
+			} else if ep.URLOpenAI != "" {
+				actualEndpointFormat = "openai"
+			} else {
+				actualEndpointFormat = "openai" // 默认
+			}
 		}
 
 		// 判断是否需要格式转换
-		requestIsAnthropic := (formatDetection.Format == utils.FormatAnthropic)
-		requestIsOpenAI := (formatDetection.Format == utils.FormatOpenAI)
+		// requestIsAnthropic 和 requestIsOpenAI 已在上面定义
 		endpointIsOpenAI := (actualEndpointFormat == "openai")
 
 		// Anthropic格式请求 + OpenAI URL = 需要转换
@@ -397,9 +429,9 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		needsConversion = (ep.EndpointType == "openai")
 	}
 
-	actuallyUsingOpenAIURL := (actualEndpointFormat == "openai")
+    actuallyUsingOpenAIURL := (actualEndpointFormat == "openai")
 
-	if needsConversion {
+    if needsConversion {
 		s.logger.Info(fmt.Sprintf("Starting request conversion for endpoint type: %s", ep.EndpointType))
 
 		var convertedBody []byte
@@ -442,28 +474,28 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 
 		finalRequestBody = convertedBody
 
-		// 如果进行了格式转换，也需要转换路径
-		if clientRequestFormat == "anthropic" && actualEndpointFormat == "openai" {
-			// Anthropic → OpenAI: /v1/messages → /v1/chat/completions
-			if effectivePath == "/v1/messages" {
-				effectivePath = "/v1/chat/completions"
-				s.logger.Debug("Path converted for format conversion", map[string]interface{}{
-					"original_path":  "/v1/messages",
-					"converted_path": "/v1/chat/completions",
-					"conversion":     "anthropic_to_openai",
-				})
-			}
-		} else if shouldConvertAnthropicResponseToOpenAI {
-			// OpenAI → Anthropic: /v1/chat/completions → /v1/messages
-			if effectivePath == "/v1/chat/completions" {
-				effectivePath = "/v1/messages"
-				s.logger.Debug("Path converted for format conversion", map[string]interface{}{
-					"original_path":  "/v1/chat/completions",
-					"converted_path": "/v1/messages",
-					"conversion":     "openai_to_anthropic",
-				})
-			}
-		}
+        // 如果进行了格式转换，也需要转换路径（仅针对标准消息路径）
+        if clientRequestFormat == "anthropic" && actualEndpointFormat == "openai" {
+            // Anthropic → OpenAI: /v1/messages → /v1/chat/completions
+            if effectivePath == "/v1/messages" {
+                effectivePath = "/v1/chat/completions"
+                s.logger.Debug("Path converted for format conversion", map[string]interface{}{
+                    "original_path":  "/v1/messages",
+                    "converted_path": "/v1/chat/completions",
+                    "conversion":     "anthropic_to_openai",
+                })
+            }
+        } else if shouldConvertAnthropicResponseToOpenAI {
+            // OpenAI → Anthropic: 将标准 OpenAI 消息路径映射到 Anthropic 消息路径
+            if effectivePath == "/v1/chat/completions" {
+                effectivePath = "/v1/messages"
+                s.logger.Debug("Path converted for format conversion", map[string]interface{}{
+                    "original_path":  "/v1/chat/completions",
+                    "converted_path": "/v1/messages",
+                    "conversion":     "openai_to_anthropic",
+                })
+            }
+        }
 
 		s.logger.Debug("Request format converted successfully", map[string]interface{}{
 			"endpoint_type":  ep.EndpointType,
@@ -478,7 +510,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 
 		// 重新构建targetURL，因为路径可能已经改变
 		targetURL = ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
-	} else {
+    } else {
 		s.logger.Debug("Skipping format conversion (not needed)", map[string]interface{}{
 			"request_format": func() string {
 				if formatDetection != nil {
@@ -490,9 +522,40 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		})
 	}
 
-	if shouldConvertAnthropicResponseToOpenAI {
-		actuallyUsingOpenAIURL = true
-	}
+    // 路径转换（基于实际上游格式）
+    // - 当客户端为 Codex (/responses) 且上游为 OpenAI：根据偏好将路径保持为 /responses 或降级为 /chat/completions
+    // - 当客户端为 Codex (/responses) 且上游为 Anthropic：将路径映射为 /v1/messages
+    if inboundPath == "/responses" {
+        if actualEndpointFormat == "openai" {
+            if ep.OpenAIPreference == "chat_completions" {
+                effectivePath = "/chat/completions"
+                s.logger.Debug("Early path conversion applied (OpenAI upstream, prefer chat_completions)", map[string]interface{}{
+                    "endpoint":   ep.Name,
+                    "inbound":    "/responses",
+                    "effective":  "/chat/completions",
+                    "preference": ep.OpenAIPreference,
+                })
+            } else {
+                // 保持 /responses
+                effectivePath = "/responses"
+            }
+        } else {
+            // 上游是Anthropic，映射到 /v1/messages
+            effectivePath = "/v1/messages"
+            s.logger.Debug("Path converted for Codex->Anthropic routing", map[string]interface{}{
+                "endpoint":  ep.Name,
+                "inbound":   "/responses",
+                "effective": "/v1/messages",
+            })
+        }
+        // 路径变化后，更新 targetURL
+        targetURL = ep.GetFullURLWithFormat(effectivePath, func() string {
+            if actualEndpointFormat != "" {
+                return actualEndpointFormat
+            }
+            return endpointRequestFormat
+        }())
+    }
 
 	// Codex /responses 格式转换为 OpenAI /chat/completions 格式
 	// 智能自适应逻辑：
@@ -508,7 +571,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	codexNeedsConversion := false
 	// 关键修复：检查实际使用的URL类型，而不是endpoint_type
 	// 当请求格式是openai且路径是/responses时，需要考虑Codex转换
-	if actuallyUsingOpenAIURL && inboundPath == "/responses" {
+    if actualEndpointFormat == "openai" && inboundPath == "/responses" {
 		// 优先使用配置的偏好设置
 		preference := ep.OpenAIPreference
 		if preference == "" {
@@ -544,7 +607,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			// 自动探测逻辑（原有逻辑）
 			if ep.NativeCodexFormat == nil {
 				// 首次请求，使用原生格式尝试（收到400后会自动转换并重试）
-				s.logger.Info("First /responses request to endpoint, trying native Codex format (auto)", map[string]interface{}{
+            s.logger.Info("First /responses request to endpoint, trying native Codex format (auto)", map[string]interface{}{
 					"endpoint": ep.Name,
 				})
 				codexNeedsConversion = false
@@ -578,15 +641,15 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		}
 	}
 
-	if codexNeedsConversion {
+    if codexNeedsConversion {
 		// 将 Codex 格式转换为 OpenAI Chat Completions，并切换路径到 /chat/completions
 		// 大多数 OpenAI 兼容端点（包括 88code）不支持 /responses
-		if inboundPath == "/responses" {
+        if inboundPath == "/responses" {
 			effectivePath = "/chat/completions"
 			targetURL = ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
 		}
 		convertedBody, err := processingCache.GetConvertedBody("codex_to_openai", finalRequestBody, func(body []byte) ([]byte, error) {
-			return s.convertCodexToOpenAI(body)
+			return s.convertCodexToOpenAI(body, ep.Name)
 		})
 		if err != nil {
 			s.logger.Debug("Failed to convert Codex format to OpenAI", map[string]interface{}{
@@ -914,7 +977,7 @@ attemptLoop:
 			updateSupportsResponsesContext(c, ep)
 			if cachedConvertedCodexBody == nil {
 				if convertedBody, convertErr := processingCache.GetConvertedBody("codex_to_openai", requestBody, func(body []byte) ([]byte, error) {
-					return s.convertCodexToOpenAI(body)
+					return s.convertCodexToOpenAI(body, ep.Name)
 				}); convertErr == nil && convertedBody != nil {
 					cachedConvertedCodexBody = convertedBody
 				} else if convertErr != nil {
@@ -1074,7 +1137,7 @@ attemptLoop:
 			// 转换 Codex 格式到 OpenAI 格式
 			if cachedConvertedCodexBody == nil {
 				convertedBody, convertErr := processingCache.GetConvertedBody("codex_to_openai", requestBody, func(body []byte) ([]byte, error) {
-					return s.convertCodexToOpenAI(body)
+					return s.convertCodexToOpenAI(body, ep.Name)
 				})
 				if convertErr != nil {
 					s.logger.Error("Failed to convert Codex format to OpenAI for retry", convertErr)
@@ -1550,24 +1613,24 @@ attemptLoop:
 				"client_type":            "codex",
 				"path":                   path,
 			})
-			finalResponseBody = s.convertChatCompletionsToResponsesSSE(finalResponseBody)
+			finalResponseBody = s.convertChatCompletionsToResponsesSSE(finalResponseBody, ep.Name)
 		}
 	} else {
-		// 非流式响应的Codex格式转换
-		formatDetection, _ := c.Get("format_detection")
-		isCodexClient := false
-		if fd, ok := formatDetection.(*utils.FormatDetectionResult); ok {
-			isCodexClient = (fd.ClientType == utils.ClientCodex)
-		}
+    // 非流式响应的Codex格式转换
+    formatDetection, _ := c.Get("format_detection")
+    isCodexClient := false
+    if fd, ok := formatDetection.(*utils.FormatDetectionResult); ok {
+        isCodexClient = (fd.ClientType == utils.ClientCodex)
+    }
 
-		// 如果是Codex客户端且使用OpenAI URL，需要转换非流式响应
-		if actuallyUsingOpenAIURL && isCodexClient {
+    // 如果是Codex客户端，则统一转换为 /responses 格式（无论上游是OpenAI还是Anthropic；Anthropic场景已在上面先转为OpenAI）
+    if isCodexClient {
 			s.logger.Info("Converting chat completion to Responses API format for Codex", map[string]interface{}{
 				"actual_endpoint_format": actualEndpointFormat,
 				"client_type":            "codex",
 				"path":                   path,
 			})
-			if converted, err := s.convertChatCompletionToResponse(finalResponseBody); err == nil {
+			if converted, err := s.convertChatCompletionToResponse(finalResponseBody, ep.Name); err == nil {
 				finalResponseBody = converted
 				// 更新Content-Length
 				c.Header("Content-Length", fmt.Sprintf("%d", len(finalResponseBody)))
@@ -2082,17 +2145,17 @@ func (s *Server) handleStreamingResponse(
 	originalCapture := newLimitedBuffer(responseCaptureLimit)
 	reader = io.TeeReader(reader, originalCapture)
 
-	isCodexClient := formatDetection != nil && formatDetection.ClientType == utils.ClientCodex
-	convertChatToResponses := actuallyUsingOpenAIURL && isCodexClient
-	convertAnthropicToOpenAI := shouldConvertAnthropicResponseToOpenAI
-	if conversionStages != nil {
-		if convertAnthropicToOpenAI {
-			addConversionStage(conversionStages, "response:anthropic->openai")
-		}
-		if convertChatToResponses {
-			addConversionStage(conversionStages, "response:chat_completions->responses")
-		}
-	}
+    isCodexClient := formatDetection != nil && formatDetection.ClientType == utils.ClientCodex
+    convertAnthropicToOpenAI := shouldConvertAnthropicResponseToOpenAI
+    if conversionStages != nil {
+        if convertAnthropicToOpenAI && !isCodexClient {
+            // 仅当目标客户端不是 Codex 时，记录 anthropic->openai 的响应转换（Codex 直接转换为 responses）
+            addConversionStage(conversionStages, "response:anthropic->openai")
+        }
+        if isCodexClient {
+            addConversionStage(conversionStages, "response:*->responses")
+        }
+    }
 
 	validationEndpointType := ep.EndpointType
 	if actualEndpointFormat != "" {
@@ -2131,14 +2194,23 @@ func (s *Server) handleStreamingResponse(
 	captureWriter := newTeeCaptureWriter(c.Writer, responseCaptureLimit)
 	var streamErr error
 
-	if convertAnthropicToOpenAI {
-		streamErr = conversion.StreamAnthropicSSEToOpenAI(reader, captureWriter)
-		actuallyUsingOpenAIURL = true
-	} else if convertChatToResponses {
-		streamErr = conversion.StreamChatCompletionsToResponses(reader, captureWriter)
-	} else {
-		_, streamErr = io.Copy(captureWriter, reader)
-	}
+    if isCodexClient {
+        // Codex 客户端一律期望 Responses API 事件
+        if actualEndpointFormat == "openai" {
+            // 上游是 OpenAI Chat SSE → 转 Responses SSE
+            streamErr = conversion.LegacyStreamChatCompletionsToResponses(reader, captureWriter)
+        } else {
+            // 上游是 Anthropic SSE → 对于Codex客户端，这种组合不支持，切换端点
+            streamErr = fmt.Errorf("Codex client with Anthropic endpoint not supported, switching endpoint")
+        }
+    } else if convertAnthropicToOpenAI {
+        // 非 Codex 客户端：Anthropic → OpenAI Chat SSE
+        streamErr = conversion.StreamAnthropicSSEToOpenAI(reader, captureWriter)
+        actuallyUsingOpenAIURL = true
+    } else {
+        // 透传
+        _, streamErr = io.Copy(captureWriter, reader)
+    }
 
 	if streamErr != nil {
 		duration := time.Since(endpointStartTime)
@@ -2219,7 +2291,7 @@ func (s *Server) handleStreamingResponse(
 		requestLog.ClientType = string(formatDetection.ClientType)
 		requestLog.RequestFormat = string(formatDetection.Format)
 		requestLog.TargetFormat = ep.EndpointType
-		requestLog.FormatConverted = convertAnthropicToOpenAI || convertChatToResponses
+    requestLog.FormatConverted = convertAnthropicToOpenAI || isCodexClient
 		requestLog.DetectionConfidence = formatDetection.Confidence
 		requestLog.DetectedBy = formatDetection.DetectedBy
 	}
@@ -2350,24 +2422,36 @@ func (s *Server) handleStreamingResponse(
 	s.logger.UpdateRequestLog(requestLog, req, resp, finalSample, duration, nil)
 	s.logger.LogRequest(requestLog)
 
-	if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil && !convertChatToResponses {
-		trueValue := true
-		ep.NativeCodexFormat = &trueValue
-		updateSupportsResponsesContext(c, ep)
-		s.logger.Info("Auto-detected: endpoint natively supports Codex format", map[string]interface{}{
-			"endpoint": ep.Name,
-		})
-		if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
-			ep.OpenAIPreference = "responses"
-			s.PersistEndpointLearning(ep)
-		}
-	}
+    if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil {
+        // 基于上游原始样本判断是否为原生 Codex /responses 流
+        isResponsesNative := bytes.Contains(originalSample, []byte("response.output_text.delta")) ||
+            bytes.Contains(originalSample, []byte("response.created")) ||
+            bytes.Contains(originalSample, []byte("\"type\":\"response.completed\""))
+        if isResponsesNative {
+            trueValue := true
+            ep.NativeCodexFormat = &trueValue
+            updateSupportsResponsesContext(c, ep)
+            s.logger.Info("Auto-detected: endpoint natively supports Codex format", map[string]interface{}{
+                "endpoint": ep.Name,
+            })
+            if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
+                ep.OpenAIPreference = "responses"
+                s.PersistEndpointLearning(ep)
+            }
+        }
+    }
 
-	if formatDetection != nil && formatDetection.ClientType == utils.ClientCodex && ep.EndpointType == "openai" {
-		if inboundPath == "/responses" && !convertChatToResponses {
-			s.updateEndpointCodexSupport(ep, true)
-		}
-	} else if formatDetection != nil && formatDetection.ClientType == utils.ClientClaudeCode && ep.EndpointType == "anthropic" {
+    if formatDetection != nil && formatDetection.ClientType == utils.ClientCodex && ep.EndpointType == "openai" {
+        if inboundPath == "/responses" {
+            // 使用原始样本判断是否原生Codex支持
+            isResponsesNative := bytes.Contains(originalSample, []byte("response.output_text.delta")) ||
+                bytes.Contains(originalSample, []byte("response.created")) ||
+                bytes.Contains(originalSample, []byte("\"type\":\"response.completed\""))
+            if isResponsesNative {
+                s.updateEndpointCodexSupport(ep, true)
+            }
+        }
+    } else if formatDetection != nil && formatDetection.ClientType == utils.ClientClaudeCode && ep.EndpointType == "anthropic" {
 		s.updateEndpointCodexSupport(ep, false)
 	}
 
@@ -2644,11 +2728,11 @@ func (s *Server) requestHasTools(requestBody []byte) bool {
 	if err := json.Unmarshal(requestBody, &reqMap); err != nil {
 		return false
 	}
-	
+
 	if tools, ok := reqMap["tools"].([]interface{}); ok && len(tools) > 0 {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -2657,179 +2741,118 @@ func (s *Server) requestHasTools(requestBody []byte) bool {
 //   - {"type": "response.created", "response": {...}}
 //   - {"type": "response.output_text.delta", "delta": "..."}
 //   - {"type": "response.completed", "response": {...}}
-func (s *Server) convertChatCompletionsToResponsesSSE(body []byte) []byte {
-	var buf bytes.Buffer
-	if err := conversion.StreamChatCompletionsToResponses(bytes.NewReader(body), &buf); err != nil {
-		s.logger.Error("Failed to convert chat completions SSE to responses format", err)
+func (s *Server) convertChatCompletionsToResponsesSSE(body []byte, endpointName string) []byte {
+	unified := func() ([]byte, error) {
+		var buf bytes.Buffer
+		if err := conversion.StreamChatCompletionsToResponsesUnified(bytes.NewReader(body), &buf); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	}
+	legacy := func() ([]byte, error) {
+		var buf bytes.Buffer
+		if err := conversion.LegacyStreamChatCompletionsToResponses(bytes.NewReader(body), &buf); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	}
+
+	var (
+		result []byte
+		mode   conversion.ConversionMode
+		err    error
+	)
+
+	if s.conversionManager != nil {
+		result, mode, err = s.conversionManager.Convert("chat_sse_to_responses", endpointName, unified, legacy)
+	} else {
+		result, err = unified()
+		mode = conversion.ConversionModeUnified
+	}
+
+	if err != nil {
+		s.logger.Error("Failed to convert chat completions SSE to responses format", err, map[string]interface{}{
+			"operation": "chat_sse_to_responses",
+			"mode":      string(mode),
+			"endpoint":  endpointName,
+		})
 		return body
 	}
-	return buf.Bytes()
+	if len(result) == 0 {
+		return body
+	}
+	return result
 }
 
 // convertChatCompletionToResponse 将 OpenAI /chat/completions 非流式响应转换为 Codex /responses 格式
 // OpenAI格式: {"id":"xxx","object":"chat.completion","created":123,"model":"xxx","choices":[{"index":0,"message":{"role":"assistant","content":"..."}}]}
 // Codex格式: {"type":"response","id":"xxx","object":"response","created":123,"model":"xxx","choices":[{"index":0,"message":{"role":"assistant","content":"..."}}]}
-func (s *Server) convertChatCompletionToResponse(body []byte) ([]byte, error) {
-	var completion map[string]interface{}
-	if err := json.Unmarshal(body, &completion); err != nil {
-		s.logger.Error("Failed to parse chat completion response", err)
-		return nil, err
+func (s *Server) convertChatCompletionToResponse(body []byte, endpointName string) ([]byte, error) {
+	unified := func() ([]byte, error) {
+		return conversion.ConvertChatResponseJSONToResponses(body)
+	}
+	legacy := func() ([]byte, error) {
+		return conversion.LegacyConvertChatResponseJSONToResponses(body)
 	}
 
-	// 检查是否是chat.completion对象
-	if obj, ok := completion["object"].(string); !ok || obj != "chat.completion" {
-		// 不是chat.completion，可能已经是正确格式或其他错误
+	var (
+		result []byte
+		mode   conversion.ConversionMode
+		err    error
+	)
+
+	if s.conversionManager != nil {
+		result, mode, err = s.conversionManager.Convert("chat_json_to_responses", endpointName, unified, legacy)
+	} else {
+		result, err = unified()
+		mode = conversion.ConversionModeUnified
+	}
+
+	if err != nil {
+		s.logger.Error("Failed to convert chat response to Responses format", err, map[string]interface{}{
+			"operation": "chat_json_to_responses",
+			"mode":      string(mode),
+			"endpoint":  endpointName,
+		})
+		return nil, err
+	}
+	if result == nil {
 		return body, nil
 	}
-
-	// 转换为Codex response格式
-	response := map[string]interface{}{
-		"type":    "response", // Codex响应的type字段
-		"id":      completion["id"],
-		"object":  "response", // 改为response对象
-		"created": completion["created"],
-		"model":   completion["model"],
-		"choices": completion["choices"], // choices保持不变
-	}
-
-	// 可选字段
-	if usage, ok := completion["usage"]; ok {
-		response["usage"] = usage
-	}
-	if systemFingerprint, ok := completion["system_fingerprint"]; ok {
-		response["system_fingerprint"] = systemFingerprint
-	}
-
-	converted, err := json.Marshal(response)
-	if err != nil {
-		s.logger.Error("Failed to marshal Codex response", err)
-		return nil, err
-	}
-
-	s.logger.Debug("Converted chat completion to Responses API format", map[string]interface{}{
-		"original_object":  "chat.completion",
-		"converted_object": "response",
-		"original_size":    len(body),
-		"converted_size":   len(converted),
-	})
-
-	return converted, nil
+	return result, nil
 }
 
-// convertCodexToOpenAI 将 Codex /responses 格式转换为 OpenAI /chat/completions 格式
-// Codex 格式复杂，包含多个特殊字段：
-//   - instructions: 系统提示（字符串）
-//   - input: 消息数组（结构与 OpenAI messages 不同）
-//   - include: 响应包含选项（Codex 特有）
-//
-// 转换策略：
-//  1. 从 input 数组提取内容，转换为标准 OpenAI messages 格式
-//  2. instructions 作为系统消息（如果存在）
-//  3. 删除 Codex 特有字段（input, include 等）
-func (s *Server) convertCodexToOpenAI(requestBody []byte) ([]byte, error) {
-	// 解析请求体
-	var requestData map[string]interface{}
-	if err := json.Unmarshal(requestBody, &requestData); err != nil {
-		s.logger.Error("Failed to parse request body for Codex conversion", err)
-		return nil, err
+// convertCodexToOpenAI 将 Codex /responses 请求转换为 OpenAI /chat/completions 请求
+func (s *Server) convertCodexToOpenAI(requestBody []byte, endpointName string) ([]byte, error) {
+	unified := func() ([]byte, error) {
+		return conversion.ConvertResponsesRequestJSONToChat(requestBody)
+	}
+	legacy := func() ([]byte, error) {
+		return conversion.LegacyConvertResponsesRequestJSONToChat(requestBody)
 	}
 
-	// 检查是否是 Codex 格式（至少要有 input 或 instructions 字段之一）
-	_, hasInput := requestData["input"]
-	_, hasInstructions := requestData["instructions"]
+	var (
+		result []byte
+		mode   conversion.ConversionMode
+		err    error
+	)
 
-	if !hasInput && !hasInstructions {
-		// 不是 Codex 格式，跳过转换
+	if s.conversionManager != nil {
+		result, mode, err = s.conversionManager.Convert("responses_json_to_chat", endpointName, unified, legacy)
+	} else {
+		result, err = unified()
+		mode = conversion.ConversionModeUnified
+	}
+
+	if err != nil {
+		s.logger.Debug("Skipping Codex->OpenAI conversion", map[string]interface{}{
+			"error":    err.Error(),
+			"mode":     string(mode),
+			"endpoint": endpointName,
+		})
 		return nil, nil
 	}
-
-	// 构建 OpenAI messages 数组
-	messages := []map[string]interface{}{}
-
-	// 1. 处理 instructions（作为 system 消息）
-	if hasInstructions {
-		if instructionsStr, ok := requestData["instructions"].(string); ok && instructionsStr != "" {
-			messages = append(messages, map[string]interface{}{
-				"role":    "system",
-				"content": instructionsStr,
-			})
-		}
-		delete(requestData, "instructions")
-	}
-
-	// 2. 处理 input 数组（转换为 user/assistant 消息）
-	if hasInput {
-		if inputArray, ok := requestData["input"].([]interface{}); ok {
-			for _, item := range inputArray {
-				if inputMsg, ok := item.(map[string]interface{}); ok {
-					// 提取 role
-					role, _ := inputMsg["role"].(string)
-					if role == "" {
-						role = "user" // 默认为 user
-					}
-
-					// 提取 content
-					// Codex 的 content 是一个数组，包含 {text, type} 对象
-					var contentStr string
-					if contentArray, ok := inputMsg["content"].([]interface{}); ok {
-						for _, contentItem := range contentArray {
-							if contentObj, ok := contentItem.(map[string]interface{}); ok {
-								if text, ok := contentObj["text"].(string); ok {
-									contentStr += text
-								}
-							}
-						}
-					}
-
-					if contentStr != "" {
-						messages = append(messages, map[string]interface{}{
-							"role":    role,
-							"content": contentStr,
-						})
-					}
-				}
-			}
-		}
-		delete(requestData, "input")
-	}
-
-	// 如果没有成功转换出任何消息，添加一个默认的 user 消息
-	if len(messages) == 0 {
-		messages = append(messages, map[string]interface{}{
-			"role":    "user",
-			"content": "Hello",
-		})
-	}
-
-	// 设置 messages 字段
-	requestData["messages"] = messages
-
-	// 删除其他 Codex 特有字段
-	delete(requestData, "include") // Codex 特有的响应选项
-
-	// 保留以下字段（OpenAI 兼容）：
-	// - tools: 工具定义数组（OpenAI 标准）
-	// - tool_choice: 工具选择策略（OpenAI 标准）
-	// - stream: 流式响应标志（OpenAI 标准）
-	// - temperature, max_tokens 等参数（OpenAI 标准）
-
-	// 注意：tools 字段在 Codex 和 OpenAI 中格式相同，可以直接保留
-	// 不需要特殊处理，只需确保不被删除
-
-	// 重新序列化为 JSON
-	convertedBody, err := json.Marshal(requestData)
-	if err != nil {
-		s.logger.Error("Failed to marshal converted request body", err)
-		return nil, err
-	}
-
-	s.logger.Debug("Codex to OpenAI conversion completed", map[string]interface{}{
-		"messages_count": len(messages),
-		"has_tools":      requestData["tools"] != nil,
-		"has_stream":     requestData["stream"] != nil,
-	})
-
-	return convertedBody, nil
+	return result, nil
 }
 
 // 动态更新端点的Codex支持状态

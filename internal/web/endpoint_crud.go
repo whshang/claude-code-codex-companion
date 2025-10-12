@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"claude-code-codex-companion/internal/config"
 	"claude-code-codex-companion/internal/i18n"
@@ -69,6 +70,7 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 		ToolEnhancementMode string              `json:"tool_enhancement_mode,omitempty"` // 新增：工具调用增强模式（可选）
 		CountTokensEnabled  *bool               `json:"count_tokens_enabled,omitempty"`  // 新增：是否允许 /count_tokens
 		SupportsResponses   *bool               `json:"supports_responses,omitempty"`    // 新增：显式声明 /responses 支持
+		OpenAIPreference    string              `json:"openai_preference"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -118,6 +120,12 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 	// 验证auth_type
 	if request.AuthType != "api_key" && request.AuthType != "auth_token" && request.AuthType != "oauth" && request.AuthType != "auto" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "auth_type must be 'api_key', 'auth_token', 'oauth', or 'auto'"})
+		return
+	}
+
+	normalizedPreference, err := normalizeOpenAIPreference(request.OpenAIPreference)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -171,6 +179,7 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 		request.Name, request.URLAnthropic, request.URLOpenAI,
 		request.AuthType, request.AuthValue,
 		request.Enabled, maxPriority+1, request.Tags, request.Proxy, request.OAuthConfig, request.HeaderOverrides, request.ParameterOverrides, countTokensPtr, request.SupportsResponses)
+	newEndpoint.OpenAIPreference = normalizedPreference
 	// 设置可选的工具相关配置
 	newEndpoint.NativeToolSupport = request.NativeToolSupport
 	if request.ToolEnhancementMode != "" {
@@ -218,6 +227,7 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 		ToolEnhancementMode string                     `json:"tool_enhancement_mode,omitempty"`
 		CountTokensEnabled  *bool                      `json:"count_tokens_enabled,omitempty"`
 		SupportsResponses   *bool                      `json:"supports_responses,omitempty"`
+		OpenAIPreference    *string                    `json:"openai_preference,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -371,6 +381,14 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 				currentEndpoints[i].CountTokensEnabled = ptr
 			}
 			currentEndpoints[i].SupportsResponses = request.SupportsResponses
+			if request.OpenAIPreference != nil {
+				pref, prefErr := normalizeOpenAIPreference(*request.OpenAIPreference)
+				if prefErr != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": prefErr.Error()})
+					return
+				}
+				currentEndpoints[i].OpenAIPreference = pref
+			}
 			// 如果没有model_rewrite字段，保持原有配置不变
 
 			found = true
@@ -435,4 +453,18 @@ func (s *AdminServer) handleDeleteEndpoint(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Endpoint deleted successfully"})
+}
+
+func normalizeOpenAIPreference(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "auto", nil
+	}
+
+	switch trimmed {
+	case "auto", "responses", "chat_completions":
+		return trimmed, nil
+	default:
+		return "", fmt.Errorf("openai_preference must be 'auto', 'responses', or 'chat_completions'")
+	}
 }

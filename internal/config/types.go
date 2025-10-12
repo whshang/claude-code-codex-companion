@@ -9,6 +9,7 @@ type Config struct {
 	Timeouts   TimeoutConfig    `yaml:"timeouts"`  // 超时配置
 	I18n       I18nConfig       `yaml:"i18n"`      // 国际化配置
 	Blacklist  BlacklistConfig  `yaml:"blacklist"` // 端点拉黑配置
+	Conversion ConversionConfig `yaml:"conversion"` // 格式转换配置
 }
 
 // I18nConfig 国际化配置
@@ -186,6 +187,19 @@ type TaggerConfig struct {
 	Enabled     bool                   `yaml:"enabled"`
 	Priority    int                    `yaml:"priority"` // 执行优先级(未使用，因为并发执行)
 	Config      map[string]interface{} `yaml:"config"`   // tagger特定配置
+}
+
+// ConversionConfig 格式转换配置
+type ConversionConfig struct {
+	// 转换适配器模式：legacy | unified | auto
+	// legacy: 使用原有的直接函数调用转换
+	// unified: 使用新的适配器架构转换（推荐）
+	// auto: 智能选择，优先使用unified，失败时自动回退到legacy
+	AdapterMode string `yaml:"adapter_mode" json:"adapter_mode"` 
+	// 转换模式验证：在模式切换后进行小流量验证
+	ValidateModeSwitch bool `yaml:"validate_mode_switch" json:"validate_mode_switch"`
+	// 转换失败回退阈值：当失败率达到此百分比时，自动回退到legacy模式
+	FailbackThreshold int `yaml:"failback_threshold" json:"failback_threshold"` // 默认: 30 (30%)
 }
 
 // （已移除）全局 ToolCallingConfig：采用零配置 + 端点级自动学习/开关

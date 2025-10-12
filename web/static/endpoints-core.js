@@ -168,6 +168,16 @@ function buildSupportsUpdatePayload(endpoint, mode) {
         payload.count_tokens_enabled = endpoint.count_tokens_enabled;
     }
 
+    let newPreference = endpoint.openai_preference || 'auto';
+    if (mode === 'native') {
+        newPreference = 'responses';
+    } else if (mode === 'convert') {
+        newPreference = 'chat_completions';
+    } else {
+        newPreference = 'auto';
+    }
+    payload.openai_preference = newPreference;
+
     return payload;
 }
 
@@ -180,6 +190,7 @@ function updateSupportsResponses(endpointName, mode, triggerButton) {
 
     const payload = buildSupportsUpdatePayload(endpoint, mode);
     const newValue = mode === 'native' ? true : mode === 'convert' ? false : null;
+    const newPreference = payload.openai_preference;
 
     if (triggerButton) {
         triggerButton.setAttribute('disabled', 'disabled');
@@ -200,6 +211,7 @@ function updateSupportsResponses(endpointName, mode, triggerButton) {
                 throw new Error(message);
             }
             endpoint.supports_responses = newValue;
+            endpoint.openai_preference = newPreference;
             const modeLabel = mode === 'native' ? '显式设置为原生响应' : mode === 'convert' ? '显式设置为强制转换' : '恢复自动探测';
             showAlert(`${endpointName}: ${modeLabel}`, 'success');
             loadEndpoints();

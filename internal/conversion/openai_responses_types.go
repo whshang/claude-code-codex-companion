@@ -1,0 +1,57 @@
+package conversion
+
+// 简化版的 OpenAI Responses API 结构，用于格式转换
+
+type OpenAIResponsesRequest struct {
+	Model             string                        `json:"model"`
+	Input             []OpenAIResponsesMessage      `json:"input,omitempty"`
+	Tools             []OpenAIResponsesTool         `json:"tools,omitempty"`
+	ToolChoice        interface{}                   `json:"tool_choice,omitempty"`
+	Temperature       *float64                      `json:"temperature,omitempty"`
+	TopP              *float64                      `json:"top_p,omitempty"`
+	MaxOutputTokens   *int                          `json:"max_output_tokens,omitempty"`
+	ParallelToolCalls *bool                         `json:"parallel_tool_calls,omitempty"`
+	User              string                        `json:"user,omitempty"`
+	Metadata          map[string]interface{}        `json:"metadata,omitempty"`
+}
+
+type OpenAIResponsesMessage struct {
+	Role    string                       `json:"role"`
+	Content []OpenAIResponsesContentItem `json:"content"`
+}
+
+type OpenAIResponsesContentItem struct {
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	ImageURL *OpenAIImageURL  `json:"image_url,omitempty"`
+}
+
+type OpenAIResponsesTool struct {
+	Type     string                 `json:"type"`
+	Function *OpenAIFunctionDef     `json:"function,omitempty"`
+	Config   map[string]interface{} `json:"config,omitempty"`
+}
+
+type OpenAIResponsesResponse struct {
+	ID     string                       `json:"id"`
+	Model  string                       `json:"model"`
+	Status string                       `json:"status,omitempty"`
+	Output []OpenAIResponsesOutputItem  `json:"output"`
+	Usage  *OpenAIResponsesUsage        `json:"usage,omitempty"`
+}
+
+type OpenAIResponsesOutputItem struct {
+	Type     string                       `json:"type"`
+	ID       string                       `json:"id,omitempty"`
+	Status   string                       `json:"status,omitempty"`
+	Role     string                       `json:"role,omitempty"`
+	Content  []OpenAIResponsesContentItem `json:"content,omitempty"`
+	Name     string                       `json:"name,omitempty"`
+	Arguments string                      `json:"arguments,omitempty"`
+}
+
+type OpenAIResponsesUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}

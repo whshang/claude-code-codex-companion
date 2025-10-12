@@ -245,7 +245,7 @@ func (p *FunctionCallParser) parseLegacyFunctionBlocks(content string) ([]ToolCa
 func (p *FunctionCallParser) parseInvokeArgs(block string) (map[string]interface{}, error) {
 	args := make(map[string]interface{})
 
-	paramPattern := regexp.MustCompile(`<parameter\s+[^>]*name="([^"]+)"[^>]*>([\s\S]*?)</parameter>`)
+	paramPattern := regexp.MustCompile(`(?s)<parameter\s+[^>]*name="([^"]+)"[^>]*>(.*?)</parameter>`)
 	matches := paramPattern.FindAllStringSubmatch(block, -1)
 	for _, match := range matches {
 		key := strings.TrimSpace(match[1])
@@ -257,7 +257,7 @@ func (p *FunctionCallParser) parseInvokeArgs(block string) (map[string]interface
 	}
 
 	// Also handle <args>...</args> style nested content inside invoke
-	argsPattern := regexp.MustCompile(`<args>([\s\S]*?)</args>`)
+	argsPattern := regexp.MustCompile(`(?s)<args>(.*?)</args>`)
 	if nested := argsPattern.FindStringSubmatch(block); nested != nil {
 		nestedArgs, err := p.parseArgs(nested[0])
 		if err != nil {
@@ -276,7 +276,7 @@ func (p *FunctionCallParser) parseArgs(block string) (map[string]interface{}, er
 	args := make(map[string]interface{})
 
 	// Extract <args> block
-	argsPattern := regexp.MustCompile(`<args>([\s\S]*?)</args>`)
+	argsPattern := regexp.MustCompile(`(?s)<args>(.*?)</args>`)
 	argsMatch := argsPattern.FindStringSubmatch(block)
 	if argsMatch == nil {
 		return args, nil
@@ -286,11 +286,15 @@ func (p *FunctionCallParser) parseArgs(block string) (map[string]interface{}, er
 
 	// Match individual argument tags (supports hyphens and special characters)
 	// Pattern: <key>value</key> where key can contain hyphens, underscores, etc.
-	argPattern := regexp.MustCompile(`<([^\s>/]+)>([\s\S]*?)</\1>`)
+	argPattern := regexp.MustCompile(`(?s)<([^\s>/]+)>(.*?)</([^\s>/]+)>`)
 	argMatches := argPattern.FindAllStringSubmatch(argsContent, -1)
 
 	for _, match := range argMatches {
 		key := match[1]
+		closing := match[3]
+		if key == "" || key != closing {
+			continue
+		}
 		value := match[2]
 
 		// Try to parse as JSON, fallback to string

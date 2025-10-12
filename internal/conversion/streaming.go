@@ -1,12 +1,13 @@
 package conversion
 
 import (
-    "bufio"
-    "encoding/json"
-    "fmt"
-    "io"
-    "strings"
-    "time"
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+	"time"
 )
 
 const (
@@ -14,126 +15,130 @@ const (
 	defaultScannerMaxCapacity = 2 * 1024 * 1024
 )
 
-// StreamChatCompletionsToResponses 将 OpenAI Chat Completions SSE 转为 Codex Responses SSE
-// 策略：
-// - 纯文本增量：转换为 response.output_text.delta，并在开始发 response.created，结束发 response.completed
-// - 含 tool_calls 的增量：直接透传原始 Chat Completions chunk，避免把函数参数当成文本注入
+// StreamChatCompletionsToResponsesUnified 将 OpenAI Chat SSE 转换为 Responses SSE（统一模式实现）
+func StreamChatCompletionsToResponsesUnified(r io.Reader, w io.Writer) error {
+	return streamChatCompletionsToResponsesUnified(r, w)
+}
+
+// StreamChatCompletionsToResponses 保持原函数名，默认指向统一模式
 func StreamChatCompletionsToResponses(r io.Reader, w io.Writer) error {
-    scanner := bufio.NewScanner(r)
-    scanner.Buffer(make([]byte, defaultScannerBuffer), defaultScannerMaxCapacity)
+	return streamChatCompletionsToResponsesUnified(r, w)
+}
 
-    var responseID string
-    var model string
-    var createdEmitted bool
-    var completedEmitted bool
+func streamChatCompletionsToResponsesUnified(r io.Reader, w io.Writer) error {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, defaultScannerBuffer), defaultScannerMaxCapacity)
 
-    // 发出 Responses 事件
-    writeEvent := func(event string, payload map[string]interface{}) error {
-        if _, ok := payload["model"]; !ok && model != "" {
-            payload["model"] = model
-        }
-        b, err := json.Marshal(payload)
-        if err != nil {
-            return err
-        }
-        if event != "" {
-            if _, err := io.WriteString(w, "event: "+event+"\n"); err != nil {
-                return err
-            }
-        }
-        if _, err := io.WriteString(w, "data: "+string(b)+"\n\n"); err != nil {
-            return err
-        }
-        return nil
-    }
+	var chunks []OpenAIStreamChunk
+	respID := generateResponseID()
+	var model string
+	// var usage *OpenAIUsage // 暂时不使用
 
-    emitCreatedIfNeeded := func() error {
-        if createdEmitted || responseID == "" || model == "" {
-            return nil
-        }
-        createdEmitted = true
-        return writeEvent("response.created", map[string]interface{}{
-            "type":   "response.created",
-            "response": map[string]interface{}{
-                "id":    responseID,
-                "model": model,
-            },
-        })
-    }
+	// 流式读取和处理SSE数据
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		
+		// 跳过空行和注释
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		
+		// 处理data行
+		if strings.HasPrefix(line, "data: ") {
+			dataContent := strings.TrimPrefix(line, "data: ")
+			
+			// 检查结束标记
+			if dataContent == "[DONE]" {
+				break
+			}
+			
+			// 解析JSON chunk
+			var chunk OpenAIStreamChunk
+			if err := json.Unmarshal([]byte(dataContent), &chunk); err != nil {
+				continue // 跳过无效chunk
+			}
+			
+			chunks = append(chunks, chunk)
+			
+			// 记录响应信息
+			if chunk.ID != "" {
+				respID = chunk.ID
+			}
+			if chunk.Model != "" {
+				model = chunk.Model
+			}
+			// 暂时不处理usage，因为我们需要在流结束时收集
+		}
+	}
 
-    emitCompleted := func() error {
-        if completedEmitted {
-            return nil
-        }
-        completedEmitted = true
-        if err := emitCreatedIfNeeded(); err != nil { return err }
-        return writeEvent("response.completed", map[string]interface{}{
-            "type": "response.completed",
-            "response": map[string]interface{}{
-                "id":    responseID,
-                "model": model,
-            },
-        })
-    }
+	if err := scanner.Err(); err != nil {
+		return err
+	}
 
-    for scanner.Scan() {
-        line := scanner.Text()
-        trimmed := strings.TrimSpace(line)
+	// 构建并写入Responses格式的SSE
+	sse, err := buildResponsesSSEFromChunks(chunks, respID, model, nil)
+	if err != nil {
+		return err
+	}
+	
+	_, err = w.Write(sse)
+	return err
+}
 
-        if !strings.HasPrefix(trimmed, "data: ") {
-            continue
-        }
-        dataContent := strings.TrimSpace(strings.TrimPrefix(trimmed, "data: "))
+func StreamAnthropicSSEToResponses(r io.Reader, w io.Writer) error {
+	// 使用现有的流式转换函数，先转换为OpenAI格式，再转换为Responses格式
+	var buf bytes.Buffer
+	if err := StreamAnthropicSSEToOpenAI(r, &buf); err != nil {
+		return err
+	}
+	
+	// 然后将OpenAI格式转换为Responses格式
+	return streamChatCompletionsToResponsesUnified(&buf, w)
+}
 
-        if dataContent == "[DONE]" {
-            if err := emitCompleted(); err != nil { return err }
-            if _, err := io.WriteString(w, "data: [DONE]\n\n"); err != nil { return err }
-            continue
-        }
+// StreamResponsesToChat 将 Responses SSE 转换为 Chat SSE
+func StreamResponsesToChat(r io.Reader, w io.Writer) error {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, defaultScannerBuffer), defaultScannerMaxCapacity)
 
-        // 解析 Chat Completions chunk
-        var chunk OpenAIStreamChunk
-        if err := json.Unmarshal([]byte(dataContent), &chunk); err != nil {
-            // 无法解析则直接透传（容错）
-            if _, err2 := io.WriteString(w, "data: "+dataContent+"\n\n"); err2 != nil { return err2 }
-            continue
-        }
-        if chunk.Model != "" { model = chunk.Model }
-        if chunk.ID != "" && responseID == "" { responseID = chunk.ID }
+	var chunks []OpenAIStreamChunk
+	respID := generateResponseID()
+	var model string
 
-        // 如果包含 tool_calls，直接透传整个chunk，避免把函数参数当文本
-        hasToolCalls := false
-        for _, ch := range chunk.Choices {
-            if len(ch.Delta.ToolCalls) > 0 { hasToolCalls = true; break }
-        }
-        if hasToolCalls {
-            // 先确保 created 发出（避免客户端等待 response.created）
-            if err := emitCreatedIfNeeded(); err != nil { return err }
-            if _, err := io.WriteString(w, "data: "+dataContent+"\n\n"); err != nil { return err }
-            continue
-        }
+	// 解析Responses格式并转换为OpenAI chunks
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		
+		if strings.HasPrefix(line, "event: ") {
+			eventType := strings.TrimPrefix(line, "event: ")
+			// 读取下一行的data
+			if scanner.Scan() {
+				dataLine := strings.TrimSpace(scanner.Text())
+				if strings.HasPrefix(dataLine, "data: ") {
+					dataContent := strings.TrimPrefix(dataLine, "data: ")
+					
+					chunk, err := convertResponsesEventToChatChunk(eventType, dataContent, respID, model)
+					if err != nil {
+						continue
+					}
+					if chunk != nil {
+						chunks = append(chunks, *chunk)
+						if chunk.Model != "" {
+							model = chunk.Model
+						}
+						// 暂时不处理usage
+					}
+				}
+			}
+		}
+	}
 
-        // 文本增量 → response.output_text.delta
-        if err := emitCreatedIfNeeded(); err != nil { return err }
-        for _, ch := range chunk.Choices {
-            if text, ok := ch.Delta.Content.(string); ok && text != "" {
-                if err := writeEvent("response.output_text.delta", map[string]interface{}{
-                    "type":        "response.output_text.delta",
-                    "delta":       text,
-                    "response_id": responseID,
-                }); err != nil { return err }
-            }
-        }
-    }
+	if err := scanner.Err(); err != nil {
+		return err
+	}
 
-    if err := scanner.Err(); err != nil {
-        return err
-    }
-
-    if !completedEmitted {
-        if err := emitCompleted(); err != nil { return err }
-    }
-    return nil
+	// 构建Chat格式的SSE
+	return buildChatSSEFromChunks(chunks, w)
 }
 
 type anthropicStreamState struct {
@@ -266,7 +271,7 @@ func (s *anthropicStreamState) handleContentBlockStart(data string) error {
 									"name":      event.ContentBlock.Name,
 									"arguments": "",
 								},
-			},
+							},
 						},
 					},
 					"finish_reason": nil,
@@ -285,8 +290,8 @@ func (s *anthropicStreamState) handleContentBlockDelta(data string) error {
 	var event struct {
 		Index int `json:"index"`
 		Delta struct {
-			Type       string `json:"type"`
-			Text       string `json:"text,omitempty"`
+			Type        string `json:"type"`
+			Text        string `json:"text,omitempty"`
 			PartialJSON string `json:"partial_json,omitempty"`
 		} `json:"delta"`
 	}

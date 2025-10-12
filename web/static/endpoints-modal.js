@@ -49,6 +49,8 @@ document.getElementById('endpointForm').reset();
     document.getElementById('max-tokens-field-name').value = '';
 	const supportsResponsesSelect = document.getElementById('supports-responses');
 	if (supportsResponsesSelect) supportsResponsesSelect.value = '';
+	const openaiPreferenceSelect = document.getElementById('openai-preference');
+	if (openaiPreferenceSelect) openaiPreferenceSelect.value = 'auto';
     const nativeToolSelect = document.getElementById('native-tool-support');
     if (nativeToolSelect) nativeToolSelect.value = '';
     const toolEnhMode = document.getElementById('tool-enhancement-mode');
@@ -81,6 +83,7 @@ function showEditEndpointModal(endpointName) {
     originalAuthValue = endpoint.auth_value;
     isAuthVisible = false;
 	const supportsResponsesSelect = document.getElementById('supports-responses');
+	const openaiPreferenceSelect = document.getElementById('openai-preference');
     
     document.getElementById('endpointModalTitle').textContent = T('edit_endpoint', '编辑端点');
     
@@ -144,6 +147,10 @@ function showEditEndpointModal(endpointName) {
 		if (endpoint.supports_responses === true) supportsResponsesSelect.value = 'true';
 		else if (endpoint.supports_responses === false) supportsResponsesSelect.value = 'false';
 		else supportsResponsesSelect.value = '';
+	}
+	if (openaiPreferenceSelect) {
+		const prefValue = endpoint.openai_preference || 'auto';
+		openaiPreferenceSelect.value = prefValue;
 	}
 	if (endpoint.native_tool_support !== undefined && endpoint.native_tool_support !== null) {
 		document.getElementById('native-tool-support').value = String(!!endpoint.native_tool_support);
@@ -285,6 +292,7 @@ function saveEndpoint() {
     const tags = tagsInput ? tagsInput.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
 
 	const supportsResponsesSelect = document.getElementById('supports-responses');
+	const openaiPreferenceSelect = document.getElementById('openai-preference');
 	const data = {
 		name: document.getElementById('endpoint-name').value,
 		url_anthropic: urlAnthropic || undefined, // Anthropic URL
@@ -306,6 +314,9 @@ function saveEndpoint() {
 		if (supportsResponsesSelect.value === 'true') data.supports_responses = true;
 		else if (supportsResponsesSelect.value === 'false') data.supports_responses = false;
 		else data.supports_responses = null;
+	}
+	if (openaiPreferenceSelect) {
+		data.openai_preference = openaiPreferenceSelect.value || 'auto';
 	}
     
     // Add OAuth config if present

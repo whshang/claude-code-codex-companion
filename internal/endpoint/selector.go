@@ -193,6 +193,42 @@ func (s *Selector) filterEndpointsByFormatAndClient(requestFormat string, client
 	return filtered
 }
 
+// isEndpointCompatibleWithClient 判断端点是否与客户端类型和请求格式兼容
+func (s *Selector) isEndpointCompatibleWithClient(ep *Endpoint, clientType string, requestFormat string) bool {
+	if !ep.Enabled {
+		return false
+	}
+
+	// 移除硬性客户端限制，实现自动判断
+	// if len(ep.SupportedClients) > 0 {
+	// 	supported := false
+	// 	for _, sc := range ep.SupportedClients {
+	// 		if sc == clientType {
+	// 		supported = true
+	// 			break
+	// 		}
+	// 	if !supported {
+	// 		return false // 端点不支持当前客户端类型
+	// 	}
+	// }
+	// 如果 SupportedClients 为空，表示支持所有客户端
+
+	// Codex 客户端优先使用原生 OpenAI 端点，避免 Anthropic 端点的转换延迟
+	if clientType == "codex" && requestFormat == "openai" {
+		// 仅当端点具备原生 OpenAI URL 时才视为兼容
+		if ep.URLOpenAI == "" {
+			return false
+		}
+		// 额外检查：确保endpoint_type也是openai，以避免Anthropic端点的转换问题
+		if ep.EndpointType != "openai" {
+			return false
+		}
+	}
+
+	// 2. 检查格式兼容性
+	return s.isEndpointCompatible(ep, requestFormat)
+}
+
 // isEndpointCompatible 判断端点是否与请求格式兼容（不检查客户端类型）
 func (s *Selector) isEndpointCompatible(ep *Endpoint, requestFormat string) bool {
 	if !ep.Enabled {
@@ -217,30 +253,6 @@ func (s *Selector) isEndpointCompatible(ep *Endpoint, requestFormat string) bool
 
 	// 未知格式，保持向后兼容（如果有任意一个URL就可用）
 	return ep.URLAnthropic != "" || ep.URLOpenAI != ""
-}
-
-// isEndpointCompatibleWithClient 判断端点是否与客户端类型和请求格式兼容
-func (s *Selector) isEndpointCompatibleWithClient(ep *Endpoint, clientType string, requestFormat string) bool {
-	if !ep.Enabled {
-		return false
-	}
-
-	// 移除硬性客户端限制，实现自动判断
-	// if len(ep.SupportedClients) > 0 {
-	// 	supported := false
-	// 	for _, sc := range ep.SupportedClients {
-	// 		if sc == clientType {
-	// 		supported = true
-	// 			break
-	// 	}
-	// 	if !supported {
-	// 		return false // 端点不支持当前客户端类型
-	// 	}
-	// }
-	// 如果 SupportedClients 为空，表示支持所有客户端
-
-	// 2. 检查格式兼容性
-	return s.isEndpointCompatible(ep, requestFormat)
 }
 
 func (s *Selector) GetAllEndpoints() []*Endpoint {

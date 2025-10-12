@@ -29,6 +29,11 @@ func validateConfig(config *Config) error {
 		return err
 	}
 
+	// 验证转换配置
+	if err := validateConversionConfig(&config.Conversion); err != nil {
+		return err
+	}
+
 	// WebAdmin 现在合并到主服务器端口，无需单独验证
 
 	if config.Logging.LogDirectory == "" {
@@ -120,7 +125,7 @@ func validateTaggingConfig(config *TaggingConfig) error {
 	if config.PipelineTimeout == "" {
 		config.PipelineTimeout = "5s"
 	}
-	
+
 	// 验证超时时间格式
 	if _, err := time.ParseDuration(config.PipelineTimeout); err != nil {
 		return fmt.Errorf("invalid pipeline_timeout '%s': %v", config.PipelineTimeout, err)
@@ -132,20 +137,20 @@ func validateTaggingConfig(config *TaggingConfig) error {
 		if tagger.Name == "" {
 			return fmt.Errorf("tagger[%d]: name is required", i)
 		}
-		
+
 		if tagNames[tagger.Name] {
 			return fmt.Errorf("tagger[%d]: duplicate name '%s'", i, tagger.Name)
 		}
 		tagNames[tagger.Name] = true
-		
+
 		if tagger.Tag == "" {
 			return fmt.Errorf("tagger[%d] '%s': tag is required", i, tagger.Name)
 		}
-		
+
 		if tagger.Type != "builtin" && tagger.Type != "starlark" {
 			return fmt.Errorf("tagger[%d] '%s': type must be 'builtin' or 'starlark'", i, tagger.Name)
 		}
-		
+
 		// 验证内置tagger类型
 		if tagger.Type == "builtin" {
 			validBuiltinTypes := []string{"path", "header", "body-json", "query", "user-message", "model", "thinking"}
@@ -157,17 +162,17 @@ func validateTaggingConfig(config *TaggingConfig) error {
 				}
 			}
 			if !validType {
-				return fmt.Errorf("tagger[%d] '%s': invalid builtin_type '%s', must be one of: %v", 
+				return fmt.Errorf("tagger[%d] '%s': invalid builtin_type '%s', must be one of: %v",
 					i, tagger.Name, tagger.BuiltinType, validBuiltinTypes)
 			}
 		}
-		
+
 		// 验证starlark脚本配置
 		if tagger.Type == "starlark" {
 			// 支持两种方式：script_file 或 script
 			scriptFile, hasScriptFile := tagger.Config["script_file"].(string)
 			script, hasScript := tagger.Config["script"].(string)
-			
+
 			if hasScriptFile && scriptFile != "" {
 				// 使用脚本文件 - 可以在这里添加脚本文件存在性检查
 			} else if hasScript && script != "" {
@@ -192,7 +197,7 @@ func validateTimeoutConfig(config *TimeoutConfig) error {
 	if config.IdleConnection == "" {
 		config.IdleConnection = "90s"
 	}
-	
+
 	// 设置健康检查特有配置默认值
 	if config.HealthCheckTimeout == "" {
 		config.HealthCheckTimeout = "30s"
@@ -203,11 +208,11 @@ func validateTimeoutConfig(config *TimeoutConfig) error {
 
 	// 验证所有非空超时时间格式
 	timeoutFields := map[string]string{
-		"tls_handshake":          config.TLSHandshake,
-		"response_header":        config.ResponseHeader,
-		"idle_connection":        config.IdleConnection,
-		"health_check_timeout":   config.HealthCheckTimeout,
-		"check_interval":         config.CheckInterval,
+		"tls_handshake":        config.TLSHandshake,
+		"response_header":      config.ResponseHeader,
+		"idle_connection":      config.IdleConnection,
+		"health_check_timeout": config.HealthCheckTimeout,
+		"check_interval":       config.CheckInterval,
 	}
 
 	for fieldName, value := range timeoutFields {
@@ -228,7 +233,7 @@ func validateOAuthConfigs(endpoints []EndpointConfig) error {
 			if endpoint.OAuthConfig == nil {
 				return fmt.Errorf("endpoint[%d] '%s': oauth_config is required when auth_type is 'oauth'", i, endpoint.Name)
 			}
-			
+
 			if err := validateOAuthConfig(endpoint.OAuthConfig, fmt.Sprintf("endpoint[%d] '%s'", i, endpoint.Name)); err != nil {
 				return err
 			}
@@ -247,34 +252,34 @@ func validateOAuthConfig(config *OAuthConfig, context string) error {
 	if config.AccessToken == "" {
 		return fmt.Errorf("%s: oauth access_token is required", context)
 	}
-	
+
 	if config.RefreshToken == "" {
 		return fmt.Errorf("%s: oauth refresh_token is required", context)
 	}
-	
+
 	// ExpiresAt can be 0 to trigger automatic refresh, or positive timestamp
 	if config.ExpiresAt < 0 {
 		return fmt.Errorf("%s: oauth expires_at must be 0 (for auto-refresh) or a valid positive timestamp (milliseconds)", context)
 	}
-	
+
 	if config.TokenURL == "" {
 		return fmt.Errorf("%s: oauth token_url is required", context)
 	}
-	
+
 	if config.ClientID == "" {
 		config.ClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	}
-	
+
 	// 验证access token格式（如果是 Anthropic token）
 	if strings.HasPrefix(config.AccessToken, "sk-ant-") && !strings.HasPrefix(config.AccessToken, "sk-ant-oat01-") {
 		return fmt.Errorf("%s: Anthropic oauth access_token should start with 'sk-ant-oat01-'", context)
 	}
-	
+
 	// 验证refresh token格式（如果是 Anthropic token）
 	if strings.HasPrefix(config.RefreshToken, "sk-ant-") && !strings.HasPrefix(config.RefreshToken, "sk-ant-ort01-") {
 		return fmt.Errorf("%s: Anthropic oauth refresh_token should start with 'sk-ant-ort01-'", context)
 	}
-	
+
 	return nil
 }
 
@@ -284,7 +289,7 @@ func validateModelRewriteConfigs(endpoints []EndpointConfig) error {
 		if endpoint.ModelRewrite == nil {
 			continue // 没有配置模型重写，跳过验证
 		}
-		
+
 		if err := validateModelRewriteConfig(endpoint.ModelRewrite, fmt.Sprintf("endpoint[%d] '%s'", i, endpoint.Name)); err != nil {
 			return err
 		}
@@ -302,34 +307,34 @@ func validateModelRewriteConfig(config *ModelRewriteConfig, context string) erro
 	if !config.Enabled {
 		return nil // 未启用，跳过规则验证
 	}
-	
+
 	if len(config.Rules) == 0 {
 		return fmt.Errorf("%s: model_rewrite is enabled but no rules configured", context)
 	}
-	
+
 	// 验证每个规则
 	seenPatterns := make(map[string]bool)
 	for i, rule := range config.Rules {
 		if rule.SourcePattern == "" {
 			return fmt.Errorf("%s: rule[%d] source_pattern is required", context, i)
 		}
-		
+
 		if rule.TargetModel == "" {
 			return fmt.Errorf("%s: rule[%d] target_model is required", context, i)
 		}
-		
+
 		// 检查重复的源模式
 		if seenPatterns[rule.SourcePattern] {
 			return fmt.Errorf("%s: rule[%d] duplicate source_pattern '%s'", context, i, rule.SourcePattern)
 		}
 		seenPatterns[rule.SourcePattern] = true
-		
+
 		// 验证通配符模式语法（尝试用一个测试字符串匹配）
 		if _, err := filepath.Match(rule.SourcePattern, "test-model"); err != nil {
 			return fmt.Errorf("%s: rule[%d] invalid source_pattern '%s': %v", context, i, rule.SourcePattern, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -349,7 +354,7 @@ func validateProxyConfigs(endpoints []EndpointConfig) error {
 		if endpoint.Proxy == nil {
 			continue // 没有配置代理，跳过验证
 		}
-		
+
 		if err := validateProxyConfig(endpoint.Proxy, fmt.Sprintf("endpoint[%d] '%s'", i, endpoint.Name)); err != nil {
 			return err
 		}
@@ -367,7 +372,7 @@ func validateProxyConfig(config *ProxyConfig, context string) error {
 	if config.Type == "" {
 		return fmt.Errorf("%s: proxy type is required", context)
 	}
-	
+
 	// 验证代理类型
 	validTypes := []string{"http", "socks5"}
 	validType := false
@@ -380,21 +385,21 @@ func validateProxyConfig(config *ProxyConfig, context string) error {
 	if !validType {
 		return fmt.Errorf("%s: invalid proxy type '%s', must be one of: %v", context, config.Type, validTypes)
 	}
-	
+
 	if config.Address == "" {
 		return fmt.Errorf("%s: proxy address is required", context)
 	}
-	
+
 	// 验证地址格式（简单检查是否包含端口）
 	if _, _, err := net.SplitHostPort(config.Address); err != nil {
 		return fmt.Errorf("%s: invalid proxy address '%s': %v", context, config.Address, err)
 	}
-	
+
 	// 验证认证配置一致性
 	if (config.Username != "" && config.Password == "") || (config.Username == "" && config.Password != "") {
 		return fmt.Errorf("%s: proxy username and password must both be provided or both be empty", context)
 	}
-	
+
 	return nil
 }
 
@@ -403,7 +408,7 @@ func validateServerConfig(host string, port int) error {
 	if port <= 0 || port > 65535 {
 		return fmt.Errorf("invalid server port: %d", port)
 	}
-	
+
 	return nil
 }
 
@@ -412,13 +417,13 @@ func validateEndpoints(endpoints []EndpointConfig) error {
 	if len(endpoints) == 0 {
 		return fmt.Errorf("at least one endpoint must be configured")
 	}
-	
+
 	for i, endpoint := range endpoints {
 		if err := validateEndpoint(endpoint, i); err != nil {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -432,15 +437,61 @@ func validateEndpoint(endpoint EndpointConfig, index int) error {
 	if endpoint.URLAnthropic == "" && endpoint.URLOpenAI == "" {
 		return fmt.Errorf("endpoint %d: at least one URL must be provided (url_anthropic or url_openai)", index)
 	}
-	
+
 	if endpoint.AuthType != "" && endpoint.AuthType != "api_key" && endpoint.AuthType != "auth_token" && endpoint.AuthType != "oauth" && endpoint.AuthType != "auto" {
 		return fmt.Errorf("endpoint %d: invalid auth_type '%s', must be 'api_key', 'auth_token', 'oauth', 'auto', or empty", index, endpoint.AuthType)
 	}
-	
+
 	// OAuth 认证不需要 auth_value，其他认证类型需要
 	if endpoint.AuthType != "oauth" && endpoint.AuthValue == "" {
 		return fmt.Errorf("endpoint %d: auth_value cannot be empty for non-oauth authentication", index)
 	}
-	
+
+	if endpoint.OpenAIPreference != "" {
+		switch endpoint.OpenAIPreference {
+		case "auto", "responses", "chat_completions":
+			// valid
+		default:
+			return fmt.Errorf("endpoint %d: invalid openai_preference '%s', must be 'auto', 'responses', or 'chat_completions'", index, endpoint.OpenAIPreference)
+		}
+	}
+
+	return nil
+}
+
+// validateConversionConfig 验证转换配置
+func validateConversionConfig(config *ConversionConfig) error {
+	if config == nil {
+		return nil
+	}
+
+	// 设置默认值
+	if strings.TrimSpace(config.AdapterMode) == "" {
+		config.AdapterMode = "auto"
+	}
+
+	// 验证适配器模式
+	validModes := []string{"legacy", "unified", "auto"}
+	validMode := false
+	modeLower := strings.ToLower(config.AdapterMode)
+	for _, mode := range validModes {
+		if modeLower == mode {
+			validMode = true
+			break
+		}
+	}
+	if !validMode {
+		return fmt.Errorf("invalid conversion.adapter_mode '%s', must be 'legacy', 'unified', or 'auto'", config.AdapterMode)
+	}
+	config.AdapterMode = modeLower
+
+	// 验证回退阈值
+	if config.FailbackThreshold <= 0 {
+		config.FailbackThreshold = 30 // 默认30%
+	}
+	if config.FailbackThreshold > 100 {
+		return fmt.Errorf("conversion.failback_threshold cannot exceed 100, got %d", config.FailbackThreshold)
+	}
+
 	return nil
 }

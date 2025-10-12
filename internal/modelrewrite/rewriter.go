@@ -32,6 +32,8 @@ func (r *Rewriter) RewriteRequest(req *http.Request, modelRewriteConfig *config.
 
 // RewriteRequestWithTags 重写请求中的模型名称，支持通用端点的隐式重写规则
 func (r *Rewriter) RewriteRequestWithTags(req *http.Request, modelRewriteConfig *config.ModelRewriteConfig, endpointTags []string, clientType string) (string, string, error) {
+	// 判断是否为健康检查（clientType为空字符串）
+	isHealthCheck := clientType == ""
 	// 读取请求体
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
@@ -107,7 +109,7 @@ func (r *Rewriter) RewriteRequestWithTags(req *http.Request, modelRewriteConfig 
 	}
 
 	// 应用重写规则
-	newModel := r.applyRewriteRules(originalModel, rules)
+	newModel := r.applyRewriteRules(originalModel, rules, isHealthCheck)
 	if newModel == originalModel {
 		return "", "", nil // 没有重写，返回空字符串
 	}
@@ -124,10 +126,13 @@ func (r *Rewriter) RewriteRequestWithTags(req *http.Request, modelRewriteConfig 
 	req.Body = io.NopCloser(bytes.NewReader(newBody))
 	req.ContentLength = int64(len(newBody))
 
-	r.logger.Info("Model rewritten in request", map[string]interface{}{
-		"original": originalModel,
-		"new":      newModel,
-	})
+	// 只在非健康检查时输出日志
+	if !isHealthCheck {
+		r.logger.Info("Model rewritten in request", map[string]interface{}{
+			"original": originalModel,
+			"new":      newModel,
+		})
+	}
 	return originalModel, newModel, nil
 }
 
@@ -275,14 +280,16 @@ func (r *Rewriter) rewriteTextResponse(responseBody []byte, originalModel, rewri
 }
 
 // applyRewriteRules 应用重写规则
-func (r *Rewriter) applyRewriteRules(originalModel string, rules []config.ModelRewriteRule) string {
+func (r *Rewriter) applyRewriteRules(originalModel string, rules []config.ModelRewriteRule, isHealthCheck bool) string {
 	for _, rule := range rules {
 		if matched, err := filepath.Match(rule.SourcePattern, originalModel); err == nil && matched {
-			r.logger.Debug("Model rewrite rule matched", map[string]interface{}{
-				"original": originalModel,
-				"pattern":  rule.SourcePattern,
-				"target":   rule.TargetModel,
-			})
+			if !isHealthCheck {
+				r.logger.Debug("Model rewrite rule matched", map[string]interface{}{
+					"original": originalModel,
+					"pattern":  rule.SourcePattern,
+					"target":   rule.TargetModel,
+				})
+			}
 			return rule.TargetModel
 		}
 	}
