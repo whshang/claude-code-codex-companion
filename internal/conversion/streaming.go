@@ -1,13 +1,12 @@
 package conversion
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"strings"
-	"time"
+    "bufio"
+    "encoding/json"
+    "fmt"
+    "io"
+    "strings"
+    "time"
 )
 
 const (
@@ -85,16 +84,7 @@ func streamChatCompletionsToResponsesUnified(r io.Reader, w io.Writer) error {
 	return err
 }
 
-func StreamAnthropicSSEToResponses(r io.Reader, w io.Writer) error {
-	// 使用现有的流式转换函数，先转换为OpenAI格式，再转换为Responses格式
-	var buf bytes.Buffer
-	if err := StreamAnthropicSSEToOpenAI(r, &buf); err != nil {
-		return err
-	}
-	
-	// 然后将OpenAI格式转换为Responses格式
-	return streamChatCompletionsToResponsesUnified(&buf, w)
-}
+// StreamAnthropicSSEToResponses 已弃用，移除以简化代码路径（使用方应先统一为 OpenAI 再转换为 Responses）
 
 // StreamResponsesToChat 将 Responses SSE 转换为 Chat SSE
 func StreamResponsesToChat(r io.Reader, w io.Writer) error {

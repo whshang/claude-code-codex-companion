@@ -382,12 +382,9 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	// 关键修复：只有当请求格式与端点格式不匹配时才需要转换
 	var conversionContext *conversion.ConversionContext
     // 判断是否需要格式转换
-	// 关键修复：根据实际使用的URL来判断端点格式，而不是endpoint_type
-	needsConversion := false
-	actualEndpointFormat := ""
-
-	// 用于决定响应是否需要转换回客户端格式
-	shouldConvertAnthropicResponseToOpenAI := false
+    // 关键修复：根据实际使用的URL来判断端点格式，而不是endpoint_type
+    needsConversion := false
+    actualEndpointFormat := ""
 
 	if formatDetection != nil && formatDetection.Format != utils.FormatUnknown {
 		// 确定实际使用的URL类型 - 严格匹配，不跨家族
@@ -454,39 +451,24 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		var ctx *conversion.ConversionContext
 		var err error
 
-		if shouldConvertAnthropicResponseToOpenAI {
-			// OpenAI → Anthropic 请求转换
-			convertedBody, err = conversion.ConvertOpenAIRequestJSONToAnthropic(finalRequestBody)
-			if err != nil {
-				s.logger.Error("OpenAI to Anthropic conversion failed", err)
-				duration := time.Since(endpointStartTime)
-				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Request format conversion failed", "details": err.Error()})
-				c.Set("last_error", err)
-				c.Set("last_status_code", http.StatusBadRequest)
-				return false, false
-			}
-			conversionContext = nil // 响应由自定义路径转换
-		} else {
-			// Anthropic → OpenAI 请求转换
-			reqConverter := conversion.NewRequestConverter(s.logger)
-			endpointInfo := &conversion.EndpointInfo{
-				Type:               ep.EndpointType,
-				MaxTokensFieldName: ep.MaxTokensFieldName,
-			}
+        // Anthropic → OpenAI 请求转换
+        reqConverter := conversion.NewRequestConverter(s.logger)
+        endpointInfo := &conversion.EndpointInfo{
+            Type:               ep.EndpointType,
+            MaxTokensFieldName: ep.MaxTokensFieldName,
+        }
 
-			convertedBody, ctx, err = reqConverter.Convert(finalRequestBody, endpointInfo)
-			if err != nil {
-				s.logger.Error("Request format conversion failed", err)
-				duration := time.Since(endpointStartTime)
-				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Request format conversion failed", "details": err.Error()})
-				c.Set("last_error", err)
-				c.Set("last_status_code", http.StatusBadRequest)
-				return false, false
-			}
-			conversionContext = ctx
-		}
+        convertedBody, ctx, err = reqConverter.Convert(finalRequestBody, endpointInfo)
+        if err != nil {
+            s.logger.Error("Request format conversion failed", err)
+            duration := time.Since(endpointStartTime)
+            s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
+            c.JSON(http.StatusBadRequest, gin.H{"error": "Request format conversion failed", "details": err.Error()})
+            c.Set("last_error", err)
+            c.Set("last_status_code", http.StatusBadRequest)
+            return false, false
+        }
+        conversionContext = ctx
 
 		finalRequestBody = convertedBody
 
@@ -499,16 +481,6 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
                     "original_path":  "/v1/messages",
                     "converted_path": "/v1/chat/completions",
                     "conversion":     "anthropic_to_openai",
-                })
-            }
-        } else if shouldConvertAnthropicResponseToOpenAI {
-            // OpenAI → Anthropic: 将标准 OpenAI 消息路径映射到 Anthropic 消息路径
-            if effectivePath == "/v1/chat/completions" {
-                effectivePath = "/v1/messages"
-                s.logger.Debug("Path converted for format conversion", map[string]interface{}{
-                    "original_path":  "/v1/chat/completions",
-                    "converted_path": "/v1/messages",
-                    "conversion":     "openai_to_anthropic",
                 })
             }
         }
@@ -1269,7 +1241,7 @@ attemptLoop:
 	originalContentType := resp.Header.Get("Content-Type")
 	isStreamingResponse := strings.Contains(strings.ToLower(originalContentType), "text/event-stream")
 	if isStreamingResponse {
-		return s.handleStreamingResponse(
+        return s.handleStreamingResponse(
 			c,
 			resp,
 			req,
@@ -1285,7 +1257,6 @@ attemptLoop:
 			endpointRequestFormat,
 			actualEndpointFormat,
 			formatDetection,
-			shouldConvertAnthropicResponseToOpenAI,
 			actuallyUsingOpenAIURL,
 			isCountTokensRequest,
 			endpointStartTime,
@@ -1536,38 +1507,7 @@ attemptLoop:
 		// 如果执行到这里，说明代码逻辑可能有问题
 	}
 
-	if shouldConvertAnthropicResponseToOpenAI && len(decompressedBody) > 0 {
-		var converted []byte
-		var err error
-
-		if isStreaming {
-			converted, err = conversion.ConvertAnthropicSSEToOpenAI(decompressedBody)
-		} else {
-			converted, err = conversion.ConvertAnthropicResponseJSONToOpenAI(decompressedBody)
-		}
-
-		if err != nil {
-			s.logger.Error("Failed to convert Anthropic response to OpenAI format", err)
-		} else {
-			addConversionStage(&conversionStages, "response:openai->anthropic")
-			convertedResponseBody = converted
-			actuallyUsingOpenAIURL = true
-
-			// 确保响应头与新的数据格式匹配
-			c.Header("Content-Encoding", "")
-			if !isStreaming {
-				c.Header("Content-Length", fmt.Sprintf("%d", len(convertedResponseBody)))
-			} else {
-				c.Header("Content-Length", "")
-			}
-
-			if isStreaming {
-				contentTypeOverrideFromConversion = "text/event-stream; charset=utf-8"
-			} else {
-				contentTypeOverrideFromConversion = "application/json"
-			}
-		}
-	}
+    // 移除 Anthropic -> OpenAI 响应转换（跨家族转换已弃用）
 
 	// 应用响应模型重写（如果进行了请求模型重写）
 	finalResponseBody := convertedResponseBody
@@ -2322,7 +2262,6 @@ func (s *Server) handleStreamingResponse(
 	endpointRequestFormat string,
 	actualEndpointFormat string,
 	formatDetection *utils.FormatDetectionResult,
-	shouldConvertAnthropicResponseToOpenAI bool,
 	actuallyUsingOpenAIURL bool,
 	isCountTokensRequest bool,
 	endpointStartTime time.Time,
@@ -2357,12 +2296,7 @@ func (s *Server) handleStreamingResponse(
 	reader = io.TeeReader(reader, originalCapture)
 
     isCodexClient := formatDetection != nil && formatDetection.ClientType == utils.ClientCodex
-    convertAnthropicToOpenAI := shouldConvertAnthropicResponseToOpenAI
     if conversionStages != nil {
-        if convertAnthropicToOpenAI && !isCodexClient {
-            // 仅当目标客户端不是 Codex 时，记录 anthropic->openai 的响应转换（Codex 直接转换为 responses）
-            addConversionStage(conversionStages, "response:anthropic->openai")
-        }
         if isCodexClient {
             addConversionStage(conversionStages, "response:*->responses")
         }
@@ -2427,10 +2361,6 @@ func (s *Server) handleStreamingResponse(
             // 上游是 Anthropic SSE → 对于Codex客户端，这种组合不支持，切换端点
             streamErr = fmt.Errorf("Codex client with Anthropic endpoint not supported, switching endpoint")
         }
-    } else if convertAnthropicToOpenAI {
-        // 非 Codex 客户端：Anthropic → OpenAI Chat SSE
-        streamErr = conversion.StreamAnthropicSSEToOpenAI(reader, captureWriter)
-        actuallyUsingOpenAIURL = true
     } else {
         // 透传
         _, streamErr = io.Copy(captureWriter, reader)
@@ -2511,11 +2441,11 @@ func (s *Server) handleStreamingResponse(
 		}
 	}
 
-	if formatDetection != nil {
+    if formatDetection != nil {
 		requestLog.ClientType = string(formatDetection.ClientType)
 		requestLog.RequestFormat = string(formatDetection.Format)
 		requestLog.TargetFormat = ep.EndpointType
-    requestLog.FormatConverted = convertAnthropicToOpenAI || isCodexClient
+    requestLog.FormatConverted = isCodexClient
 		requestLog.DetectionConfidence = formatDetection.Confidence
 		requestLog.DetectedBy = formatDetection.DetectedBy
 	}

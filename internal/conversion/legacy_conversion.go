@@ -253,12 +253,4 @@ func LegacyStreamChatCompletionsToResponses(r io.Reader, w io.Writer) error {
 	return nil
 }
 
-// LegacyStreamResponsesToChat reuses the unified implementation (legacy never supported this directly)
-func LegacyStreamResponsesToChat(r io.Reader, w io.Writer) error {
-	return StreamResponsesToChat(r, w)
-}
-
-// LegacyStreamAnthropicSSEToResponses falls back to unified implementation
-func LegacyStreamAnthropicSSEToResponses(r io.Reader, w io.Writer) error {
-	return StreamAnthropicSSEToResponses(r, w)
-}
+// Legacy stream helpers removed: use StreamResponsesToChat or StreamChatCompletionsToResponsesUnified directly.

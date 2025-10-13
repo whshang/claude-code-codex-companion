@@ -1,24 +1,24 @@
 # Desktop 客户端改造 TODO（Wails + React/Tailwind + shadcn/ui）
 
-目标：将现有 Go 单体服务打包为桌面客户端（macOS/Windows），前端实现现代化（shadcn 风格、少自定义样式），在不大幅侵入后端的前提下分阶段渐进迁移。优先路线：Wails + React/Vite/Tailwind + shadcn（Phase B），稳定后可选用 Wails bindings（Phase C）去掉本地端口与 HTTP 调用。
+目标：将现有 Go 单体服务打包为桌面客户端（macOS/Windows），前端实现现代化（shadcn 风格、少自定义样式），在不大幅侵入后端的前提下分阶段渐进迁移。优先路线：Wails + React/Vite/Tailwind + shadcn，稳定后可选用 Wails bindings 去掉本地端口与 HTTP 调用加速。
 
 ---
 
 ## 里程碑与总览
 
-1) Phase 0：准备与对齐（0.5 天）  
-2) Phase 1：Wails 容器落地（1 天）  
-3) Phase 2：前端基座搭建（1 天）  
-4) Phase 3：页面迁移（Settings → Endpoints → Logs/Inspector）（5–7 天）  
-5) Phase 4：性能与工程化（1 天）  
-6) Phase 5（可选）：Wails bindings 深度收口（2–3 天）  
-7) Phase 6：打包与发布（0.5–1 天）
+1) 准备与对齐  
+2) Wails 容器落地  
+3) 前端基座搭建  
+4) 页面迁移（Settings → Endpoints → Logs/Inspector）  
+5) 性能与工程化  
+6) Wails bindings 深度收口  
+7) 打包与发布
 
 所有阶段均要求：可回滚、可阶段交付；每完成一页的迁移即可去除相应 Bootstrap/JS 资源。
 
 ---
 
-## Phase 0：准备与对齐（0.5 天）
+## 准备与对齐
 
 - 明确路线：先 Phase B（React 前端经 HTTP 调用现有 Go 服务），再视情况进入 Phase C（bindings）。
 - 目录规划：
@@ -32,7 +32,7 @@
 
 ---
 
-## Phase 1：Wails 容器落地（1 天）
+## Wails 容器落地
 
 1. 安装 Wails 工具链：
    - `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
@@ -58,7 +58,7 @@
 
 ---
 
-## Phase 2：前端基座（1 天）
+## 前端基座
 
 1. 初始化前端（React + Vite + TS）：
    - 在 `wails-app/` 下：`npm create vite@latest frontend -- --template react-ts`
@@ -85,11 +85,11 @@
 
 ---
 
-## Phase 3：页面迁移（逐页替换，可随时发布）
+## 页面迁移（逐页替换，可随时发布）
 
 通用要求：迁移一页就删除对应 Bootstrap/JS 资源；行为一致、接口不变。
 
-### 3.1 Settings（1 天）
+### 3.1 Settings
 步骤：
 1. 对照 `web/templates/settings.html` 与 `web/static/settings.js`，梳理字段与接口（读取/保存、校验）。
 2. 用 shadcn Form/Input/Select/Switch/Card 重建设置表单；复用现有校验规则与提示文案。
@@ -100,7 +100,7 @@
    - 国际化占位（沿用 `web/locales` 资源，后续再抽取）。
 验收：设置读写成功、必填/格式提示准确、UI 一致并更现代。
 
-### 3.2 Endpoints（2–3 天）
+### 3.2 Endpoints
 步骤：
 1. 列表页：
    - 用 shadcn Table（基于 TanStack Table）实现优先级、名称、URL、代理、标签、配置、状态、操作列；
@@ -117,7 +117,7 @@
 4. 清理：移除 `web/static/vendor/sortablejs/*`、`endpoints-*.js/css` 中已替代的逻辑与样式。
 验收：端点增删改查、拖拽排序、批量测试、弹窗/向导全通过；无回归。
 
-### 3.3 Logs/Inspector（2 天）
+### 3.3 Logs/Inspector
 步骤：
 1. 页布局：Tabs/Accordion 分区（概览、请求/响应、工具调用、系统提示、对比等）。
 2. 代码/长文档区域使用 ScrollArea + Code 样式（等宽字体、折行/复制）。
@@ -127,7 +127,7 @@
 
 ---
 
-## Phase 4：性能与工程化（1 天）
+## 性能与工程化
 
 - 构建优化：Vite splitChunks、`@rollup/plugin-visualizer` 检查体积、按需引入 shadcn 组件、移除未用依赖。
 - 资源优化：关键 CSS preload、图片/字体内联阈值、长缓存与文件名哈希。
@@ -137,7 +137,7 @@
 
 ---
 
-## Phase 5（可选）：Wails bindings 深度收口（2–3 天）
+## Wails bindings 深度收口
 
 目标：消除本地 HTTP 端口与 CORS/鉴权负担，提升调用速度与一致性。
 
@@ -151,7 +151,7 @@
 
 ---
 
-## Phase 6：打包与发布（0.5–1 天）
+## 打包与发布
 
 - macOS：`wails build -platform darwin/universal` 生成 `.app` 与 `.dmg`；
 - Windows：`wails build -platform windows/amd64` 生成安装包（msi/nsis）；
@@ -164,15 +164,15 @@
 
 ## 任务清单（可勾选）
 
-- [ ] Phase 0：目录/路线确认；视觉令牌草案
-- [ ] Phase 1：Wails 容器与 `wails.json`；本地端口策略与 CSP
-- [ ] Phase 2：Vite + React + Tailwind + shadcn 初始化；Layout/路由/API 客户端
+- [ ] 目录/路线确认；视觉令牌草案
+- [ ] Wails 容器与 `wails.json`；本地端口策略与 CSP
+- [ ] Vite + React + Tailwind + shadcn 初始化；Layout/路由/API 客户端
 - [ ] Phase 3.1：Settings 迁移；删除对应 Bootstrap 资源
 - [ ] Phase 3.2：Endpoints 列表/弹窗/向导迁移；去除 SortableJS；批量测试联通
 - [ ] Phase 3.3：Logs/Inspector 迁移；长日志性能验证
-- [ ] Phase 4：打包体积/首屏/内存优化；CSP 硬化
+- [ ] 打包体积/首屏/内存优化；CSP 硬化
 - [ ] Phase 5（可选）：Bindings 收口；移除本地端口
-- [ ] Phase 6：打包与签名；发布验证
+- [ ] 打包与签名；发布验证
 
 ---
 

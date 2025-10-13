@@ -206,6 +206,18 @@ func (a *OpenAIResponsesFormatAdapter) BuildSSE(events []InternalEvent) ([]SSEPa
 	return nil, fmt.Errorf("BuildSSE not implemented")
 }
 
+// cloneStringInterfaceMap performs a shallow clone of a map[string]interface{}
+func cloneStringInterfaceMap(src map[string]interface{}) map[string]interface{} {
+    if src == nil {
+        return nil
+    }
+    out := make(map[string]interface{}, len(src))
+    for k, v := range src {
+        out[k] = v
+    }
+    return out
+}
+
 func convertResponsesMessageToInternal(msg OpenAIResponsesMessage) InternalMessage {
 	internal := InternalMessage{
 		Role:      msg.Role,

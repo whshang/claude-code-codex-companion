@@ -38,77 +38,7 @@ func ConvertResponsesResponseJSONToChat(body []byte) ([]byte, error) {
 	return converted, nil
 }
 
-// ConvertAnthropicResponseJSONToResponses 将 Anthropic 响应转换为 OpenAI Responses 响应
-func ConvertAnthropicResponseJSONToResponses(body []byte) ([]byte, error) {
-	factory := NewAdapterFactory(nil)
-	anthropicAdapter := factory.AnthropicAdapter()
-	responsesAdapter := factory.OpenAIResponsesAdapter()
-
-	internalResp, err := anthropicAdapter.ParseResponseJSON(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to normalize Anthropic response: %w", err)
-	}
-
-	converted, err := responsesAdapter.BuildResponseJSON(internalResp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to render responses payload: %w", err)
-	}
-	return converted, nil
-}
-
-// ConvertResponsesResponseJSONToAnthropic 将 OpenAI Responses 响应转换为 Anthropic 响应
-func ConvertResponsesResponseJSONToAnthropic(body []byte) ([]byte, error) {
-	factory := NewAdapterFactory(nil)
-	responsesAdapter := factory.OpenAIResponsesAdapter()
-	anthropicAdapter := factory.AnthropicAdapter()
-
-	internalResp, err := responsesAdapter.ParseResponseJSON(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to normalize responses response: %w", err)
-	}
-
-	converted, err := anthropicAdapter.BuildResponseJSON(internalResp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to render Anthropic response: %w", err)
-	}
-	return converted, nil
-}
-
-// ConvertResponsesRequestJSONToAnthropic 将 OpenAI Responses 请求转换为 Anthropic 请求
-func ConvertResponsesRequestJSONToAnthropic(body []byte) ([]byte, error) {
-	factory := NewAdapterFactory(nil)
-	responsesAdapter := factory.OpenAIResponsesAdapter()
-	anthropicAdapter := factory.AnthropicAdapter()
-
-	internalReq, err := responsesAdapter.ParseRequestJSON(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to normalize responses request: %w", err)
-	}
-
-	converted, err := anthropicAdapter.BuildRequestJSON(internalReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to render Anthropic request: %w", err)
-	}
-	return converted, nil
-}
-
-// ConvertAnthropicRequestJSONToResponses 将 Anthropic 请求转换为 OpenAI Responses 请求
-func ConvertAnthropicRequestJSONToResponses(body []byte) ([]byte, error) {
-	factory := NewAdapterFactory(nil)
-	anthropicAdapter := factory.AnthropicAdapter()
-	responsesAdapter := factory.OpenAIResponsesAdapter()
-
-	internalReq, err := anthropicAdapter.ParseRequestJSON(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to normalize Anthropic request: %w", err)
-	}
-
-	converted, err := responsesAdapter.BuildRequestJSON(internalReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to render responses request: %w", err)
-	}
-	return converted, nil
-}
+// Anthropic <-> Responses JSON conversions removed (cross-family conversion no longer supported)
 
 // ConvertChatRequestJSONToResponses 将 Chat Completions 请求转换为 Responses 请求
 func ConvertChatRequestJSONToResponses(body []byte) ([]byte, error) {

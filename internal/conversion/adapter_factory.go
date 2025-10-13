@@ -29,11 +29,6 @@ func NewAdapterFactory(logger *logger.Logger) *AdapterFactory {
 	return &AdapterFactory{logger: logger}
 }
 
-// AnthropicAdapter 构造 Anthropic 适配器
-func (f *AdapterFactory) AnthropicAdapter() FormatAdapter {
-	return &AnthropicFormatAdapter{logger: f.logger}
-}
-
 // OpenAIChatAdapter 构造 OpenAI Chat 适配器
 func (f *AdapterFactory) OpenAIChatAdapter() FormatAdapter {
 	return &OpenAIChatFormatAdapter{logger: f.logger}
