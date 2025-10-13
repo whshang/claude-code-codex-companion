@@ -938,3 +938,27 @@ func (e *Endpoint) GetURLForFormat(requestFormat string) string {
 	}
 	return e.URLOpenAI
 }
+
+// IsOpenAIOnly 判断端点是否为 OpenAI-only 模式
+// 规则：仅配置了 url_openai，没有配置 url_anthropic
+func (e *Endpoint) IsOpenAIOnly() bool {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+	return e.URLOpenAI != "" && e.URLAnthropic == ""
+}
+
+// IsAnthropicOnly 判断端点是否为 Anthropic-only 模式
+// 规则：仅配置了 url_anthropic，没有配置 url_openai
+func (e *Endpoint) IsAnthropicOnly() bool {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+	return e.URLAnthropic != "" && e.URLOpenAI == ""
+}
+
+// IsDualMode 判断端点是否为双模式（同时配置了两个URL）
+// 在双模式下，不进行跨家族格式转换，只做直连
+func (e *Endpoint) IsDualMode() bool {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+	return e.URLOpenAI != "" && e.URLAnthropic != ""
+}

@@ -44,6 +44,8 @@ debug/
 .crush/
 CLAUDE.md
 AGENTS.md
+WARP.md
+
 
 # Temporary and backup files
 *.backup

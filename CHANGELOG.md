@@ -1,5 +1,15 @@
 # Changelog
 
+## 2025-10-13
+### Fixed
+- **关键修复**：修复 Codex 非流式响应转 SSE 时无内容的问题
+  - 修复 `convertResponseJSONToSSE` 函数，正确从 Responses API 格式（`output[].content[].text`）提取内容
+  - 添加对 Responses JSON 结构的优先解析，同时保持对 Chat Completions 格式的向后兼容
+  - 修复 SSE 流立即写入并返回的逻辑，避免后续 JSON 写入覆盖 SSE 流
+  - 完整实现 Chat Completions JSON → Responses JSON → Responses SSE 的三阶段转换
+  - 解决了 Codex 客户端在 `stream: true` 但上游返回非流式 JSON 时的 "无回复" 问题
+  - 详见日志："Converting non-streaming JSON to SSE for Codex (client expects stream)"
+
 ## 2025-10-10
 ### Fixed
 - **关键修复**：修复 Claude Code 发送 tool_result 时 tool_use_id 丢失的问题

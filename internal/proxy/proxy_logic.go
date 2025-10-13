@@ -176,7 +176,36 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	}
 	endpointRequestFormat := clientRequestFormat
 
-	// 早期检查：如果端点没有对应格式的URL，快速跳过
+	// 早期检查1：端点类型与请求格式兼容性（静默跳过不匹配的端点）
+	if clientRequestFormat != "" {
+		// OpenAI-only 端点只能处理 OpenAI 格式请求
+		if ep.IsOpenAIOnly() && clientRequestFormat != "openai" {
+			s.logger.Debug("Silently skipping OpenAI-only endpoint for non-OpenAI request", map[string]interface{}{
+				"endpoint":       ep.Name,
+				"request_format": clientRequestFormat,
+			})
+			c.Set("skip_health_record", true)
+			c.Set("skip_logging", true) // 静默跳过，不记录日志
+			c.Set("last_error", fmt.Errorf("endpoint %s is OpenAI-only", ep.Name))
+			c.Set("last_status_code", http.StatusBadGateway)
+			return false, true
+		}
+
+		// Anthropic-only 端点只能处理 Anthropic 格式请求
+		if ep.IsAnthropicOnly() && clientRequestFormat != "anthropic" {
+			s.logger.Debug("Silently skipping Anthropic-only endpoint for non-Anthropic request", map[string]interface{}{
+				"endpoint":       ep.Name,
+				"request_format": clientRequestFormat,
+			})
+			c.Set("skip_health_record", true)
+			c.Set("skip_logging", true) // 静默跳过，不记录日志
+			c.Set("last_error", fmt.Errorf("endpoint %s is Anthropic-only", ep.Name))
+			c.Set("last_status_code", http.StatusBadGateway)
+			return false, true
+		}
+	}
+
+	// 早期检查2：如果端点没有对应格式的URL，快速跳过
 	if clientRequestFormat != "" && !ep.HasURLForFormat(clientRequestFormat) {
 		s.logger.Debug("Skipping endpoint: no URL for request format", map[string]interface{}{
 			"endpoint":       ep.Name,
@@ -283,7 +312,6 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			if rewriteErr != nil {
 				s.logger.Error("Failed to read rewritten request body", rewriteErr)
 				duration := time.Since(endpointStartTime)
-				setConversionContext(c, conversionStages)
 				setConversionContext(c, conversionStages)
 				s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, rewriteErr, false, tags, "", originalModel, rewrittenModel, attemptNumber)
 				// 设置错误信息到context中
@@ -403,9 +431,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 
 		// 判断是否需要格式转换
 		// requestIsAnthropic 和 requestIsOpenAI 已在上面定义
-		endpointIsOpenAI := (actualEndpointFormat == "openai")
-
-undefined
+		// 由于路由层已经确保不会跨家族，这里的转换逻辑已被简化
+		// needsConversion 默认为 false，除非有特定的同家族转换需求
 
 		s.logger.Debug("Format conversion decision", map[string]interface{}{
 			"request_format":         formatDetection.Format,
@@ -945,7 +972,6 @@ attemptLoop:
 		s.logger.Error("Failed to create proxy client for endpoint", err)
 		duration := time.Since(endpointStartTime)
 		setConversionContext(c, conversionStages)
-		setConversionContext(c, conversionStages)
 		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, nil, nil, duration, err, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 		// 设置错误信息到context中
 		c.Set("last_error", err)
@@ -1025,9 +1051,6 @@ attemptLoop:
 				decompressedBody = body
 			}
 
-			setConversionContext(c, conversionStages)
-			setConversionContext(c, conversionStages)
-			setConversionContext(c, conversionStages)
 			setConversionContext(c, conversionStages)
 			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 			c.Set("last_error", fmt.Errorf("authentication failed, switching to x-api-key"))
@@ -1614,19 +1637,218 @@ attemptLoop:
 
     // 如果是Codex客户端，则统一转换为 /responses 格式（无论上游是OpenAI还是Anthropic；Anthropic场景已在上面先转为OpenAI）
     if isCodexClient {
-			s.logger.Info("Converting chat completion to Responses API format for Codex", map[string]interface{}{
-				"actual_endpoint_format": actualEndpointFormat,
-				"client_type":            "codex",
-				"path":                   path,
-			})
-			if converted, err := s.convertChatCompletionToResponse(finalResponseBody, ep.Name); err == nil {
-				finalResponseBody = converted
-				// 更新Content-Length
-				c.Header("Content-Length", fmt.Sprintf("%d", len(finalResponseBody)))
+			// 检查客户端是否期望流式响应
+			clientExpectsStream := s.isRequestExpectingStream(c.Request)
+			
+			// 解析请求体检查 stream 参数
+			if !clientExpectsStream && len(requestBody) > 0 {
+				var reqData map[string]interface{}
+				if err := json.Unmarshal(requestBody, &reqData); err == nil {
+					if streamVal, ok := reqData["stream"].(bool); ok && streamVal {
+						clientExpectsStream = true
+					}
+				}
+			}
+			
+			if clientExpectsStream {
+				// 客户端期望流式响应，将JSON转换为SSE流
+				s.logger.Info("Converting non-streaming JSON to SSE for Codex (client expects stream)", map[string]interface{}{
+					"actual_endpoint_format": actualEndpointFormat,
+					"client_type":            "codex",
+					"path":                   path,
+				})
+				
+				// 先将 Chat Completion JSON 转换为 Responses JSON
+				if converted, err := s.convertChatCompletionToResponse(finalResponseBody, ep.Name); err == nil {
+					// 再将 Responses JSON 转换为 SSE 流
+					if sseBody := s.convertResponseJSONToSSE(converted); len(sseBody) > 0 {
+						finalResponseBody = sseBody
+						// 设置 SSE 响应头
+						c.Header("Content-Type", "text/event-stream; charset=utf-8")
+						c.Header("Cache-Control", "no-cache")
+						c.Header("Connection", "keep-alive")
+						c.Header("X-Accel-Buffering", "no")
+						c.Header("Content-Length", "")
+						
+						// 🎯 关键修复：立即写入SSE流并返回
+						if _, err := c.Writer.Write(finalResponseBody); err != nil {
+							s.logger.Error("Failed to write SSE response", err)
+						}
+						if flusher, ok := c.Writer.(http.Flusher); ok {
+							flusher.Flush()
+						}
+						
+						// 记录日志
+						duration := time.Since(endpointStartTime)
+						requestLog := s.logger.CreateRequestLog(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path)
+						requestLog.RequestBodySize = len(requestBody)
+						requestLog.Tags = tags
+						requestLog.ContentTypeOverride = overrideInfo
+						requestLog.AttemptNumber = attemptNumber
+						requestLog.IsStreaming = true
+						requestLog.WasStreaming = true
+						
+						// 设置格式检测信息
+						if formatDetection, exists := c.Get("format_detection"); exists {
+							if detection, ok := formatDetection.(*utils.FormatDetectionResult); ok && detection != nil {
+								requestLog.ClientType = string(detection.ClientType)
+								requestLog.RequestFormat = string(detection.Format)
+								requestLog.TargetFormat = ep.EndpointType
+								requestLog.DetectionConfidence = detection.Confidence
+								requestLog.DetectedBy = detection.DetectedBy
+							}
+						}
+						
+						// 记录请求和响应数据
+						if len(requestBody) > 0 {
+							if s.config.Logging.LogRequestBody != "none" {
+								preview, _, _ := buildBodySnapshot(requestBody)
+								requestLog.OriginalRequestBody = preview
+							}
+						}
+						
+						if len(finalRequestBody) > 0 {
+							preview, hash, truncated := buildBodySnapshot(finalRequestBody)
+							if s.config.Logging.LogRequestBody != "none" {
+								requestLog.FinalRequestBody = preview
+							}
+							requestLog.RequestBodyHash = hash
+							requestLog.RequestBodyTruncated = truncated
+							requestLog.RequestBodySize = len(finalRequestBody)
+						}
+						
+						if len(finalResponseBody) > 0 {
+							if s.config.Logging.LogResponseBody != "none" {
+								preview, _, _ := buildBodySnapshot(finalResponseBody)
+								requestLog.FinalResponseBody = preview
+							}
+						}
+						
+						if originalModel != "" {
+							requestLog.OriginalModel = originalModel
+							requestLog.Model = originalModel
+						}
+						if rewrittenModel != "" {
+							requestLog.RewrittenModel = rewrittenModel
+							requestLog.ModelRewriteApplied = (rewrittenModel != originalModel)
+						}
+						
+						s.logger.UpdateRequestLog(requestLog, req, resp, finalResponseBody, duration, nil)
+						s.logger.LogRequest(requestLog)
+						
+						// 清除错误信息
+						c.Set("last_error", nil)
+						c.Set("last_status_code", resp.StatusCode)
+						setConversionContext(c, conversionStages)
+						updateSupportsResponsesContext(c, ep)
+						
+						// 立即返回，避免后续写入覆盖SSE流
+						return true, false
+					} else {
+						s.logger.Error("Failed to convert Response JSON to SSE", nil)
+					}
+				} else {
+					s.logger.Error("Failed to convert chat completion to Response format", err)
+				}
 			} else {
-				s.logger.Error("Failed to convert response format for Codex", err)
+				// 客户端不期望流式响应，使用普通JSON转换
+				s.logger.Info("Converting chat completion to Responses API format for Codex", map[string]interface{}{
+					"actual_endpoint_format": actualEndpointFormat,
+					"client_type":            "codex",
+					"path":                   path,
+				})
+				if converted, err := s.convertChatCompletionToResponse(finalResponseBody, ep.Name); err == nil {
+					finalResponseBody = converted
+					// 更新Content-Length
+					c.Header("Content-Length", fmt.Sprintf("%d", len(finalResponseBody)))
+				} else {
+					s.logger.Error("Failed to convert response format for Codex", err)
+				}
 			}
 		}
+	}
+
+	// 🎯 关键修复：如果已经发送了 SSE 流，立即返回，不要继续执行后面的写入
+	// 检查是否已经设置了 SSE 响应头
+	if c.Writer.Header().Get("Content-Type") == "text/event-stream; charset=utf-8" {
+		// SSE 响应已经完成，记录日志并返回
+		s.logger.Debug("SSE response already sent, skipping final write", map[string]interface{}{
+			"endpoint":    ep.Name,
+			"client_type": clientType,
+		})
+		
+		// Flush 确保数据发送
+		if flusher, ok := c.Writer.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		
+		// 记录日志
+		duration := time.Since(endpointStartTime)
+		requestLog := s.logger.CreateRequestLog(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path)
+		requestLog.RequestBodySize = len(requestBody)
+		requestLog.Tags = tags
+		requestLog.ContentTypeOverride = overrideInfo
+		requestLog.AttemptNumber = attemptNumber
+		requestLog.IsStreaming = true  // SSE 是流式
+		requestLog.WasStreaming = true
+		
+		// 设置格式检测信息
+		if formatDetection, exists := c.Get("format_detection"); exists {
+			if detection, ok := formatDetection.(*utils.FormatDetectionResult); ok && detection != nil {
+				requestLog.ClientType = string(detection.ClientType)
+				requestLog.RequestFormat = string(detection.Format)
+				requestLog.TargetFormat = ep.EndpointType
+				requestLog.DetectionConfidence = detection.Confidence
+				requestLog.DetectedBy = detection.DetectedBy
+			}
+		}
+		
+		// 记录原始和最终请求数据
+		if len(requestBody) > 0 {
+			if s.config.Logging.LogRequestBody != "none" {
+				preview, _, _ := buildBodySnapshot(requestBody)
+				requestLog.OriginalRequestBody = preview
+			}
+		}
+		
+		if len(finalRequestBody) > 0 {
+			preview, hash, truncated := buildBodySnapshot(finalRequestBody)
+			if s.config.Logging.LogRequestBody != "none" {
+				requestLog.FinalRequestBody = preview
+			}
+			requestLog.RequestBodyHash = hash
+			requestLog.RequestBodyTruncated = truncated
+			requestLog.RequestBodySize = len(finalRequestBody)
+		}
+		
+		// 记录响应数据（SSE 流）
+		if len(finalResponseBody) > 0 {
+			if s.config.Logging.LogResponseBody != "none" {
+				preview, _, _ := buildBodySnapshot(finalResponseBody)
+				requestLog.FinalResponseBody = preview
+			}
+		}
+		
+		// 设置模型信息
+		if originalModel != "" {
+			requestLog.OriginalModel = originalModel
+			requestLog.Model = originalModel
+		}
+		if rewrittenModel != "" {
+			requestLog.RewrittenModel = rewrittenModel
+			requestLog.ModelRewriteApplied = (rewrittenModel != originalModel)
+		}
+		
+		s.logger.UpdateRequestLog(requestLog, req, resp, finalResponseBody, duration, nil)
+		s.logger.LogRequest(requestLog)
+		
+		// 清除错误信息
+		c.Set("last_error", nil)
+		c.Set("last_status_code", resp.StatusCode)
+		setConversionContext(c, conversionStages)
+		updateSupportsResponsesContext(c, ep)
+		
+		return true, false  // 成功返回
 	}
 
 	// 发送最终响应体给客户端
@@ -2187,7 +2409,20 @@ func (s *Server) handleStreamingResponse(
         // Codex 客户端一律期望 Responses API 事件
         if actualEndpointFormat == "openai" {
             // 上游是 OpenAI Chat SSE → 转 Responses SSE
-            streamErr = conversion.LegacyStreamChatCompletionsToResponses(reader, captureWriter)
+            // 使用 ConversionManager 进行统一的流式转换
+            if s.conversionManager != nil {
+                _, streamErr = s.conversionManager.ConvertStream(
+                    "chat_sse_to_responses",
+                    ep.Name,
+                    reader,
+                    captureWriter,
+                    conversion.StreamChatCompletionsToResponses,     // unified
+                    conversion.LegacyStreamChatCompletionsToResponses, // legacy
+                )
+            } else {
+                // 无 manager，直接使用统一模式
+                streamErr = conversion.StreamChatCompletionsToResponses(reader, captureWriter)
+            }
         } else {
             // 上游是 Anthropic SSE → 对于Codex客户端，这种组合不支持，切换端点
             streamErr = fmt.Errorf("Codex client with Anthropic endpoint not supported, switching endpoint")
@@ -2842,6 +3077,105 @@ func (s *Server) convertCodexToOpenAI(requestBody []byte, endpointName string) (
 		return nil, nil
 	}
 	return result, nil
+}
+
+// convertResponseJSONToSSE 将 Responses JSON 响应转换为 SSE 流格式
+// 用于当客户端期望流式响应但上游返回非流式 JSON 时
+func (s *Server) convertResponseJSONToSSE(jsonBody []byte) []byte {
+	var respData map[string]interface{}
+	if err := json.Unmarshal(jsonBody, &respData); err != nil {
+		s.logger.Error("Failed to parse Response JSON", err)
+		return nil
+	}
+
+	// 添加调试日志，查看实际的响应结构
+	s.logger.Debug("Converting Response JSON to SSE", map[string]interface{}{
+		"response_keys": func() []string {
+			keys := make([]string, 0, len(respData))
+			for k := range respData {
+				keys = append(keys, k)
+			}
+			return keys
+		}(),
+		"response_preview": string(jsonBody[:min(200, len(jsonBody))]),
+	})
+
+	// 构造 SSE 事件流
+	var buf bytes.Buffer
+	
+	// 1. response.created 事件
+	createdEvent := map[string]interface{}{
+		"type":     "response.created",
+		"response": respData,
+	}
+	if createdJSON, err := json.Marshal(createdEvent); err == nil {
+		buf.WriteString("event: response.created\n")
+		buf.WriteString(fmt.Sprintf("data: %s\n\n", string(createdJSON)))
+	}
+	
+	// 2. response.output_text.delta 事件（包含完整内容）
+	// Responses API 格式的结构是: {"output": [{"content": [{"text": "..."}]}]}
+	var contentText string
+	
+	// 从 Responses API 格式中提取内容
+	if output, ok := respData["output"].([]interface{}); ok && len(output) > 0 {
+		if outputItem, ok := output[0].(map[string]interface{}); ok {
+			if content, ok := outputItem["content"].([]interface{}); ok && len(content) > 0 {
+				if contentItem, ok := content[0].(map[string]interface{}); ok {
+					if text, ok := contentItem["text"].(string); ok && text != "" {
+						contentText = text
+					}
+				}
+			}
+		}
+	}
+	
+	// 如果没有找到内容，尝试从 Chat Completion 格式中提取（兼容性）
+	if contentText == "" {
+		if choices, ok := respData["choices"].([]interface{}); ok && len(choices) > 0 {
+			if choice, ok := choices[0].(map[string]interface{}); ok {
+				if message, ok := choice["message"].(map[string]interface{}); ok {
+					if content, ok := message["content"].(string); ok && content != "" {
+						contentText = content
+					}
+				}
+			}
+		}
+	}
+	
+	// 如果还是没有找到内容，尝试其他可能的字段
+	if contentText == "" {
+		if text, ok := respData["text"].(string); ok {
+			contentText = text
+		} else if content, ok := respData["content"].(string); ok {
+			contentText = content
+		}
+	}
+	
+	if contentText != "" {
+		deltaEvent := map[string]interface{}{
+			"type":  "response.output_text.delta",
+			"delta": contentText,
+		}
+		if deltaJSON, err := json.Marshal(deltaEvent); err == nil {
+			buf.WriteString("event: response.output_text.delta\n")
+			buf.WriteString(fmt.Sprintf("data: %s\n\n", string(deltaJSON)))
+		}
+	} else {
+		s.logger.Debug("No content found in Response JSON for SSE conversion")
+	}
+	
+	// 3. response.completed 事件
+	completedEvent := map[string]interface{}{
+		"type":     "response.completed",
+		"response": respData,
+	}
+	if completedJSON, err := json.Marshal(completedEvent); err == nil {
+		buf.WriteString("event: response.completed\n")
+		buf.WriteString(fmt.Sprintf("data: %s\n\n", string(completedJSON)))
+	}
+	
+	return buf.Bytes()
 }
 
 // 动态更新端点的Codex支持状态

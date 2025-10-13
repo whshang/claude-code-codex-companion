@@ -4,6 +4,26 @@
 
 CCCC (Claude Code and Codex Companion) 为 Claude Code 提供了完整的 API 代理支持，实现多端点负载均衡、故障转移和模型重写功能。零配置工具调用能力由 Toolify 社区鼎力协助打造，文档中也包含相关指引。
 
+### Codex 兼容性增强
+
+CCCC 完整支持 Codex 客户端，自动处理各种格式转换场景：
+
+**流式响应转换**：
+- ✅ **真实流式 SSE**：上游返回 `text/event-stream` 时，自动转换 Chat Completions SSE → Responses API SSE
+- ✅ **模拟流式 SSE**：上游返回 JSON 但客户端期望流式时（`stream: true`），自动执行三阶段转换：
+  1. Chat Completions JSON → Responses JSON
+  2. Responses JSON → Responses SSE 流
+  3. 立即发送并返回，避免被后续逻辑覆盖
+- ✅ **格式探测**：根据 `response_keys` 智能判断响应类型并提取内容
+- ✅ **事件完整性**：确保发送 `response.created`、`response.output_text.delta`、`response.completed` 三个核心事件
+
+**路径自适应**：
+- `/responses` 请求根据 `openai_preference` 配置智能路由
+- 自动学习端点是否原生支持 Responses API
+- 失败时自动降级到 `/chat/completions` 并转换格式
+
+详见 [AGENTS.md](AGENTS.md) 获取完整的 Codex 集成说明。
+
 ## 🚀 快速配置
 
 ### 端点URL智能路由

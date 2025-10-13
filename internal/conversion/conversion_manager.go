@@ -2,6 +2,7 @@ package conversion
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -128,6 +129,58 @@ func (cm *ConversionManager) Convert(operation string, endpoint string, unified 
 	result, err := unified()
 	cm.recordUnifiedResult(err == nil, false, operation, endpoint, err)
 	return result, ConversionModeUnified, err
+}
+
+// ConvertStream executes a streaming conversion operation using the configured mode with optional fallback
+// unified and legacy are functions that perform the actual streaming conversion
+func (cm *ConversionManager) ConvertStream(operation string, endpoint string, r io.Reader, w io.Writer, unified func(io.Reader, io.Writer) error, legacy func(io.Reader, io.Writer) error) (ConversionMode, error) {
+	if cm == nil {
+		// No manager configured, always run unified path
+		err := unified(r, w)
+		return ConversionModeUnified, err
+	}
+
+	cm.mu.RLock()
+	currentMode := cm.effectiveMode
+	legacyAvailable := legacy != nil
+	cm.mu.RUnlock()
+
+	// If effective mode is legacy but we do not have legacy implementation, force unified path
+	if currentMode == ConversionModeLegacy && !legacyAvailable {
+		currentMode = ConversionModeUnified
+	}
+
+	if currentMode == ConversionModeUnified {
+		err := unified(r, w)
+		fallbackTriggered := cm.recordUnifiedResult(err == nil, legacyAvailable, operation, endpoint, err)
+		if err == nil {
+			return ConversionModeUnified, nil
+		}
+
+		// For streaming, we cannot fallback after starting to write
+		// So we just return the error
+		if fallbackTriggered {
+			cm.logger.Info("Streaming conversion failed but cannot fallback (already started writing)", logrus.Fields{
+				"operation": operation,
+				"endpoint":  endpoint,
+				"error":     err,
+			})
+		}
+
+		return cm.getEffectiveMode(), err
+	}
+
+	// Legacy path
+	if legacyAvailable {
+		err := legacy(r, w)
+		cm.recordLegacyResult(err == nil, operation, endpoint, err)
+		return ConversionModeLegacy, err
+	}
+
+	// No legacy implementation, fallback to unified
+	err := unified(r, w)
+	cm.recordUnifiedResult(err == nil, false, operation, endpoint, err)
+	return ConversionModeUnified, err
 }
 
 // GetConfiguredMode returns the configured mode
