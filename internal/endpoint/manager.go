@@ -143,10 +143,10 @@ func (m *Manager) UpdateEndpoints(endpointConfigs []config.EndpointConfig) {
 			endpoint := NewEndpoint(cfg)
 			if m.statisticsManager != nil {
 				if err := initializeEndpointStatistics(endpoint, m.statisticsManager); err != nil {
-					log.Printf("WARNING: Failed to load statistics for new endpoint %s: %v", 
+					log.Printf("WARNING: Failed to load statistics for new endpoint %s: %v",
 						cfg.Name, err)
 				} else if endpoint.TotalRequests > 0 {
-					log.Printf("Inherited statistics for endpoint %s: TotalRequests=%d", 
+					log.Printf("Inherited statistics for endpoint %s: TotalRequests=%d",
 						cfg.Name, endpoint.TotalRequests)
 				}
 			}
@@ -164,7 +164,10 @@ func (m *Manager) UpdateEndpoints(endpointConfigs []config.EndpointConfig) {
 
 	m.endpoints = newEndpoints
 	m.selector.UpdateEndpoints(newEndpoints)
-	
+
+	// 设置动态排序器引用并触发更新
+	m.setDynamicSorterForEndpoints()
+
 	// 重新启动健康检查
 	m.startHealthChecks()
 }
@@ -346,10 +349,19 @@ func (m *Manager) cleanupRemovedEndpoints(newConfigs []config.EndpointConfig) {
 			// Endpoint was removed - delete its statistics
 			log.Printf("Cleaning up statistics for removed endpoint: %s", endpoint.Name)
 			if err := m.statisticsManager.DeleteStatistics(endpoint.ID); err != nil {
-				log.Printf("WARNING: Failed to delete statistics for removed endpoint %s: %v", 
+				log.Printf("WARNING: Failed to delete statistics for removed endpoint %s: %v",
 					endpoint.Name, err)
 			}
 		}
+	}
+}
+
+// setDynamicSorterForEndpoints 为所有端点设置动态排序器引用
+func (m *Manager) setDynamicSorterForEndpoints() {
+	// 这里需要通过adminServer来设置动态排序器引用
+	// 由于循环依赖的问题，我们通过selector来传递引用
+	if m.selector != nil {
+		m.selector.SetDynamicSorterForEndpoints(m.endpoints)
 	}
 }
 

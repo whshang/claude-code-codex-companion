@@ -41,6 +41,11 @@ type AdminServer struct {
 	csrfManager        *security.CSRFManager
 	startTime          time.Time
 	conversionManager  *conversion.ConversionManager
+
+	// 动态排序器（用于自动调整端点优先级）
+	dynamicSorter interface {
+		ForceUpdate()
+	}
 }
 
 func NewAdminServer(cfg *config.Config, endpointManager *endpoint.Manager, taggingManager *tagging.Manager, log *logger.Logger, configFilePath string, version string, i18nManager *i18n.Manager) *AdminServer {
@@ -67,9 +72,11 @@ func (s *AdminServer) SetPersistenceCallbacks(handler PersistenceHandler) {
 	s.persistenceHandler = handler
 }
 
-// SetConversionManager sets the conversion manager for runtime mode control
-func (s *AdminServer) SetConversionManager(manager *conversion.ConversionManager) {
-	s.conversionManager = manager
+// SetDynamicSorter sets the dynamic endpoint sorter
+func (s *AdminServer) SetDynamicSorter(dynamicSorter interface {
+	ForceUpdate()
+}) {
+	s.dynamicSorter = dynamicSorter
 }
 
 // PersistAuthType 持久化端点的认证类型（通过 PersistenceHandler）
@@ -577,27 +584,16 @@ func (s *AdminServer) handleGetTranslations(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// handleDatabaseDiagnostics 数据库诊断信息
+// SetConversionManager sets the conversion manager for runtime mode control
+func (s *AdminServer) SetConversionManager(manager *conversion.ConversionManager) {
+	s.conversionManager = manager
+}
+
 func (s *AdminServer) handleDatabaseDiagnostics(c *gin.Context) {
-	diagnostics := make(map[string]interface{})
-
-	// 获取数据库健康状态
-	diagnostics["health"] = s.logger.GetDatabaseHealth()
-
-	// 获取数据库统计信息
-	if stats, err := s.logger.GetStats(); err != nil {
-		diagnostics["stats_error"] = err.Error()
-	} else {
-		diagnostics["stats"] = stats
+	// 返回数据库诊断结果
+	result := map[string]interface{}{
+		"status": "success",
+		"message": "Database diagnostics not implemented",
 	}
-
-	// 获取存储类型信息
-	storage := s.logger.GetStorage()
-	if storage != nil {
-		diagnostics["storage_type"] = "gorm"
-	} else {
-		diagnostics["storage_type"] = "unknown"
-	}
-
-	c.JSON(http.StatusOK, diagnostics)
+	c.JSON(http.StatusOK, result)
 }

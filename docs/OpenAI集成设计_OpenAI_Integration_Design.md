@@ -123,7 +123,7 @@ if isCodexRequest && clientExpectsStreaming {
 
 - `supports_responses` 与 `openai_preference` 决定是否优先尝试 `/responses`。
 - `model_rewrite` 在转换前（请求）与回写后（响应）统一模型名称。
-- `native_tool_support` 与工具增强逻辑协同，确保转换后依旧具备 Tool Calling 能力。
+- 保持转换后的工具调用内容一致传递，确保调用成功。
 - `url_anthropic` 与 `url_openai` 双 URL 配置实现智能路由与格式转换。
 
 ### 相关代码
@@ -256,7 +256,7 @@ if isCodexRequest && clientExpectsStreaming {
 
 - `supports_responses` and `openai_preference` control whether `/responses` is attempted first.
 - `model_rewrite` normalises model names for both requests and responses.
-- `native_tool_support` integrates with tool enhancement so that tool calls remain functional after conversion.
+- Ensure tool-call payloads stay consistent after conversion.
 - `url_anthropic` and `url_openai` dual URL configuration enables intelligent routing and format conversion.
 
 ### Related Code

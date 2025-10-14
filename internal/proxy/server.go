@@ -1,9 +1,8 @@
 package proxy
 
 import (
-	"fmt"
-	"sync"
-	"time"
+    "fmt"
+    "sync"
 
 	"claude-code-codex-companion/internal/config"
 	"claude-code-codex-companion/internal/conversion"
@@ -12,11 +11,11 @@ import (
 	"claude-code-codex-companion/internal/i18n"
 	"claude-code-codex-companion/internal/logger"
 	"claude-code-codex-companion/internal/modelrewrite"
-	"claude-code-codex-companion/internal/statistics"
-	"claude-code-codex-companion/internal/tagging"
-	"claude-code-codex-companion/internal/toolcall"
-	"claude-code-codex-companion/internal/validator"
-	"claude-code-codex-companion/internal/web"
+    "claude-code-codex-companion/internal/statistics"
+    "claude-code-codex-companion/internal/tagging"
+    "claude-code-codex-companion/internal/validator"
+    "claude-code-codex-companion/internal/web"
+    "claude-code-codex-companion/internal/utils" // 新增：导入utils包
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,11 +34,11 @@ type Server struct {
 	configFilePath  string
 	configMutex     sync.Mutex // 新增：保护配置文件操作的互斥锁
 
-	// Tool Calling enhancer (auto-enabled when tools provided by client)
-	toolEnhancer *toolcall.Enhancer
-
 	// Conversion manager for format adaptation
 	conversionManager *conversion.ConversionManager
+
+	// 动态端点排序器
+	dynamicSorter *utils.DynamicEndpointSorter
 }
 
 func NewServer(cfg *config.Config, configFilePath string, version string) (*Server, error) {
@@ -113,17 +112,12 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 		configFilePath:  configFilePath,
 	}
 
-	// Initialize tool enhancer with sensible defaults (zero-config enable when tools present)
-	// Use defaults from config.Default, with fallbacks
-	// Zero-config defaults for tool calling enhancer
-	ttl := 30 * time.Minute
-	server.toolEnhancer = toolcall.NewEnhancer(toolcall.CacheConfig{
-		MaxSize: 100,
-		TTL:     ttl,
-	})
+	// 初始化动态端点排序器
+	server.dynamicSorter = utils.NewDynamicEndpointSorter()
 
 	server.conversionManager = manager
 	adminServer.SetConversionManager(manager)
+	adminServer.SetDynamicSorter(server.dynamicSorter)
 
 	// 设置持久化回调，让AdminServer可以被Server调用
 	adminServer.SetPersistenceCallbacks(server)
@@ -161,7 +155,23 @@ func (s *Server) setupRoutes() {
 	s.router.Any("/chat/completions", s.loggingMiddleware(), s.handleProxy)
 }
 
+// Start starts the proxy server
 func (s *Server) Start() error {
+	// 根据配置启用动态排序
+	if s.config.Server.AutoSortEndpoints {
+		s.dynamicSorter.Enable()
+		// 将端点转换为动态端点类型并设置引用
+		dynamicEndpoints := make([]utils.DynamicEndpoint, 0)
+		for _, ep := range s.endpointManager.GetAllEndpoints() {
+			ep.SetDynamicSorter(s.dynamicSorter)
+			dynamicEndpoints = append(dynamicEndpoints, ep)
+		}
+		s.dynamicSorter.SetEndpoints(dynamicEndpoints)
+		s.logger.Info("✅ 启用动态端点排序功能")
+	} else {
+		s.logger.Info("ℹ️ 动态端点排序功能已禁用")
+	}
+
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
 	s.logger.Info(fmt.Sprintf("Starting proxy server on %s:%d", s.config.Server.Host, s.config.Server.Port))
 	return s.router.Run(addr)
@@ -365,8 +375,6 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 	ep.AuthHeaderMutex.RUnlock()
 
 	openAIPreference := ep.OpenAIPreference
-	nativeToolSupport := ep.NativeToolSupport
-	toolEnhMode := ep.ToolEnhancementMode
 	countTokensEnabled := ep.CountTokensEnabled
 	supportsResponses := ep.NativeCodexFormat
 	if supportsResponses == nil {
@@ -433,36 +441,7 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 		}
 	}
 
-	// 3. 持久化原生工具调用支持（当有学习结果或明确设置时）
-	if nativeToolSupport != nil {
-		var configToolSupportValue bool
-		configToolSupportSet := false
-		s.configMutex.Lock()
-		for i := range s.config.Endpoints {
-			if s.config.Endpoints[i].Name == ep.Name {
-				if s.config.Endpoints[i].NativeToolSupport != nil {
-					configToolSupportValue = *s.config.Endpoints[i].NativeToolSupport
-					configToolSupportSet = true
-				}
-				break
-			}
-		}
-		s.configMutex.Unlock()
-
-		if !configToolSupportSet || configToolSupportValue != *nativeToolSupport {
-			s.logger.Info(fmt.Sprintf("🧩 Learning: Detected native tool support=%v for endpoint '%s'", *nativeToolSupport, ep.Name), nil)
-			if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
-				cfg.NativeToolSupport = nativeToolSupport
-				return nil
-			}); err != nil {
-				s.logger.Error(fmt.Sprintf("Failed to persist native tool support for endpoint '%s'", ep.Name), err)
-			} else {
-				needsPersist = true
-			}
-		}
-	}
-
-	// 4. 持久化对 /responses 支持的学习结果
+	// 3. 持久化对 /responses 支持的学习结果
 	if supportsResponses != nil {
 		var configSupportsValue bool
 		configSupportsSet := false
@@ -517,17 +496,5 @@ func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 
 	if needsPersist {
 		s.logger.Info(fmt.Sprintf("🎓 Successfully persisted learned configuration for endpoint '%s'", ep.Name), nil)
-	}
-
-	// 6. 工具增强模式（如果被设置，持久化）
-	if toolEnhMode != "" {
-		if err := s.updateEndpointConfig(ep.Name, func(cfg *config.EndpointConfig) error {
-			cfg.ToolEnhancementMode = toolEnhMode
-			return nil
-		}); err != nil {
-			s.logger.Error(fmt.Sprintf("Failed to persist tool enhancement mode for endpoint '%s'", ep.Name), err)
-		} else {
-			s.logger.Info(fmt.Sprintf("✓ Persisted tool enhancement mode '%s' for endpoint '%s'", toolEnhMode, ep.Name), nil)
-		}
 	}
 }

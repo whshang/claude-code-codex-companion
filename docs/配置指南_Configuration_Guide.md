@@ -30,7 +30,6 @@ endpoints:
 | `openai_preference` | `auto` / `responses` / `chat_completions`，控制首选请求格式。 |
 | `model_rewrite` | 使用通配符将客户端模型映射为供应商模型，详见《[模型重写设计](模型重写设计_Model_Rewrite_Design.md)》。 |
 | `parameter_overrides` | 为特定端点覆盖 `temperature`、`max_tokens` 等参数。 |
-| `native_tool_support` / `tool_enhancement_mode` | 控制工具调用增强策略，详见《[工具调用增强](工具调用增强_Tool_Calling_Enhancement.md)》。 |
 
 ### 配置流程
 
@@ -72,7 +71,6 @@ endpoints:
 | `openai_preference` | `auto` / `responses` / `chat_completions`, defines the preferred format. |
 | `model_rewrite` | Maps client models to provider models via wildcards; see [Model Rewrite Design](模型重写设计_Model_Rewrite_Design.md). |
 | `parameter_overrides` | Endpoint-level overrides for `temperature`, `max_tokens`, etc. |
-| `native_tool_support` / `tool_enhancement_mode` | Governs tool-calling enhancement; see [Tool Calling Enhancement](工具调用增强_Tool_Calling_Enhancement.md). |
 
 ### Workflow
 

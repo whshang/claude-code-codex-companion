@@ -104,43 +104,6 @@ func (s *Server) sendFailureResponse(c *gin.Context, requestID string, startTime
 		}
 	}
 
-	// 工具调用增强信息
-	if val, exists := c.Get("tool_enhanced"); exists {
-		if applied, ok := val.(bool); ok {
-			requestLog.ToolEnhancementApplied = applied
-		}
-	}
-	if val, exists := c.Get("tool_enhancement_mode_effective"); exists {
-		if mode, ok := val.(string); ok {
-			requestLog.ToolEnhancementMode = mode
-		}
-	}
-	if val, exists := c.Get("tool_call_count"); exists {
-		if count, ok := val.(int); ok {
-			requestLog.ToolCallCount = count
-			if count > 0 {
-				requestLog.ToolCallsDetected = true
-			}
-		}
-	}
-	if val, exists := c.Get("tool_call_detected"); exists {
-		if detected, ok := val.(bool); ok {
-			requestLog.ToolCallsDetected = detected || requestLog.ToolCallsDetected
-		}
-	}
-	if val, exists := c.Get("tool_native_support_value"); exists {
-		switch v := val.(type) {
-		case bool:
-			b := v
-			requestLog.ToolNativeSupport = &b
-		case *bool:
-			requestLog.ToolNativeSupport = v
-		}
-	}
-	if requestLog.ToolEnhancementMode == "" {
-		requestLog.ToolEnhancementMode = "auto"
-	}
-
 	s.logger.LogRequest(requestLog)
 	s.sendProxyError(c, http.StatusBadGateway, errorType, requestLog.Error, requestID)
 }
@@ -180,39 +143,6 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 		requestLog.OriginalRequestURL = c.Request.URL.String()
 		requestLog.OriginalRequestHeaders = utils.HeadersToMap(c.Request.Header)
 
-		// 工具调用增强上下文
-		if val, exists := c.Get("tool_enhanced"); exists {
-			if applied, ok := val.(bool); ok {
-				requestLog.ToolEnhancementApplied = applied
-			}
-		}
-		if val, exists := c.Get("tool_enhancement_mode_effective"); exists {
-			if mode, ok := val.(string); ok {
-				requestLog.ToolEnhancementMode = mode
-			}
-		}
-		if val, exists := c.Get("tool_call_count"); exists {
-			if count, ok := val.(int); ok {
-				requestLog.ToolCallCount = count
-				if count > 0 {
-					requestLog.ToolCallsDetected = true
-				}
-			}
-		}
-		if val, exists := c.Get("tool_call_detected"); exists {
-			if detected, ok := val.(bool); ok {
-				requestLog.ToolCallsDetected = detected || requestLog.ToolCallsDetected
-			}
-		}
-		if val, exists := c.Get("tool_native_support_value"); exists {
-			switch v := val.(type) {
-			case bool:
-				b := v
-				requestLog.ToolNativeSupport = &b
-			case *bool:
-				requestLog.ToolNativeSupport = v
-			}
-		}
 	}
 
 	if len(originalRequestBody) > 0 {

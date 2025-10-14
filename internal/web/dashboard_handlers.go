@@ -2,6 +2,7 @@ package web
 
 import (
 	"claude-code-codex-companion/internal/endpoint"
+	"sort"
 
 	"github.com/gin-gonic/gin"
 )
@@ -111,6 +112,11 @@ func (s *AdminServer) handleDashboard(c *gin.Context) {
 
 func (s *AdminServer) handleEndpointsPage(c *gin.Context) {
 	endpoints := s.endpointManager.GetAllEndpoints()
+
+	// 按优先级排序端点
+	sort.Slice(endpoints, func(i, j int) bool {
+		return endpoints[i].Priority < endpoints[j].Priority
+	})
 
 	type EndpointStats struct {
 		*endpoint.Endpoint

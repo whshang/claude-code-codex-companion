@@ -272,69 +272,44 @@
 
                         <!-- Advanced Configuration Tab (合并高级参数1和2) -->
                         <div class="tab-pane fade" id="advanced-tab-pane" role="tabpanel" aria-labelledby="advanced-tab">
-                            <div class="mb-4">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="mb-0">
-                                        <i class="fas fa-code-branch"></i> <span>/responses 兼容策略</span>
-                                    </h6>
-                                </div>
-                                <div class="row mb-3">
-                                    <div class="col-6">
-                                        <label for="supports-responses" class="form-label">/responses 支持声明</label>
-                                        <select class="form-select" id="supports-responses">
-                                            <option value="">自动探测（推荐）</option>
-                                            <option value="true">始终视为原生支持（直接请求 /responses）</option>
-                                            <option value="false">始终转换为 /chat/completions</option>
-                                        </select>
-                                        <small class="form-text text-muted">留空表示由代理自动学习，适合大多数场景</small>
-                                        <div class="mt-2" id="supports-runtime-wrapper">
-                                            <span class="badge bg-secondary" id="supports-runtime-indicator">当前学习：未知</span>
-                                            <small class="text-muted d-block" id="supports-runtime-note">根据最近一次请求自动更新</small>
+                            <div class="row g-4 mb-4">
+                                <div class="col-12 col-lg-6">
+                                    <div class="card border-0 shadow-sm h-100">
+                                        <div class="card-body p-3">
+                                            <div class="d-flex align-items-center justify-content-between mb-3">
+                                                <h6 class="mb-0">
+                                                    <i class="fas fa-code-branch"></i> <span>/responses 兼容策略</span>
+                                                </h6>
+                                            </div>
+                                            <label for="responses-mode" class="form-label">Responses 支持模式</label>
+                                            <select class="form-select" id="responses-mode">
+                                                <option value="auto">自动探测上游接口（推荐）</option>
+                                                <option value="native">仅使用上游原生 /responses</option>
+                                                <option value="convert">始终向上游发送 /chat/completions</option>
+                                            </select>
+                                            <small class="form-text text-muted">按上游接口能力自动选择请求格式；自动模式会记忆反馈以加速后续调用</small>
+                                            <div class="d-flex align-items-center flex-wrap gap-2 mt-3" id="supports-runtime-wrapper">
+                                                <span class="badge bg-secondary" id="supports-runtime-indicator">上次成功：未知</span>
+                                                <small class="text-muted" id="supports-runtime-note">当前策略：自动探测</small>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="col-6">
-                                        <label for="openai-preference" class="form-label">OpenAI 首选格式</label>
-                                        <select class="form-select" id="openai-preference">
-                                            <option value="auto">自动检测并学习（推荐）</option>
-                                            <option value="responses">优先尝试 /responses（原生 Responses）</option>
-                                            <option value="chat_completions">直接使用 /chat/completions（旧格式）</option>
-                                        </select>
-                                        <small class="form-text text-muted">设置Codex客户端首选路径；仍可在运行时根据探测结果自动回退</small>
-                                    </div>
                                 </div>
-                            </div>
-                            <!-- 工具调用增强配置 -->
-                            <div class="mb-4">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="mb-0">
-                                        <i class="fas fa-tools"></i> <span>工具调用增强</span>
-                                    </h6>
-                                </div>
-                                <div class="row mb-3">
-                                    <div class="col-6">
-                                        <label for="native-tool-support" class="form-label">原生工具支持（可选）</label>
-                                        <select class="form-select" id="native-tool-support">
-                                            <option value="">未设置 / 自动学习</option>
-                                            <option value="true">是（原生支持）</option>
-                                            <option value="false">否（不原生支持）</option>
-                                        </select>
-                                        <small class="form-text text-muted">留空表示由系统自动学习与更新</small>
+                                <div class="col-12 col-lg-6">
+                                    <div class="card border-0 shadow-sm h-100">
+                                        <div class="card-body p-3">
+                                            <div class="d-flex align-items-center justify-content-between mb-3">
+                                                <h6 class="mb-0">
+                                                    <i class="fas fa-sliders-h"></i> <span>高级请求控制</span>
+                                                </h6>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="count-tokens-enabled" checked>
+                                                <label class="form-check-label" for="count-tokens-enabled">允许参与 /count_tokens 估算</label>
+                                            </div>
+                                            <small class="form-text text-muted">关闭后该端点仅处理对话请求，不参与 token 预估。</small>
+                                        </div>
                                     </div>
-                                    <div class="col-6">
-                                        <label for="tool-enhancement-mode" class="form-label">工具增强模式</label>
-                                        <select class="form-select" id="tool-enhancement-mode">
-                                            <option value="">默认（auto）</option>
-                                            <option value="auto">auto（自动：优先原生，否或未知时注入）</option>
-                                            <option value="force">force（总是注入增强）</option>
-                                            <option value="disable">disable（从不注入增强）</option>
-                                        </select>
-                                        <small class="form-text text-muted">设置代理在请求包含 tools 时的注入策略</small>
-                                    </div>
-                                </div>
-                                <div class="form-check mb-3">
-                                    <input class="form-check-input" type="checkbox" id="count-tokens-enabled" checked>
-                                    <label class="form-check-label" for="count-tokens-enabled">允许参与 /count_tokens 估算</label>
-                                    <small class="form-text text-muted">关闭后该端点仅处理对话请求，不参与 token 预估。</small>
                                 </div>
                             </div>
                             <!-- HTTP Header 覆盖配置区域 -->

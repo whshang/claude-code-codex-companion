@@ -89,7 +89,7 @@ if delta, ok := choice["delta"].(map[string]interface{}); ok {
 
 ### 为什么工具调用会导致这个问题？
 
-根据 Toolify 增强和现代 AI Agent 模式：
+根据现代 AI Agent 模式：
 - 当用户请求包含代码操作时（如 "搜索 gpt-4o"），LLM 会返回工具调用
 - 这些工具调用在流式响应中表现为 `delta.tool_calls` 字段
 - 如果转换函数不处理 `tool_calls`，整个流式响应会中断或错乱

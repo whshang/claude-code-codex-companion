@@ -4,23 +4,35 @@ package conversion
 
 // OpenAIRequest OpenAI Chat Completions 请求（2025 以后官方推荐字段名）
 type OpenAIRequest struct {
-	Model               string      `json:"model"`
-	Messages            []OpenAIMessage `json:"messages"`
-	Tools               []OpenAITool    `json:"tools,omitempty"`       // functions
-	ToolChoice          interface{}     `json:"tool_choice,omitempty"` // "none"|"auto"|{"type":"function","function":{"name":...}}|"required"
-	Temperature         *float64    `json:"temperature,omitempty"`
-	TopP                *float64    `json:"top_p,omitempty"`
-	MaxCompletionTokens *int        `json:"max_completion_tokens,omitempty"` // OpenAI: 输出最大 token
-	MaxOutputTokens     *int        `json:"max_output_tokens,omitempty"`     // OpenAI: 新的输出最大 token 字段
-	// 兼容保留：
-	MaxTokens           *int        `json:"max_tokens,omitempty"` // 老字段，有些代理仍在用
-	Stream              *bool       `json:"stream,omitempty"`
-	Stop                []string    `json:"stop,omitempty"`
-	User                string      `json:"user,omitempty"`
-	ParallelToolCalls   *bool       `json:"parallel_tool_calls,omitempty"`
+	Model               string                 `json:"model"`
+	Messages            []OpenAIMessage        `json:"messages"`
+	Tools               []OpenAITool           `json:"tools,omitempty"`       // functions
+	ToolChoice          interface{}            `json:"tool_choice,omitempty"` // "none"|"auto"|{"type":"function","function":{"name":...}}|"required"
+	Temperature         *float64               `json:"temperature,omitempty"`
+	TopP                *float64               `json:"top_p,omitempty"`
+	MaxCompletionTokens *int                   `json:"max_completion_tokens,omitempty"` // OpenAI: 输出最大 token
+	MaxOutputTokens     *int                   `json:"max_output_tokens,omitempty"`     // OpenAI: 新的输出最大 token 字段
+	MaxTokens           *int                   `json:"max_tokens,omitempty"`            // 兼容保留：老字段，有些代理仍在用
+	Stream              *bool                  `json:"stream,omitempty"`
+	Stop                []string               `json:"stop,omitempty"`
+	User                string                 `json:"user,omitempty"`
+	ParallelToolCalls   *bool                  `json:"parallel_tool_calls,omitempty"`
+	// 🆕 采样控制参数 (参考 chat2response)
+	PresencePenalty     *float64               `json:"presence_penalty,omitempty"`  // 存在惩罚 (-2.0 to 2.0)
+	FrequencyPenalty    *float64               `json:"frequency_penalty,omitempty"` // 频率惩罚 (-2.0 to 2.0)
+	LogitBias           map[string]float64     `json:"logit_bias,omitempty"`        // token ID 到偏置值的映射
+	N                   *int                   `json:"n,omitempty"`                 // 生成多个候选响应
+	// 🆕 输出格式控制
+	ResponseFormat      *OpenAIResponseFormat  `json:"response_format,omitempty"`   // {"type":"json_object"|"text",...}
 	// 推理相关字段 (o1 模型)
-	ReasoningEffort     *string     `json:"reasoning_effort,omitempty"`     // "low"|"medium"|"high" 推理强度
-	MaxReasoningTokens  *int        `json:"max_reasoning_tokens,omitempty"` // 推理阶段的最大 token 数
+	ReasoningEffort     *string                `json:"reasoning_effort,omitempty"`     // "low"|"medium"|"high" 推理强度
+	MaxReasoningTokens  *int                   `json:"max_reasoning_tokens,omitempty"` // 推理阶段的最大 token 数
+}
+
+// OpenAIResponseFormat 定义输出格式约束
+type OpenAIResponseFormat struct {
+	Type   string                 `json:"type"`             // "text"|"json_object"|"json_schema"
+	Schema map[string]interface{} `json:"schema,omitempty"` // 当 type="json_schema" 时的 JSON Schema
 }
 
 // OpenAIMessage OpenAI 消息结构

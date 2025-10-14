@@ -27,7 +27,6 @@ type EndpointTestResult struct {
 	URL                string              `json:"url"`                           // 测试的URL
 	PerformanceMetrics *PerformanceMetrics `json:"performance_metrics,omitempty"` // 详细性能指标
     ModelRewrite       *ModelRewriteInfo   `json:"model_rewrite,omitempty"`       // 模型重写信息
-    ToolSupport        []*ToolSupportInfo  `json:"tool_support,omitempty"`        // 原生工具调用支持探测结果
 }
 
 // PerformanceMetrics 性能指标
@@ -52,15 +51,6 @@ type BatchTestResult struct {
 	EndpointName string                `json:"endpoint_name"`
 	Results      []*EndpointTestResult `json:"results"`
 	TotalTime    int64                 `json:"total_time"` // 总耗时(毫秒)
-}
-
-// ToolSupportInfo 工具调用支持测试结果
-type ToolSupportInfo struct {
-    Format        string `json:"format"`          // "anthropic" | "openai"
-    Path          string `json:"path,omitempty"`  // OpenAI下实际测试路径：/chat/completions|/responses
-    Supported     bool   `json:"supported"`       // 是否检测到原生工具调用字段
-    ToolCalls     int    `json:"tool_calls"`      // 检测到的工具调用数量
-    Error         string `json:"error,omitempty"` // 错误/不支持原因
 }
 
 // testEndpointFormat 测试单个端点的单个格式
@@ -777,37 +767,8 @@ func (s *AdminServer) testSingleEndpoint(ep *endpoint.Endpoint) *BatchTestResult
 			s.logger.Info(fmt.Sprintf("  ✅ OpenAI format test passed (%dms)", openaiResult.ResponseTime), nil)
 		} else {
 			s.logger.Info(fmt.Sprintf("  ❌ OpenAI format test failed: %s", openaiResult.Error), nil)
-    }
-
-    // 追加：原生工具调用支持探测（非流式，快速）
-    // Anthropic tools
-    if ep.URLAnthropic != "" {
-        if ts := s.testAnthropicToolSupport(ep, 20*time.Second); ts != nil {
-            // 将结果附加到对应格式的测试结果中，便于前端聚合
-            for _, r := range result.Results {
-                if r.Format == "anthropic" {
-                    r.ToolSupport = append(r.ToolSupport, ts)
-                }
-            }
-            s.logger.Info(fmt.Sprintf("  🧩 Anthropic tool support: %v (tool_calls=%d)", ts.Supported, ts.ToolCalls), nil)
-            // 学习并回写（优先以任一格式支持为 true）
-            s.learnAndPersistToolSupport(ep, ts.Supported)
-        }
-    }
-    // OpenAI tools（优先用端点偏好路径，失败时自动切换）
-    if ep.URLOpenAI != "" {
-        if ts := s.testOpenAIToolSupport(ep, 20*time.Second); ts != nil {
-            for _, r := range result.Results {
-                if r.Format == "openai" {
-                    r.ToolSupport = append(r.ToolSupport, ts)
-                }
-            }
-            s.logger.Info(fmt.Sprintf("  🧩 OpenAI tool support (%s): %v (tool_calls=%d)", ts.Path, ts.Supported, ts.ToolCalls), nil)
-            s.learnAndPersistToolSupport(ep, ts.Supported)
-        }
-    }
+		}
 	}
-
 	result.TotalTime = time.Since(startTime).Milliseconds()
 	s.logger.Info(fmt.Sprintf("📊 Endpoint %s test completed in %dms", ep.Name, result.TotalTime), nil)
 
@@ -821,219 +782,6 @@ func (s *AdminServer) TestEndpoint(endpointName string) *BatchTestResult {
         return &BatchTestResult{EndpointName: endpointName, Results: []*EndpointTestResult{&EndpointTestResult{Error: "endpoint not found"}}}
     }
     return s.testSingleEndpoint(ep)
-}
-
-// learnAndPersistToolSupport 基于探测结果学习端点原生工具支持，并持久化
-func (s *AdminServer) learnAndPersistToolSupport(ep *endpoint.Endpoint, supported bool) {
-    if ep == nil {
-        return
-    }
-    // 如果此前未知或不同，则更新
-    if ep.NativeToolSupport == nil || (ep.NativeToolSupport != nil && *ep.NativeToolSupport != supported) {
-        val := supported
-        ep.NativeToolSupport = &val
-        if s.persistenceHandler != nil {
-            s.persistenceHandler.PersistEndpointLearning(ep)
-        }
-    }
-}
-
-// testOpenAIToolSupport 检测 OpenAI 端点是否原生支持工具调用（tool_calls）
-func (s *AdminServer) testOpenAIToolSupport(ep *endpoint.Endpoint, timeout time.Duration) *ToolSupportInfo {
-    // 优先使用端点偏好路径
-    path := s.selectOpenAIPath(ep)
-    // 构造请求体（chat/completions 更通用）
-    buildBody := func(useResponses bool) ([]byte, error) {
-        if useResponses {
-            // Responses API：使用 input + tools
-            req := map[string]interface{}{
-                "model": s.selectTestModel(ep, "openai"),
-                "input": "Please call the get_weather tool for city=Shanghai.",
-                "max_tokens": 32,
-                "tools": []map[string]interface{}{
-                    {
-                        "type": "function",
-                        "function": map[string]interface{}{
-                            "name": "get_weather",
-                            "description": "Get weather by city",
-                            "parameters": map[string]interface{}{
-                                "type": "object",
-                                "properties": map[string]interface{}{
-                                    "city": map[string]interface{}{"type": "string"},
-                                },
-                                "required": []string{"city"},
-                            },
-                        },
-                    },
-                },
-            }
-            return json.Marshal(req)
-        }
-        // Chat Completions：messages + tools + tool_choice
-        req := map[string]interface{}{
-            "model": s.selectTestModel(ep, "openai"),
-            "max_tokens": 32,
-            "messages": []map[string]interface{}{
-                {"role": "user", "content": "Please call the get_weather tool for city=Shanghai."},
-            },
-            "tool_choice": "auto",
-            "tools": []map[string]interface{}{
-                {
-                    "type": "function",
-                    "function": map[string]interface{}{
-                        "name": "get_weather",
-                        "description": "Get weather by city",
-                        "parameters": map[string]interface{}{
-                            "type": "object",
-                            "properties": map[string]interface{}{
-                                "city": map[string]interface{}{"type": "string"},
-                            },
-                            "required": []string{"city"},
-                        },
-                    },
-                },
-            },
-        }
-        return json.Marshal(req)
-    }
-
-    tryPaths := []string{path}
-    if path == "/responses" {
-        tryPaths = []string{"/responses", "/chat/completions"}
-    } else {
-        tryPaths = []string{"/chat/completions", "/responses"}
-    }
-
-    for _, p := range tryPaths {
-        body, _ := buildBody(p == "/responses")
-        url := ep.URLOpenAI + p
-        ctx, cancel := context.WithTimeout(context.Background(), timeout)
-        defer cancel()
-        req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-        req.Header.Set("Content-Type", "application/json")
-        if auth, err := ep.GetAuthHeader(); err == nil && auth != "" {
-            req.Header.Set("Authorization", auth)
-        }
-        if p == "/responses" {
-            req.Header.Set("Openai-Beta", "responses=v1")
-        }
-        client := &http.Client{Timeout: timeout}
-        resp, err := client.Do(req)
-        if err != nil {
-            continue
-        }
-        data, _ := io.ReadAll(resp.Body)
-        resp.Body.Close()
-        if resp.StatusCode < 200 || resp.StatusCode >= 300 || len(data) == 0 {
-            continue
-        }
-        // 解析是否有 tool_calls
-        var m map[string]interface{}
-        if json.Unmarshal(data, &m) != nil {
-            continue
-        }
-        // chat.completions: choices[0].message.tool_calls
-        if p == "/chat/completions" {
-            if choices, ok := m["choices"].([]interface{}); ok && len(choices) > 0 {
-                if first, ok := choices[0].(map[string]interface{}); ok {
-                    if msg, ok := first["message"].(map[string]interface{}); ok {
-                        if tc, ok := msg["tool_calls"].([]interface{}); ok && len(tc) > 0 {
-                            return &ToolSupportInfo{Format: "openai", Path: p, Supported: true, ToolCalls: len(tc)}
-                        }
-                    }
-                }
-            }
-        } else {
-            // responses: output must contain tool calls under top-level? APIs vary; fallback: check presence of tool_calls anywhere
-            if _, has := m["tool_calls"]; has {
-                if arr, ok := m["tool_calls"].([]interface{}); ok {
-                    return &ToolSupportInfo{Format: "openai", Path: p, Supported: true, ToolCalls: len(arr)}
-                }
-            }
-            // Some providers wrap under choices/message similar to chat
-            if choices, ok := m["choices"].([]interface{}); ok && len(choices) > 0 {
-                if first, ok := choices[0].(map[string]interface{}); ok {
-                    if msg, ok := first["message"].(map[string]interface{}); ok {
-                        if tc, ok := msg["tool_calls"].([]interface{}); ok && len(tc) > 0 {
-                            return &ToolSupportInfo{Format: "openai", Path: p, Supported: true, ToolCalls: len(tc)}
-                        }
-                    }
-                }
-            }
-        }
-        // 未检测到则继续下一个路径
-    }
-    return &ToolSupportInfo{Format: "openai", Path: path, Supported: false, ToolCalls: 0}
-}
-
-// testAnthropicToolSupport 检测 Anthropic 端点是否原生支持工具调用（tool_use）
-func (s *AdminServer) testAnthropicToolSupport(ep *endpoint.Endpoint, timeout time.Duration) *ToolSupportInfo {
-    url := ep.URLAnthropic + "/v1/messages"
-    reqBody := map[string]interface{}{
-        "model": s.selectTestModel(ep, "anthropic"),
-        "max_tokens": 32,
-        "stream": false,
-        "tools": []map[string]interface{}{
-            {
-                "name": "get_weather",
-                "description": "Get weather by city",
-                "input_schema": map[string]interface{}{
-                    "type": "object",
-                    "properties": map[string]interface{}{
-                        "city": map[string]interface{}{"type": "string"},
-                    },
-                    "required": []string{"city"},
-                },
-            },
-        },
-        "messages": []map[string]interface{}{
-            {"role": "user", "content": "Please call the get_weather tool for city=Shanghai."},
-        },
-    }
-    body, _ := json.Marshal(reqBody)
-    ctx, cancel := context.WithTimeout(context.Background(), timeout)
-    defer cancel()
-    req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-    req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("anthropic-version", "2023-06-01")
-    if auth, err := ep.GetAuthHeader(); err == nil && auth != "" {
-        // try both headers for compatibility
-        req.Header.Set("Authorization", auth)
-        if strings.HasPrefix(auth, "Bearer ") {
-            req.Header.Set("x-api-key", strings.TrimPrefix(auth, "Bearer "))
-        } else {
-            req.Header.Set("x-api-key", auth)
-        }
-    }
-    client := &http.Client{Timeout: timeout}
-    resp, err := client.Do(req)
-    if err != nil {
-        return &ToolSupportInfo{Format: "anthropic", Supported: false, Error: err.Error()}
-    }
-    data, _ := io.ReadAll(resp.Body)
-    resp.Body.Close()
-    if resp.StatusCode < 200 || resp.StatusCode >= 300 || len(data) == 0 {
-        return &ToolSupportInfo{Format: "anthropic", Supported: false, Error: fmt.Sprintf("HTTP %d", resp.StatusCode)}
-    }
-    var m map[string]interface{}
-    if json.Unmarshal(data, &m) != nil {
-        return &ToolSupportInfo{Format: "anthropic", Supported: false, Error: "invalid JSON"}
-    }
-    // Anthropic messages: content[] with type=tool_use
-    if contentArr, ok := m["content"].([]interface{}); ok {
-        count := 0
-        for _, it := range contentArr {
-            if blk, ok := it.(map[string]interface{}); ok {
-                if t, _ := blk["type"].(string); t == "tool_use" {
-                    count++
-                }
-            }
-        }
-        if count > 0 {
-            return &ToolSupportInfo{Format: "anthropic", Supported: true, ToolCalls: count}
-        }
-    }
-    return &ToolSupportInfo{Format: "anthropic", Supported: false}
 }
 
 // testAllEndpoints 并行批量测试所有端点

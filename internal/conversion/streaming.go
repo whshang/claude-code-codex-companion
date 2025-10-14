@@ -16,12 +16,12 @@ const (
 
 // StreamChatCompletionsToResponsesUnified 将 OpenAI Chat SSE 转换为 Responses SSE（统一模式实现）
 func StreamChatCompletionsToResponsesUnified(r io.Reader, w io.Writer) error {
-	return streamChatCompletionsToResponsesUnified(r, w)
+	return StreamChatToResponsesRealtime(r, w)
 }
 
-// StreamChatCompletionsToResponses 保持原函数名，默认指向统一模式
+// StreamChatCompletionsToResponses 保持原函数名，默认指向实时流式转换
 func StreamChatCompletionsToResponses(r io.Reader, w io.Writer) error {
-	return streamChatCompletionsToResponsesUnified(r, w)
+	return StreamChatToResponsesRealtime(r, w)
 }
 
 func streamChatCompletionsToResponsesUnified(r io.Reader, w io.Writer) error {
@@ -34,48 +34,48 @@ func streamChatCompletionsToResponsesUnified(r io.Reader, w io.Writer) error {
 	// var usage *OpenAIUsage // 暂时不使用
 
 	// 流式读取和处理SSE数据
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		
-		// 跳过空行和注释
-		if line == "" || strings.HasPrefix(line, ":") {
-			continue
-		}
-		
-		// 处理data行
-		if strings.HasPrefix(line, "data: ") {
-			dataContent := strings.TrimPrefix(line, "data: ")
-			
-			// 检查结束标记
-			if dataContent == "[DONE]" {
-				break
-			}
-			
-			// 解析JSON chunk
-			var chunk OpenAIStreamChunk
-			if err := json.Unmarshal([]byte(dataContent), &chunk); err != nil {
-				continue // 跳过无效chunk
-			}
-			
-			chunks = append(chunks, chunk)
-			
-			// 记录响应信息
-			if chunk.ID != "" {
-				respID = chunk.ID
-			}
-			if chunk.Model != "" {
-				model = chunk.Model
-			}
-			// 暂时不处理usage，因为我们需要在流结束时收集
-		}
-	}
+    for scanner.Scan() {
+        line := strings.TrimSpace(scanner.Text())
+        
+        // 跳过空行和注释
+        if line == "" || strings.HasPrefix(line, ":") {
+            continue
+        }
+        
+        // 处理data行（兼容 "data:" 与 "data: ")
+        if strings.HasPrefix(line, "data:") {
+            dataContent := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+            
+            // 检查结束标记
+            if dataContent == "[DONE]" {
+                break
+            }
+            
+            // 解析JSON chunk
+            var chunk OpenAIStreamChunk
+            if err := json.Unmarshal([]byte(dataContent), &chunk); err != nil {
+                continue // 跳过无效chunk
+            }
+            
+            chunks = append(chunks, chunk)
+            
+            // 记录响应信息
+            if chunk.ID != "" {
+                respID = chunk.ID
+            }
+            if chunk.Model != "" {
+                model = chunk.Model
+            }
+            // 暂时不处理usage，因为我们需要在流结束时收集
+        }
+    }
 
 	if err := scanner.Err(); err != nil {
 		return err
 	}
 
 	// 构建并写入Responses格式的SSE
-	sse, err := buildResponsesSSEFromChunks(chunks, respID, model, nil)
+    sse, err := buildResponsesSSEFromChunks(chunks, respID, model, nil)
 	if err != nil {
 		return err
 	}

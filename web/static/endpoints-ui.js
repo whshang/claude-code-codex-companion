@@ -118,20 +118,6 @@ function rebuildTable(endpoints) {
         const chips = [];
         // Auth first (merged column)
         chips.push(authTypeBadge);
-        // Tool support
-        const enhMode = (endpoint.tool_enhancement_mode || 'auto').toLowerCase();
-        if (endpoint.native_tool_support === true) {
-            chips.push('<span class="badge bg-success" data-bs-toggle="tooltip" title="工具调用：原生支持（不注入增强）"><i class="fas fa-tools"></i></span>');
-        } else {
-            let modeLabel = enhMode || 'auto';
-            let cls = 'bg-info';
-            if (modeLabel === 'force') cls = 'bg-warning';
-            if (modeLabel === 'disable') cls = 'bg-secondary';
-            let tip = '工具增强模式：auto（原生不支持/未知时注入）';
-            if (modeLabel === 'force') tip = '工具增强模式：force（始终注入增强）';
-            if (modeLabel === 'disable') tip = '工具增强模式：disable（从不注入增强）';
-            chips.push(`<span class="badge ${cls}" data-bs-toggle="tooltip" title="${tip}"><i class="fas fa-tools"></i></span>`);
-        }
         // OpenAI preference
         const pref = (endpoint.openai_preference || 'auto');
         const prefShort = pref === 'chat_completions' ? 'chat' : (pref === 'responses' ? 'resp' : 'auto');

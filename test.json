@@ -1,0 +1,35 @@
+{
+  "model": "gpt-5",
+  "instructions": "You are a helpful assistant. When asked to search files, you MUST use the glob_search function.",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Please use glob_search to find config.yaml in the project"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_search",
+        "description": "Search for files matching a glob pattern in the filesystem",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "The glob pattern to match files against"
+            }
+          },
+          "required": ["pattern"]
+        }
+      }
+    }
+  ],
+  "stream": false
+}

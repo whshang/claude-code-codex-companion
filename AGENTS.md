@@ -2,7 +2,7 @@
 
 ## 📋 概述
 
-CCCC (Claude Code and Codex Companion) 不仅支持 Claude Code 和 Codex，还可以为各种 AI Agent 和自定义应用提供统一的 API 代理服务。通过智能路由、格式转换和负载均衡，为 AI Agent 提供稳定可靠的 LLM 接入层；同时感谢 Toolify 社区协作带来的零配置 Tool Calling 能力与日志改进。
+CCCC (Claude Code and Codex Companion) 不仅支持 Claude Code 和 Codex，还可以为各种 AI Agent 和自定义应用提供统一的 API 代理服务。通过智能路由、格式转换和负载均衡，为 AI Agent 提供稳定可靠的 LLM 接入层。
 
 ## 🎯 支持的 Agent 类型
 
@@ -174,7 +174,7 @@ endpoints:
 
 ### 4. 工具调用与 count_tokens 配置
 
-- **零配置 Tool Calling**：当 Agent 请求包含 `tools` 字段时，CCCC 会自动注入提示并解析工具调用，支持端点级 `native_tool_support` 与 `tool_enhancement_mode` 调优（感谢 Toolify 社区）。
+- **的标准工具调用支持**：当 Agent 请求包含 `tools` 字段时，CCCC 会自动处理 OpenAI 标准的工具调用格式，确保在不同 API 间正确转换。
 - **端点级 count_tokens**：对于仅供补全的供应商，可在端点配置中（或管理界面“高级配置”面板）关闭 `count_tokens_enabled`，避免触发不兼容的 `/messages/count_tokens` 调用。
 - **本地估算兜底**：当所有端点都不支持 `count_tokens` 时，CCCC 会返回轻量估算并标记 `proxy_estimated=true`，日志中不会再重复记录无效的 404/Invalid URL。
 

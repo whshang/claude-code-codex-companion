@@ -79,13 +79,6 @@ type GormRequestLog struct {
 	DetectionConfidence float64 `gorm:"column:detection_confidence;default:0"`
 	DetectedBy          string  `gorm:"column:detected_by;size:50;default:''"`
 
-	// 新增：工具调用增强监控字段
-	ToolEnhancementApplied bool   `gorm:"column:tool_enhancement_applied;default:false"`
-	ToolEnhancementMode    string `gorm:"column:tool_enhancement_mode;size:20;default:''"`
-	ToolCallsDetected      bool   `gorm:"column:tool_calls_detected;default:false"`
-	ToolCallCount          int    `gorm:"column:tool_call_count;default:0"`
-	ToolNativeSupport      *bool  `gorm:"column:tool_native_support"`
-
 	// 创建时间（现有字段）
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
 }
@@ -142,11 +135,6 @@ func ConvertToGormRequestLog(log *RequestLog) *GormRequestLog {
 		FormatConverted:            log.FormatConverted,
 		DetectionConfidence:        log.DetectionConfidence,
 		DetectedBy:                 log.DetectedBy,
-		ToolEnhancementApplied:     log.ToolEnhancementApplied,
-		ToolEnhancementMode:        log.ToolEnhancementMode,
-		ToolCallsDetected:          log.ToolCallsDetected,
-		ToolCallCount:              log.ToolCallCount,
-		ToolNativeSupport:          log.ToolNativeSupport,
 	}
 
 	// 转换JSON字段
@@ -208,11 +196,6 @@ func ConvertFromGormRequestLog(gormLog *GormRequestLog) *RequestLog {
 		FormatConverted:            gormLog.FormatConverted,
 		DetectionConfidence:        gormLog.DetectionConfidence,
 		DetectedBy:                 gormLog.DetectedBy,
-		ToolEnhancementApplied:     gormLog.ToolEnhancementApplied,
-		ToolEnhancementMode:        gormLog.ToolEnhancementMode,
-		ToolCallsDetected:          gormLog.ToolCallsDetected,
-		ToolCallCount:              gormLog.ToolCallCount,
-		ToolNativeSupport:          gormLog.ToolNativeSupport,
 	}
 
 	// 转换JSON字段

@@ -45,6 +45,12 @@ func (s *AdminServer) handleTestEndpoint(c *gin.Context) {
 // handleTestAllEndpoints 批量测试所有端点
 func (s *AdminServer) handleTestAllEndpoints(c *gin.Context) {
 	results := s.testAllEndpoints()
+
+	// 触发动态排序更新
+	if s.dynamicSorter != nil {
+		s.dynamicSorter.ForceUpdate()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"results": results,
 	})

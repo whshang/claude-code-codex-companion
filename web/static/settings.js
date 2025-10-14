@@ -85,7 +85,8 @@ function collectFormData() {
     return {
         server: {
             host: document.getElementById('serverHost').value,
-            port: parseInt(document.getElementById('serverPort').value)
+            port: parseInt(document.getElementById('serverPort').value),
+            auto_sort_endpoints: document.getElementById('autoSortEndpoints').checked
         },
         logging: {
             level: document.getElementById('logLevel').value,
@@ -222,6 +223,7 @@ function resetSettings() {
     // Restore form values
     document.getElementById('serverHost').value = originalConfig.server.host;
     document.getElementById('serverPort').value = originalConfig.server.port;
+    document.getElementById('autoSortEndpoints').checked = originalConfig.server.auto_sort_endpoints;
     document.getElementById('logLevel').value = originalConfig.logging.level;
     document.getElementById('logRequestTypes').value = originalConfig.logging.log_request_types;
     document.getElementById('logRequestBody').value = originalConfig.logging.log_request_body;

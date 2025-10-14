@@ -1,24 +1,23 @@
 package proxy
 
 import (
-	"bytes"
-	"compress/gzip"
-	"crypto/md5"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
+    "bytes"
+    "compress/gzip"
+    "crypto/md5"
+    "encoding/hex"
+    "encoding/json"
+    "fmt"
+    "io"
+    "net/http"
+    "regexp"
+    "strconv"
+    "strings"
+    "time"
 
 	"claude-code-codex-companion/internal/conversion"
 	"claude-code-codex-companion/internal/endpoint"
-	"claude-code-codex-companion/internal/tagging"
-	"claude-code-codex-companion/internal/toolcall"
-	"claude-code-codex-companion/internal/utils"
+    "claude-code-codex-companion/internal/tagging"
+    "claude-code-codex-companion/internal/utils"
 	"claude-code-codex-companion/internal/validator"
 
 	"github.com/gin-gonic/gin"
@@ -41,17 +40,13 @@ type modelRewriteCache struct {
 }
 
 type requestProcessingCache struct {
-	originalBody            []byte
-	toolsComputed           bool
-	tools                   []toolcall.Tool
-	conversions             map[string]cachedConversion
-	modelRewrites           map[string]*modelRewriteCache
-	toolEnhancementComputed bool
-	toolEnhancementResult   *toolcall.EnhanceResult
-	toolEnhancementTrigger  string
-	toolEnhancementErr      error
+    originalBody  []byte
+    conversions   map[string]cachedConversion
+    modelRewrites map[string]*modelRewriteCache
 }
 
+// sseFilterWriter intercepts Responses SSE events to detect and map text-based tool calls
+// into structured response.function_call.* events on-the-fly for Codex clients.
 func getRequestProcessingCache(c *gin.Context, originalBody []byte) *requestProcessingCache {
 	if val, exists := c.Get(requestProcessingCacheKey); exists {
 		if cache, ok := val.(*requestProcessingCache); ok && cache != nil {
@@ -65,15 +60,6 @@ func getRequestProcessingCache(c *gin.Context, originalBody []byte) *requestProc
 	}
 	c.Set(requestProcessingCacheKey, cache)
 	return cache
-}
-
-func (rc *requestProcessingCache) GetOrExtractTools(body []byte) []toolcall.Tool {
-	if rc.toolsComputed {
-		return rc.tools
-	}
-	rc.tools = extractToolsFromClientRequest(body)
-	rc.toolsComputed = true
-	return rc.tools
 }
 
 func (rc *requestProcessingCache) conversionMapKey(key string, body []byte) string {
@@ -116,18 +102,6 @@ func (rc *requestProcessingCache) GetModelRewrite(endpointName string) (*modelRe
 	}
 	entry, ok := rc.modelRewrites[endpointName]
 	return entry, ok
-}
-
-func (rc *requestProcessingCache) GetToolEnhancement(compute func() (*toolcall.EnhanceResult, string, error)) (*toolcall.EnhanceResult, string, error) {
-	if rc.toolEnhancementComputed {
-		return rc.toolEnhancementResult, rc.toolEnhancementTrigger, rc.toolEnhancementErr
-	}
-	result, trigger, err := compute()
-	rc.toolEnhancementComputed = true
-	rc.toolEnhancementResult = result
-	rc.toolEnhancementTrigger = trigger
-	rc.toolEnhancementErr = err
-	return result, trigger, err
 }
 
 func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path string, requestBody []byte, requestID string, startTime time.Time, taggedRequest *tagging.TaggedRequest, attemptNumber int) (bool, bool) {
@@ -176,45 +150,52 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	}
 	endpointRequestFormat := clientRequestFormat
 
-	// 早期检查1：端点类型与请求格式兼容性（静默跳过不匹配的端点）
-	if clientRequestFormat != "" {
-		// OpenAI-only 端点只能处理 OpenAI 格式请求
-		if ep.IsOpenAIOnly() && clientRequestFormat != "openai" {
-			s.logger.Debug("Silently skipping OpenAI-only endpoint for non-OpenAI request", map[string]interface{}{
-				"endpoint":       ep.Name,
-				"request_format": clientRequestFormat,
-			})
-			c.Set("skip_health_record", true)
-			c.Set("skip_logging", true) // 静默跳过，不记录日志
-			c.Set("last_error", fmt.Errorf("endpoint %s is OpenAI-only", ep.Name))
-			c.Set("last_status_code", http.StatusBadGateway)
-			return false, true
-		}
+	// 早期检查1：端点类型与请求格式兼容性（支持格式转换）
+	//
+	// 注释说明：
+	// 为支持 Codex 客户端使用 Anthropic-only 端点，我们允许格式转换：
+	// 1. OpenAI 请求 → 可以使用 Anthropic 端点（系统会自动转换格式）
+	// 2. Anthropic 请求 → 可以使用 OpenAI 端点（系统会自动转换格式）
+	//
+	// 原有的硬性限制已注释掉，现在只要端点有任意一个 URL 就可以通过格式转换来处理请求
+	//
+	// if clientRequestFormat != "" {
+	// 	// OpenAI-only 端点只能处理 OpenAI 格式请求
+	// 	if ep.IsOpenAIOnly() && clientRequestFormat != "openai" {
+	// 		s.logger.Debug("Silently skipping OpenAI-only endpoint for non-OpenAI request", map[string]interface{}{
+	// 			"endpoint":       ep.Name,
+	// 			"request_format": clientRequestFormat,
+	// 		})
+	// 		c.Set("skip_health_record", true)
+	// 		c.Set("skip_logging", true) // 静默跳过，不记录日志
+	// 		c.Set("last_error", fmt.Errorf("endpoint %s is OpenAI-only", ep.Name))
+	// 		c.Set("last_status_code", http.StatusBadGateway)
+	// 		return false, true
+	// 	}
+	//
+	// 	// Anthropic-only 端点只能处理 Anthropic 格式请求
+	// 	if ep.IsAnthropicOnly() && clientRequestFormat != "anthropic" {
+	// 		s.logger.Debug("Silently skipping Anthropic-only endpoint for non-Anthropic request", map[string]interface{}{
+	// 			"endpoint":       ep.Name,
+	// 			"request_format": clientRequestFormat,
+	// 		})
+	// 		c.Set("skip_health_record", true)
+	// 		c.Set("skip_logging", true) // 静默跳过，不记录日志
+	// 		c.Set("last_error", fmt.Errorf("endpoint %s is Anthropic-only", ep.Name))
+	// 		c.Set("last_status_code", http.StatusBadGateway)
+	// 		return false, true
+	// 	}
+	// }
 
-		// Anthropic-only 端点只能处理 Anthropic 格式请求
-		if ep.IsAnthropicOnly() && clientRequestFormat != "anthropic" {
-			s.logger.Debug("Silently skipping Anthropic-only endpoint for non-Anthropic request", map[string]interface{}{
-				"endpoint":       ep.Name,
-				"request_format": clientRequestFormat,
-			})
-			c.Set("skip_health_record", true)
-			c.Set("skip_logging", true) // 静默跳过，不记录日志
-			c.Set("last_error", fmt.Errorf("endpoint %s is Anthropic-only", ep.Name))
-			c.Set("last_status_code", http.StatusBadGateway)
-			return false, true
-		}
-	}
-
-	// 早期检查2：如果端点没有对应格式的URL，快速跳过
-	if clientRequestFormat != "" && !ep.HasURLForFormat(clientRequestFormat) {
-		s.logger.Debug("Skipping endpoint: no URL for request format", map[string]interface{}{
-			"endpoint":       ep.Name,
-			"request_format": clientRequestFormat,
-			"url_anthropic":  ep.URLAnthropic != "",
-			"url_openai":     ep.URLOpenAI != "",
+	// 早期检查2：端点必须至少有一个URL（支持格式转换）
+	// 修改：不再检查是否有对应格式的URL，只检查是否至少有一个URL
+	// 因为系统支持格式转换，所以只要有任意一个URL就可以处理请求
+	if ep.URLAnthropic == "" && ep.URLOpenAI == "" {
+		s.logger.Debug("Skipping endpoint: no URL configured", map[string]interface{}{
+			"endpoint": ep.Name,
 		})
 		c.Set("skip_health_record", true)
-		c.Set("last_error", fmt.Errorf("endpoint %s has no URL for format %s", ep.Name, clientRequestFormat))
+		c.Set("last_error", fmt.Errorf("endpoint %s has no URL configured", ep.Name))
 		c.Set("last_status_code", http.StatusBadGateway)
 		return false, true // 尝试下一个端点
 	}
@@ -236,16 +217,6 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		c.Set("last_error", fmt.Errorf("endpoint %s returned empty URL", ep.Name))
 		c.Set("last_status_code", http.StatusBadGateway)
 		return false, true
-	}
-
-	// 记录工具增强默认上下文，便于日志输出
-	effectiveToolMode := strings.ToLower(ep.ToolEnhancementMode)
-	if effectiveToolMode == "" {
-		effectiveToolMode = "auto"
-	}
-	c.Set("tool_enhancement_mode_effective", effectiveToolMode)
-	if ep.NativeToolSupport != nil {
-		c.Set("tool_native_support_value", *ep.NativeToolSupport)
 	}
 
 	// Extract tags from taggedRequest
@@ -323,59 +294,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			finalRequestBody = requestBody
 		}
 
-		processingCache.StoreModelRewrite(ep.Name, finalRequestBody, originalModel, rewrittenModel)
-	}
-
-	// === Tool Calling: zero-config prompt injection (client format) ===
-	// 自动启用：当客户端请求包含 tools 时，为任何上游模型注入系统提示以获得工具调用能力
-	if s.toolEnhancer != nil && formatDetection != nil {
-		// 仅当请求中包含 tools 时才尝试增强
-		if tools := processingCache.GetOrExtractTools(requestBody); len(tools) > 0 {
-			// 决策：根据端点配置决定是否注入
-			// disable: 不注入；force: 一定注入；auto: 若明确支持原生工具则不注入，否则注入
-			injectAllowed := true
-			switch strings.ToLower(ep.ToolEnhancementMode) {
-			case "disable":
-				injectAllowed = false
-			case "force":
-				injectAllowed = true
-			default: // auto or empty
-				if ep.NativeToolSupport != nil && *ep.NativeToolSupport {
-					injectAllowed = false
-				}
-			}
-			if injectAllowed {
-				result, triggerSignal, err := processingCache.GetToolEnhancement(func() (*toolcall.EnhanceResult, string, error) {
-					return s.toolEnhancer.EnhanceRequest(tools, nil)
-				})
-				if err == nil && result != nil && result.ShouldEnhance {
-					// 注入 system 提示到客户端格式（在格式转换之前）
-					updated, injErr := injectSystemPromptToClientRequest(finalRequestBody, string(formatDetection.Format), result.SystemPrompt)
-					if injErr == nil && len(updated) > 0 {
-						finalRequestBody = updated
-						c.Set("tool_trigger_signal", triggerSignal)
-						c.Set("tool_enhanced", true)
-						s.logger.Info("Tool calling: injected system prompt for request", map[string]interface{}{
-							"endpoint":      ep.Name,
-							"client_format": string(formatDetection.Format),
-						})
-					} else if injErr != nil {
-						s.logger.Debug("Tool calling: failed to inject system prompt", map[string]interface{}{"error": injErr.Error()})
-					}
-				} else {
-					s.logger.Debug("Tool calling: skip injection due to endpoint configuration", map[string]interface{}{
-						"endpoint": ep.Name,
-						"mode":     ep.ToolEnhancementMode,
-						"native_tool_support": func() interface{} {
-							if ep.NativeToolSupport == nil {
-								return nil
-							}
-							return *ep.NativeToolSupport
-						}(),
-					})
-				}
-			}
-		}
+	processingCache.StoreModelRewrite(ep.Name, finalRequestBody, originalModel, rewrittenModel)
 	}
 
 	// 格式转换（在模型重写之后）
@@ -660,38 +579,13 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				"body": bodyPreview,
 			})
 
-			// After converting to OpenAI chat format, re-inject tool system prompt if tools present
-			if s.toolEnhancer != nil {
-				if tools := processingCache.GetOrExtractTools(requestBody); len(tools) > 0 {
-					injectAllowed := true
-					switch strings.ToLower(ep.ToolEnhancementMode) {
-					case "disable":
-						injectAllowed = false
-					case "force":
-						injectAllowed = true
-					default:
-						if ep.NativeToolSupport != nil && *ep.NativeToolSupport {
-							injectAllowed = false
-						}
-					}
-					if injectAllowed {
-						if result, triggerSignal, err := processingCache.GetToolEnhancement(func() (*toolcall.EnhanceResult, string, error) {
-							return s.toolEnhancer.EnhanceRequest(tools, nil)
-						}); err == nil && result != nil && result.ShouldEnhance {
-							if updated, injErr := injectSystemPromptToClientRequest(finalRequestBody, "openai", result.SystemPrompt); injErr == nil && len(updated) > 0 {
-								finalRequestBody = updated
-								c.Set("tool_trigger_signal", triggerSignal)
-								c.Set("tool_enhanced", true)
-								s.logger.Info("Tool calling: injected system prompt after Codex->OpenAI conversion")
-							} else if injErr != nil {
-								s.logger.Debug("Tool calling: failed to inject after Codex conversion", map[string]interface{}{"error": injErr.Error()})
-							}
-						}
-					} else {
-						s.logger.Debug("Tool calling: skip injection after Codex conversion due to endpoint configuration")
-					}
-				}
-			}
+	            // 确保 Codex /responses 转 Chat /chat/completions 的上游启用流式
+            if inboundPath == "/responses" && effectivePath == "/chat/completions" {
+                if updated, changed := ensureOpenAIStreamTrue(finalRequestBody); changed {
+                    finalRequestBody = updated
+                    s.logger.Debug("Ensured OpenAI chat request uses streaming for Codex /responses")
+                }
+            }
 		}
 	}
 
@@ -1356,55 +1250,6 @@ attemptLoop:
 	if actualEndpointFormat != "" {
 		validationEndpointType = actualEndpointFormat
 	}
-	if !isStreaming {
-		if trig, ok := c.Get("tool_trigger_signal"); ok {
-			if triggerSignal, _ := trig.(string); triggerSignal != "" {
-				// 提取用于工具检测的文本内容（按实际端点格式解析）
-				assistantText := extractAssistantTextForToolDetect(decompressedBody, validationEndpointType)
-				if assistantText != "" && strings.Contains(assistantText, triggerSignal) {
-					if parseResult, perr := s.toolEnhancer.ParseResponse(assistantText, triggerSignal); perr == nil && parseResult != nil && parseResult.IsToolCall && len(parseResult.ToolCalls) > 0 {
-						c.Set("tool_call_detected", true)
-						c.Set("tool_call_count", len(parseResult.ToolCalls))
-						// 根据客户端期望的格式（而非上游实际格式）构造工具调用响应
-						clientFormat := "openai"
-						if formatDetection != nil {
-							clientFormat = string(formatDetection.Format)
-						}
-						// 选择模型字段：优先取原响应中的 model，否则使用重写后的/原始模型
-						respModel := parseModelFromResponse(decompressedBody)
-						if respModel == "" {
-							if rewrittenModel != "" {
-								respModel = rewrittenModel
-							} else if originalModel != "" {
-								respModel = originalModel
-							} else {
-								respModel = "unknown-model"
-							}
-						}
-
-						var rewritten []byte
-						if clientFormat == "anthropic" {
-							rewritten = buildAnthropicToolCallResponse(respModel, parseResult.ToolCalls)
-							finalContentType = "application/json"
-						} else {
-							rewritten = buildOpenAIToolCallResponse(respModel, parseResult.ToolCalls)
-							finalContentType = "application/json"
-						}
-
-						// 使用改写后的响应体
-						decompressedBody = rewritten
-						c.Header("Content-Encoding", "")
-						c.Header("Content-Length", fmt.Sprintf("%d", len(rewritten)))
-						s.logger.Info("Tool calling: detected and mapped tool calls in response", map[string]interface{}{
-							"endpoint":      ep.Name,
-							"client_format": clientFormat,
-							"tool_calls":    len(parseResult.ToolCalls),
-						})
-					}
-				}
-			}
-		}
-	}
 
 	// 严格 Anthropic 格式验证已永久启用
 	// 关键修复：使用actualEndpointFormat进行验证，而不是ep.EndpointType
@@ -1419,23 +1264,6 @@ attemptLoop:
 			setConversionContext(c, conversionStages)
 			s.logger.Info(fmt.Sprintf("Endpoint %s returned %s (not endpoint failure): %v (blacklist_safe=%v)", ep.Name, errorType, err, shouldSkip))
 			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, fmt.Errorf(errorLog), isStreaming, tags, "", originalModel, rewrittenModel, attemptNumber)
-
-			// 工具调用错误监控：若请求包含 tools 参数且返回业务错误，则学习并强制启用增强，防止伪“支持”导致失败
-			var reqJSON map[string]interface{}
-			if json.Unmarshal(requestBody, &reqJSON) == nil {
-				if _, hasTools := reqJSON["tools"]; hasTools {
-					// 学习：关闭原生工具支持，强制注入增强
-					val := false
-					ep.NativeToolSupport = &val
-					ep.ToolEnhancementMode = "force"
-					c.Set("tool_native_support_value", false)
-					c.Set("tool_enhancement_mode_effective", "force")
-					s.PersistEndpointLearning(ep)
-					s.logger.Info("🧩 Tool support business error detected: forcing tool enhancement for this endpoint", map[string]interface{}{
-						"endpoint": ep.Name,
-					})
-				}
-			}
 
 			// 根据配置决定是否跳过健康统计
 			if shouldSkip {
@@ -1834,49 +1662,6 @@ attemptLoop:
 		requestLog.ConversionPath = strings.Join(conversionStages, conversionStageSeparator)
 	}
 	requestLog.SupportsResponsesFlag = getSupportsResponsesFlag(ep)
-
-	// 工具调用增强监控信息
-	if val, exists := c.Get("tool_enhanced"); exists {
-		if applied, ok := val.(bool); ok {
-			requestLog.ToolEnhancementApplied = applied
-		}
-	}
-	if val, exists := c.Get("tool_enhancement_mode_effective"); exists {
-		if mode, ok := val.(string); ok {
-			requestLog.ToolEnhancementMode = mode
-		}
-	}
-	if val, exists := c.Get("tool_call_count"); exists {
-		if count, ok := val.(int); ok {
-			requestLog.ToolCallCount = count
-			if count > 0 {
-				requestLog.ToolCallsDetected = true
-			}
-		}
-	}
-	if val, exists := c.Get("tool_call_detected"); exists {
-		if detected, ok := val.(bool); ok {
-			requestLog.ToolCallsDetected = detected || requestLog.ToolCallsDetected
-		}
-	}
-	if val, exists := c.Get("tool_native_support_value"); exists {
-		switch v := val.(type) {
-		case bool:
-			b := v
-			requestLog.ToolNativeSupport = &b
-		case *bool:
-			requestLog.ToolNativeSupport = v
-		}
-	} else if ep.NativeToolSupport != nil {
-		requestLog.ToolNativeSupport = ep.NativeToolSupport
-	}
-	if requestLog.ToolEnhancementMode == "" {
-		effectiveMode := ep.ToolEnhancementMode
-		if effectiveMode == "" {
-			effectiveMode = "auto"
-		}
-		requestLog.ToolEnhancementMode = effectiveMode
-	}
 
 	// 记录原始客户端请求数据
 	requestLog.OriginalRequestURL = c.Request.URL.String()
@@ -2336,7 +2121,8 @@ func (s *Server) handleStreamingResponse(
 		}
 	}
 
-	captureWriter := newTeeCaptureWriter(c.Writer, responseCaptureLimit)
+    captureWriter := newTeeCaptureWriter(c.Writer, responseCaptureLimit)
+    outWriter := io.Writer(captureWriter)
 	var streamErr error
 
     if isCodexClient {
@@ -2349,13 +2135,13 @@ func (s *Server) handleStreamingResponse(
                     "chat_sse_to_responses",
                     ep.Name,
                     reader,
-                    captureWriter,
+                    outWriter,
                     conversion.StreamChatCompletionsToResponses,     // unified
                     conversion.LegacyStreamChatCompletionsToResponses, // legacy
                 )
             } else {
                 // 无 manager，直接使用统一模式
-                streamErr = conversion.StreamChatCompletionsToResponses(reader, captureWriter)
+                streamErr = conversion.StreamChatCompletionsToResponses(reader, outWriter)
             }
         } else {
             // 上游是 Anthropic SSE → 对于Codex客户端，这种组合不支持，切换端点
@@ -2454,49 +2240,6 @@ func (s *Server) handleStreamingResponse(
 		requestLog.ConversionPath = strings.Join(*conversionStages, conversionStageSeparator)
 	}
 	requestLog.SupportsResponsesFlag = getSupportsResponsesFlag(ep)
-
-	if val, exists := c.Get("tool_enhanced"); exists {
-		if applied, ok := val.(bool); ok {
-			requestLog.ToolEnhancementApplied = applied
-		}
-	}
-	if val, exists := c.Get("tool_enhancement_mode_effective"); exists {
-		if mode, ok := val.(string); ok {
-			requestLog.ToolEnhancementMode = mode
-		}
-	}
-	if val, exists := c.Get("tool_call_count"); exists {
-		if count, ok := val.(int); ok {
-			requestLog.ToolCallCount = count
-			if count > 0 {
-				requestLog.ToolCallsDetected = true
-			}
-		}
-	}
-	if val, exists := c.Get("tool_call_detected"); exists {
-		if detected, ok := val.(bool); ok {
-			requestLog.ToolCallsDetected = detected || requestLog.ToolCallsDetected
-		}
-	}
-	if val, exists := c.Get("tool_native_support_value"); exists {
-		switch v := val.(type) {
-		case bool:
-			b := v
-			requestLog.ToolNativeSupport = &b
-		case *bool:
-			requestLog.ToolNativeSupport = v
-		}
-	} else if ep.NativeToolSupport != nil {
-		requestLog.ToolNativeSupport = ep.NativeToolSupport
-	}
-	if requestLog.ToolEnhancementMode == "" {
-		effectiveMode := ep.ToolEnhancementMode
-		if effectiveMode == "" {
-			effectiveMode = "auto"
-		}
-		requestLog.ToolEnhancementMode = effectiveMode
-	}
-
 	requestLog.OriginalRequestURL = c.Request.URL.String()
 	requestLog.OriginalRequestHeaders = utils.HeadersToMap(c.Request.Header)
 	if len(requestBody) > 0 {
@@ -2813,6 +2556,29 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ensureOpenAIStreamTrue 确保 OpenAI Chat 请求携带 stream:true，用于 Codex /responses 转换后的上游流式输出
+func ensureOpenAIStreamTrue(body []byte) ([]byte, bool) {
+    if len(body) == 0 {
+        return body, false
+    }
+    var m map[string]interface{}
+    if err := json.Unmarshal(body, &m); err != nil {
+        return body, false
+    }
+    // 已设置为 true 则不改动；若明确为 false，则改为 true 以获得流式
+    if v, ok := m["stream"]; ok {
+        if vb, okb := v.(bool); okb && vb {
+            return body, false
+        }
+    }
+    m["stream"] = true
+    b, err := json.Marshal(m)
+    if err != nil {
+        return body, false
+    }
+    return b, true
 }
 
 // processRateLimitHeaders 处理Anthropic rate limit headers

@@ -4,7 +4,8 @@ package conversion
 
 type OpenAIResponsesRequest struct {
 	Model             string                        `json:"model"`
-	Input             []OpenAIResponsesMessage      `json:"input,omitempty"`
+	Input             []OpenAIResponsesMessage      `json:"input,omitempty"`           // 输入消息（Responses API 命名）
+	Messages          []OpenAIResponsesMessage      `json:"messages,omitempty"`        // 🆕 兼容 messages 字段（双路径回退）
 	Tools             []OpenAIResponsesTool         `json:"tools,omitempty"`
 	ToolChoice        interface{}                   `json:"tool_choice,omitempty"`
 	Temperature       *float64                      `json:"temperature,omitempty"`
@@ -13,6 +14,14 @@ type OpenAIResponsesRequest struct {
 	ParallelToolCalls *bool                         `json:"parallel_tool_calls,omitempty"`
 	User              string                        `json:"user,omitempty"`
 	Metadata          map[string]interface{}        `json:"metadata,omitempty"`
+	// 🆕 采样控制参数 (参考 chat2response)
+	PresencePenalty   *float64                      `json:"presence_penalty,omitempty"`
+	FrequencyPenalty  *float64                      `json:"frequency_penalty,omitempty"`
+	LogitBias         map[string]float64            `json:"logit_bias,omitempty"`
+	N                 *int                          `json:"n,omitempty"`
+	Stop              []string                      `json:"stop,omitempty"`
+	// 🆕 输出格式控制
+	ResponseFormat    *OpenAIResponseFormat         `json:"response_format,omitempty"`
 }
 
 type OpenAIResponsesMessage struct {

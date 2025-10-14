@@ -12,9 +12,32 @@ import (
 
 // buildResponsesSSEFromChunks 直接从OpenAI chunks构建Responses SSE，无需先聚合为消息
 func buildResponsesSSEFromChunks(chunks []OpenAIStreamChunk, responseID, model string, usage *OpenAIUsage) ([]byte, error) {
-	if len(chunks) == 0 {
-		return nil, fmt.Errorf("no chunks provided")
-	}
+    if len(chunks) == 0 {
+        // 容错：上游未产生任何可解析的chunks，仍然构造最小的Responses事件，避免中断流
+        if responseID == "" {
+            responseID = generateResponseID()
+        }
+        var builder strings.Builder
+        // response.created
+        writeSSEEvent(&builder, "response.created", map[string]interface{}{
+            "type": "response.created",
+            "response": map[string]interface{}{
+                "id":    responseID,
+                "model": model,
+            },
+        })
+        // 直接完成（无增量）
+        completed := map[string]interface{}{
+            "type": "response.completed",
+            "response": map[string]interface{}{
+                "id":    responseID,
+                "model": model,
+            },
+            "finish_reason": "stop",
+        }
+        writeSSEEvent(&builder, "response.completed", completed)
+        return []byte(builder.String()), nil
+    }
 	if responseID == "" {
 		responseID = generateResponseID()
 	}

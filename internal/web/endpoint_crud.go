@@ -66,8 +66,6 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 		OAuthConfig         *config.OAuthConfig `json:"oauth_config,omitempty"`          // 新增：OAuth配置
 		HeaderOverrides     map[string]string   `json:"header_overrides,omitempty"`      // 新增：HTTP Header覆盖配置
 		ParameterOverrides  map[string]string   `json:"parameter_overrides,omitempty"`   // 新增：Request Parameter覆盖配置
-		NativeToolSupport   *bool               `json:"native_tool_support,omitempty"`   // 新增：原生工具调用支持（可选）
-		ToolEnhancementMode string              `json:"tool_enhancement_mode,omitempty"` // 新增：工具调用增强模式（可选）
 		CountTokensEnabled  *bool               `json:"count_tokens_enabled,omitempty"`  // 新增：是否允许 /count_tokens
 		SupportsResponses   *bool               `json:"supports_responses,omitempty"`    // 新增：显式声明 /responses 支持
 		OpenAIPreference    string              `json:"openai_preference"`
@@ -180,11 +178,6 @@ func (s *AdminServer) handleCreateEndpoint(c *gin.Context) {
 		request.AuthType, request.AuthValue,
 		request.Enabled, maxPriority+1, request.Tags, request.Proxy, request.OAuthConfig, request.HeaderOverrides, request.ParameterOverrides, countTokensPtr, request.SupportsResponses)
 	newEndpoint.OpenAIPreference = normalizedPreference
-	// 设置可选的工具相关配置
-	newEndpoint.NativeToolSupport = request.NativeToolSupport
-	if request.ToolEnhancementMode != "" {
-		newEndpoint.ToolEnhancementMode = request.ToolEnhancementMode
-	}
 	currentEndpoints = append(currentEndpoints, newEndpoint)
 
 	// 使用热更新机制
@@ -223,8 +216,6 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 		HeaderOverrides     map[string]string          `json:"header_overrides,omitempty"`    // 新增：HTTP Header覆盖配置
 		ParameterOverrides  map[string]string          `json:"parameter_overrides,omitempty"` // 新增：Request Parameter覆盖配置
 		ModelRewrite        *config.ModelRewriteConfig `json:"model_rewrite"`                 // 修改：移除omitempty，允许null值
-		NativeToolSupport   *bool                      `json:"native_tool_support,omitempty"`
-		ToolEnhancementMode string                     `json:"tool_enhancement_mode,omitempty"`
 		CountTokensEnabled  *bool                      `json:"count_tokens_enabled,omitempty"`
 		SupportsResponses   *bool                      `json:"supports_responses,omitempty"`
 		OpenAIPreference    *string                    `json:"openai_preference,omitempty"`
@@ -367,13 +358,6 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 				}
 				// 始终保存配置对象，即使enabled=false（前端需要显示禁用状态）
 				currentEndpoints[i].ModelRewrite = request.ModelRewrite
-			}
-			// 更新工具相关配置（非必填）
-			if request.NativeToolSupport != nil {
-				currentEndpoints[i].NativeToolSupport = request.NativeToolSupport
-			}
-			if request.ToolEnhancementMode != "" {
-				currentEndpoints[i].ToolEnhancementMode = request.ToolEnhancementMode
 			}
 			if request.CountTokensEnabled != nil {
 				ptr := new(bool)

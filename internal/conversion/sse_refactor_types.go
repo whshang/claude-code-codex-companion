@@ -71,6 +71,22 @@ type InternalRequest struct {
 	User                string                 `json:"user,omitempty"`
 	ParallelToolCalls   *bool                  `json:"parallel_tool_calls,omitempty"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
+	// 🆕 采样控制参数 (参考 chat2response)
+	PresencePenalty     *float64               `json:"presence_penalty,omitempty"`  // 存在惩罚 (-2.0 to 2.0)
+	FrequencyPenalty    *float64               `json:"frequency_penalty,omitempty"` // 频率惩罚 (-2.0 to 2.0)
+	LogitBias           map[string]float64     `json:"logit_bias,omitempty"`        // token ID 到偏置值的映射
+	N                   *int                   `json:"n,omitempty"`                 // 生成多个候选响应
+	// 🆕 输出格式控制
+	ResponseFormat      *InternalResponseFormat `json:"response_format,omitempty"`  // 输出格式约束
+	// 🆕 推理相关字段 (o1 模型)
+	ReasoningEffort     *string                `json:"reasoning_effort,omitempty"`     // "low"|"medium"|"high" 推理强度
+	MaxReasoningTokens  *int                   `json:"max_reasoning_tokens,omitempty"` // 推理阶段的最大 token 数
+}
+
+// InternalResponseFormat 定义统一的输出格式约束
+type InternalResponseFormat struct {
+	Type   string                 `json:"type"`             // "text"|"json_object"|"json_schema"
+	Schema map[string]interface{} `json:"schema,omitempty"` // JSON Schema (可选)
 }
 
 // InternalResponse 表示统一的响应结构

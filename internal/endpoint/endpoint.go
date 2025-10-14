@@ -60,10 +60,6 @@ type Endpoint struct {
 	SSEConfig          *config.SSEConfig          `json:"sse_config,omitempty"`            // SSE行为配置
 	OpenAIPreference   string                     `json:"openai_preference,omitempty"`     // OpenAI格式偏好："responses"|"chat_completions"|"auto"
 	SupportsResponses  *bool                      `json:"supports_responses,omitempty"`   // 显式声明 /responses 支持情况
-	// 原生工具调用支持（学习或手动设置）。nil 表示未知/未学习
-	NativeToolSupport *bool `json:"native_tool_support,omitempty"`
-	// 工具调用增强模式："auto"|"force"|"disable"
-	ToolEnhancementMode string `json:"tool_enhancement_mode,omitempty"`
 	// 是否允许使用 /count_tokens 接口
 	CountTokensEnabled bool `json:"count_tokens_enabled"`
 	// 记录 count_tokens 支持情况（nil 表示未知）
@@ -105,6 +101,9 @@ type Endpoint struct {
 
 	// 新增：保护 DetectedAuthHeader 的互斥锁
 	AuthHeaderMutex sync.RWMutex
+
+	// 新增：动态排序器引用（用于状态变化时触发排序更新）
+	dynamicSorter *utils.DynamicEndpointSorter `json:"-"`
 
 	mutex sync.RWMutex
 }
@@ -158,8 +157,6 @@ func NewEndpoint(cfg config.EndpointConfig) *Endpoint {
 		SSEConfig:           cfg.SSEConfig,
 		OpenAIPreference:    openAIPreference,
 		SupportsResponses:  cfg.SupportsResponses,
-		NativeToolSupport:   cfg.NativeToolSupport,
-		ToolEnhancementMode: cfg.ToolEnhancementMode,
 		CountTokensEnabled:  countTokensEnabled,
 		NativeCodexFormat:   nativeCodexFormat,
 		Status:              StatusActive,
@@ -180,8 +177,9 @@ func inferEndpointType(cfg config.EndpointConfig) string {
 		return "openai"
 	}
 	if cfg.URLAnthropic != "" && cfg.URLOpenAI != "" {
-		// 两个URL都有，优先使用anthropic（因为可以自动转换到任何格式）
-		return "anthropic"
+		// 两个URL都有，优先使用openai（支持Codex客户端智能路由）
+		// OpenAI类型端点可以同时服务Claude Code（通过url_anthropic）和Codex（通过url_openai）
+		return "openai"
 	}
 
 	// 默认值（不应该到达这里，因为配置验证会确保至少有一个URL）
@@ -339,29 +337,37 @@ func (e *Endpoint) HasURLForFormat(requestFormat string) bool {
 }
 
 // GetFullURLWithFormat 根据请求格式构建完整URL
-// 严格按 requestFormat 匹配对应家族的URL，不做跨家族回退
-// 如果对应家族URL为空，返回空字符串（调用方应检查并跳过该端点）
+// 支持格式转换：当端点没有对应格式的URL时，使用另一个家族的URL并依赖格式转换逻辑
+//
+// 规则：
+// 1. 优先使用对应格式的URL（OpenAI请求 → url_openai，Anthropic请求 → url_anthropic）
+// 2. 如果没有对应URL，回退到另一个家族的URL（依赖系统格式转换）
+// 3. 只有当两个URL都为空时才返回空字符串
 func (e *Endpoint) GetFullURLWithFormat(path string, requestFormat string) string {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
 
-	// 获取对应格式的URL - 严格匹配，不跨家族
+	// 获取对应格式的URL - 支持格式转换
 	baseURL := ""
 
 	if requestFormat == "anthropic" {
-		// Anthropic 请求只使用 Anthropic URL
+		// Anthropic 请求优先使用 Anthropic URL，否则使用 OpenAI URL（通过格式转换）
 		if e.URLAnthropic != "" {
 			baseURL = e.URLAnthropic
+		} else if e.URLOpenAI != "" {
+			baseURL = e.URLOpenAI // 使用 OpenAI URL，系统会自动转换格式
 		} else {
-			// 无 Anthropic URL，返回空字符串
+			// 两个 URL 都为空，无法处理
 			return ""
 		}
 	} else if requestFormat == "openai" {
-		// OpenAI 请求只使用 OpenAI URL
+		// OpenAI 请求优先使用 OpenAI URL，否则使用 Anthropic URL（通过格式转换）
 		if e.URLOpenAI != "" {
 			baseURL = e.URLOpenAI
+		} else if e.URLAnthropic != "" {
+			baseURL = e.URLAnthropic // 使用 Anthropic URL，系统会自动转换格式
 		} else {
-			// 无 OpenAI URL，返回空字符串
+			// 两个 URL 都为空，无法处理
 			return ""
 		}
 	} else {
@@ -443,6 +449,8 @@ func (e *Endpoint) RecordRequest(success bool, requestID string) {
 			// 释放 mutex 以避免死锁，因为 MarkActive 需要获取 mutex
 			e.mutex.Unlock()
 			e.MarkActive()
+			// 触发动态排序更新
+			e.triggerDynamicSortUpdate()
 			e.mutex.Lock()
 		}
 	} else {
@@ -455,6 +463,8 @@ func (e *Endpoint) RecordRequest(success bool, requestID string) {
 			// 释放 mutex 以避免死锁，因为 MarkInactiveWithReason 需要获取 mutex
 			e.mutex.Unlock()
 			e.MarkInactiveWithReason()
+			// 触发动态排序更新
+			e.triggerDynamicSortUpdate()
 			e.mutex.Lock()
 		}
 	}
@@ -939,6 +949,24 @@ func (e *Endpoint) GetURLForFormat(requestFormat string) string {
 	return e.URLOpenAI
 }
 
+// SetDynamicSorter 设置动态排序器引用
+func (e *Endpoint) SetDynamicSorter(sorter *utils.DynamicEndpointSorter) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	e.dynamicSorter = sorter
+}
+
+// triggerDynamicSortUpdate 触发动态排序更新
+func (e *Endpoint) triggerDynamicSortUpdate() {
+	e.mutex.RLock()
+	sorter := e.dynamicSorter
+	e.mutex.RUnlock()
+
+	if sorter != nil {
+		sorter.ForceUpdate()
+	}
+}
+
 // IsOpenAIOnly 判断端点是否为 OpenAI-only 模式
 // 规则：仅配置了 url_openai，没有配置 url_anthropic
 func (e *Endpoint) IsOpenAIOnly() bool {
@@ -955,10 +983,46 @@ func (e *Endpoint) IsAnthropicOnly() bool {
 	return e.URLAnthropic != "" && e.URLOpenAI == ""
 }
 
-// IsDualMode 判断端点是否为双模式（同时配置了两个URL）
-// 在双模式下，不进行跨家族格式转换，只做直连
-func (e *Endpoint) IsDualMode() bool {
+// 动态端点接口实现
+func (e *Endpoint) GetName() string {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	return e.URLOpenAI != "" && e.URLAnthropic != ""
+	return e.Name
+}
+
+func (e *Endpoint) GetLastResponseTime() time.Duration {
+	// 从环形缓冲区获取最近的成功请求响应时间
+	// 目前环形缓冲区只存储成功/失败状态，不存储响应时间，返回默认值
+	// TODO: 未来可以扩展为存储实际响应时间
+	return 0
+}
+
+func (e *Endpoint) GetSuccessRate() float64 {
+	e.mutex.RLock()
+	total := e.TotalRequests
+	success := e.SuccessRequests
+	e.mutex.RUnlock()
+
+	if total == 0 {
+		return 0
+	}
+	return float64(success) / float64(total) * 100
+}
+
+func (e *Endpoint) GetFailureCount() int {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+	return e.FailureCount
+}
+
+func (e *Endpoint) GetTotalRequests() int {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+	return e.TotalRequests
+}
+
+func (e *Endpoint) SetPriority(priority int) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	e.Priority = priority
 }

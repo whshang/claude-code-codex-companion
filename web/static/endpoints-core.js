@@ -111,18 +111,35 @@ function refreshEndpointStatus() {
     apiRequest('/admin/api/endpoints')
         .then(response => response.json())
         .then(data => {
-            // Only update status and statistics, not the full table
-            data.endpoints.forEach(endpoint => {
-                // Try to find in special endpoint list
-                let row = document.querySelector(`#special-endpoint-list tr[data-endpoint-name="${endpoint.name}"]`);
-                if (!row) {
-                    // If not found, search in general endpoint list
-                    row = document.querySelector(`#general-endpoint-list tr[data-endpoint-name="${endpoint.name}"]`);
-                }
-                if (row) {
-                    updateEndpointRowStatus(row, endpoint);
-                }
+            // Check if any endpoints have changed priority
+            const endpointsChanged = data.endpoints.some(newEndpoint => {
+                const oldEndpoint = currentEndpoints.find(ep => ep.name === newEndpoint.name);
+                return oldEndpoint && oldEndpoint.priority !== newEndpoint.priority;
             });
+
+            if (endpointsChanged) {
+                // If priorities changed, reload the full table
+                currentEndpoints = data.endpoints;
+                rebuildTable(currentEndpoints);
+            } else {
+                // Only update status and statistics, not the full table
+                data.endpoints.forEach(endpoint => {
+                    // Try to find in special endpoint list
+                    let row = document.querySelector(`#special-endpoint-list tr[data-endpoint-name="${endpoint.name}"]`);
+                    if (!row) {
+                        // If not found, search in general endpoint list
+                        row = document.querySelector(`#general-endpoint-list tr[data-endpoint-name="${endpoint.name}"]`);
+                    }
+                    if (row) {
+                        updateEndpointRowStatus(row, endpoint);
+                        // Also update priority badge if it exists
+                        const priorityBadge = row.querySelector('.priority-badge');
+                        if (priorityBadge) {
+                            priorityBadge.textContent = endpoint.priority;
+                        }
+                    }
+                });
+            }
         })
         .catch(error => console.error('Failed to refresh endpoint status:', error));
 }

@@ -37,6 +37,14 @@ func (a *OpenAIResponsesFormatAdapter) ParseRequestJSON(payload []byte) (*Intern
 		Metadata:          cloneStringInterfaceMap(req.Metadata),
 		Tools:             []InternalTool{},
 		Messages:          []InternalMessage{},
+		Stop:              append([]string(nil), req.Stop...),
+		// 🆕 采样控制参数
+		PresencePenalty:   req.PresencePenalty,
+		FrequencyPenalty:  req.FrequencyPenalty,
+		LogitBias:         cloneLogitBias(req.LogitBias),
+		N:                 req.N,
+		// 🆕 输出格式控制
+		ResponseFormat:    convertOpenAIResponseFormatToInternal(req.ResponseFormat),
 	}
 
 	if len(req.Tools) > 0 {
@@ -56,7 +64,13 @@ func (a *OpenAIResponsesFormatAdapter) ParseRequestJSON(payload []byte) (*Intern
 		internalReq.ToolChoice = convertOpenAIToolChoiceToInternal(req.ToolChoice)
 	}
 
-	for _, msg := range req.Input {
+	// 🆕 双路径回退：优先使用 input，回退到 messages（参考 chat2response）
+	inputMessages := req.Input
+	if len(inputMessages) == 0 && len(req.Messages) > 0 {
+		inputMessages = req.Messages
+	}
+
+	for _, msg := range inputMessages {
 		internalReq.Messages = append(internalReq.Messages, convertResponsesMessageToInternal(msg))
 	}
 
@@ -79,6 +93,14 @@ func (a *OpenAIResponsesFormatAdapter) BuildRequestJSON(req *InternalRequest) ([
 		ParallelToolCalls: req.ParallelToolCalls,
 		User:              req.User,
 		Metadata:          cloneStringInterfaceMap(req.Metadata),
+		Stop:              append([]string(nil), req.Stop...),
+		// 🆕 采样控制参数
+		PresencePenalty:   req.PresencePenalty,
+		FrequencyPenalty:  req.FrequencyPenalty,
+		LogitBias:         cloneLogitBias(req.LogitBias),
+		N:                 req.N,
+		// 🆕 输出格式控制
+		ResponseFormat:    convertInternalResponseFormatToOpenAI(req.ResponseFormat),
 	}
 
 	if len(req.Tools) > 0 {

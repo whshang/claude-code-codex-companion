@@ -34,9 +34,19 @@ func (a *OpenAIChatFormatAdapter) ParseRequestJSON(payload []byte) (*InternalReq
 		MaxCompletionTokens: req.MaxCompletionTokens,
 		MaxOutputTokens:     req.MaxOutputTokens,
 		MaxTokens:           req.MaxTokens,
-		Stop:                append([]string(nil), req.Stop...),
+		Stop:                copyStringSlice(req.Stop),
 		User:                req.User,
 		Metadata:            make(map[string]interface{}),
+		// 🆕 采样控制参数
+		PresencePenalty:     req.PresencePenalty,
+		FrequencyPenalty:    req.FrequencyPenalty,
+		LogitBias:           cloneLogitBias(req.LogitBias),
+		N:                   req.N,
+		// 🆕 输出格式控制
+		ResponseFormat:      convertOpenAIResponseFormatToInternal(req.ResponseFormat),
+		// 🆕 推理相关字段
+		ReasoningEffort:     req.ReasoningEffort,
+		MaxReasoningTokens:  req.MaxReasoningTokens,
 	}
 
 	if req.User != "" {
@@ -93,8 +103,15 @@ func (a *OpenAIChatFormatAdapter) BuildRequestJSON(req *InternalRequest) ([]byte
 		MaxCompletionTokens: req.MaxCompletionTokens,
 		MaxOutputTokens:     req.MaxOutputTokens,
 		MaxTokens:           req.MaxTokens,
-		Stop:                append([]string(nil), req.Stop...),
+		Stop:                copyStringSlice(req.Stop),
 		User:                req.User,
+		// 🆕 采样控制参数
+		PresencePenalty:     req.PresencePenalty,
+		FrequencyPenalty:    req.FrequencyPenalty,
+		LogitBias:           cloneLogitBias(req.LogitBias),
+		N:                   req.N,
+		// 🆕 输出格式控制
+		ResponseFormat:      convertInternalResponseFormatToOpenAI(req.ResponseFormat),
 	}
 
 	if req.Stream {
@@ -491,4 +508,61 @@ func denormalizeOpenAIFinishReason(reason string) string {
 
 func boolPtrValue(v bool) *bool {
 	return &v
+}
+
+// 🆕 Helper函数：克隆 LogitBias
+func cloneLogitBias(src map[string]float64) map[string]float64 {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]float64, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// copyStringSlice 创建字符串切片的深度拷贝，保持空切片的语义
+func copyStringSlice(src []string) []string {
+	if src == nil {
+		return nil
+	}
+	if len(src) == 0 {
+		return []string{} // 保持空切片的语义
+	}
+	return append([]string(nil), src...)
+}
+
+// 🆕 OpenAI ResponseFormat → Internal ResponseFormat
+func convertOpenAIResponseFormatToInternal(rf *OpenAIResponseFormat) *InternalResponseFormat {
+	if rf == nil {
+		return nil
+	}
+	internal := &InternalResponseFormat{
+		Type: rf.Type,
+	}
+	if len(rf.Schema) > 0 {
+		internal.Schema = make(map[string]interface{}, len(rf.Schema))
+		for k, v := range rf.Schema {
+			internal.Schema[k] = v
+		}
+	}
+	return internal
+}
+
+// 🆕 Internal ResponseFormat → OpenAI ResponseFormat
+func convertInternalResponseFormatToOpenAI(irf *InternalResponseFormat) *OpenAIResponseFormat {
+	if irf == nil {
+		return nil
+	}
+	openai := &OpenAIResponseFormat{
+		Type: irf.Type,
+	}
+	if len(irf.Schema) > 0 {
+		openai.Schema = make(map[string]interface{}, len(irf.Schema))
+		for k, v := range irf.Schema {
+			openai.Schema[k] = v
+		}
+	}
+	return openai
 }

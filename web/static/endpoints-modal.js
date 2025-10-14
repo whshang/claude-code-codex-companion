@@ -1,5 +1,7 @@
 // Endpoints Modal JavaScript - 模态框相关功能
 
+let currentSupportsRuntimeState = 'unknown';
+
 function showAddEndpointModal() {
     editingEndpointName = null;
     originalAuthValue = '';
@@ -47,14 +49,8 @@ document.getElementById('endpointForm').reset();
     
     // Clear max tokens field name configuration
     document.getElementById('max-tokens-field-name').value = '';
-	const supportsResponsesSelect = document.getElementById('supports-responses');
-	if (supportsResponsesSelect) supportsResponsesSelect.value = '';
-	const openaiPreferenceSelect = document.getElementById('openai-preference');
-	if (openaiPreferenceSelect) openaiPreferenceSelect.value = 'auto';
-    const nativeToolSelect = document.getElementById('native-tool-support');
-    if (nativeToolSelect) nativeToolSelect.value = '';
-    const toolEnhMode = document.getElementById('tool-enhancement-mode');
-    if (toolEnhMode) toolEnhMode.value = '';
+    const responsesModeSelect = document.getElementById('responses-mode');
+    if (responsesModeSelect) responsesModeSelect.value = 'auto';
     const countTokensCheckbox = document.getElementById('count-tokens-enabled');
     if (countTokensCheckbox) countTokensCheckbox.checked = true;
     
@@ -67,7 +63,7 @@ document.getElementById('endpointForm').reset();
     // Reset to basic configuration tab
     resetModalTabs();
     
-	updateSupportsRuntimeIndicator('unknown', '');
+    updateSupportsRuntimeIndicator('unknown', 'auto');
 
     endpointModal.show();
 }
@@ -82,8 +78,7 @@ function showEditEndpointModal(endpointName) {
     editingEndpointName = endpointName;
     originalAuthValue = endpoint.auth_value;
     isAuthVisible = false;
-	const supportsResponsesSelect = document.getElementById('supports-responses');
-	const openaiPreferenceSelect = document.getElementById('openai-preference');
+    const responsesModeSelect = document.getElementById('responses-mode');
     
     document.getElementById('endpointModalTitle').textContent = T('edit_endpoint', '编辑端点');
     
@@ -142,33 +137,27 @@ function showEditEndpointModal(endpointName) {
     // Load max tokens field name configuration
     const maxTokensFieldName = endpoint.max_tokens_field_name || '';
     document.getElementById('max-tokens-field-name').value = maxTokensFieldName;
-    // Load tool settings
-	if (supportsResponsesSelect) {
-		if (endpoint.supports_responses === true) supportsResponsesSelect.value = 'true';
-		else if (endpoint.supports_responses === false) supportsResponsesSelect.value = 'false';
-		else supportsResponsesSelect.value = '';
-	}
-	if (openaiPreferenceSelect) {
-		const prefValue = endpoint.openai_preference || 'auto';
-		openaiPreferenceSelect.value = prefValue;
-	}
-	if (endpoint.native_tool_support !== undefined && endpoint.native_tool_support !== null) {
-		document.getElementById('native-tool-support').value = String(!!endpoint.native_tool_support);
-	} else {
-		document.getElementById('native-tool-support').value = '';
-	}
-	document.getElementById('tool-enhancement-mode').value = endpoint.tool_enhancement_mode || '';
-	const countTokensCheckbox = document.getElementById('count-tokens-enabled');
-	if (countTokensCheckbox) {
-		countTokensCheckbox.checked = endpoint.count_tokens_enabled !== false;
-	}
+    if (responsesModeSelect) {
+        let mode = 'auto';
+        if (endpoint.supports_responses === true || endpoint.openai_preference === 'responses') {
+            mode = 'native';
+        } else if (endpoint.supports_responses === false || endpoint.openai_preference === 'chat_completions') {
+            mode = 'convert';
+        }
+        responsesModeSelect.value = mode;
+    }
+    const countTokensCheckbox = document.getElementById('count-tokens-enabled');
+    if (countTokensCheckbox) {
+        countTokensCheckbox.checked = endpoint.count_tokens_enabled !== false;
+    }
 
-	const runtimeState = endpoint.native_codex_format === true
-		? 'native'
-		: endpoint.native_codex_format === false
-			? 'converted'
-			: 'unknown';
-	updateSupportsRuntimeIndicator(runtimeState, endpoint.openai_preference || '');
+    const runtimeState = endpoint.native_codex_format === true
+        ? 'native'
+        : endpoint.native_codex_format === false
+            ? 'converted'
+            : 'unknown';
+    const currentMode = responsesModeSelect ? responsesModeSelect.value : 'auto';
+    updateSupportsRuntimeIndicator(runtimeState, currentMode);
     
     // Load enhanced protection configuration
     const enhancedProtection = endpoint.enhanced_protection || false;
@@ -210,31 +199,34 @@ function resetModalTabs() {
     }
 }
 
-function updateSupportsRuntimeIndicator(state, preference) {
+function updateSupportsRuntimeIndicator(state, mode) {
 	const indicator = document.getElementById('supports-runtime-indicator');
 	const note = document.getElementById('supports-runtime-note');
 	if (!indicator || !note) {
 		return;
 	}
+	currentSupportsRuntimeState = state;
 
 	let badgeClass = 'bg-secondary';
-	let text = '当前学习：未知';
+	let text = '上次成功：未知';
 	if (state === 'native') {
 		badgeClass = 'bg-success';
-		text = '当前学习：原生';
+		text = '上次成功：原生 /responses';
 	} else if (state === 'converted') {
 		badgeClass = 'bg-warning text-dark';
-		text = '当前学习：转换';
+		text = '上次成功：/chat/completions';
 	}
 
 	indicator.className = `badge ${badgeClass}`;
 	indicator.textContent = text;
 
-	if (preference && preference.length > 0) {
-		note.textContent = `当前 openai_preference: ${preference}`;
-	} else {
-		note.textContent = '根据最近一次请求自动更新';
+	let strategyText = '当前策略：自动探测';
+	if (mode === 'native') {
+		strategyText = '当前策略：仅使用上游原生 /responses';
+	} else if (mode === 'convert') {
+		strategyText = '当前策略：始终向上游发送 /chat/completions';
 	}
+	note.textContent = strategyText;
 }
 
 function saveEndpoint() {
@@ -291,33 +283,37 @@ function saveEndpoint() {
     const tagsInput = document.getElementById('endpoint-tags').value.trim();
     const tags = tagsInput ? tagsInput.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
 
-	const supportsResponsesSelect = document.getElementById('supports-responses');
-	const openaiPreferenceSelect = document.getElementById('openai-preference');
-	const data = {
-		name: document.getElementById('endpoint-name').value,
-		url_anthropic: urlAnthropic || undefined, // Anthropic URL
-		url_openai: urlOpenAI || undefined,       // OpenAI URL
-		// endpoint_type 和 path_prefix 自动推断，不再需要提交
-		auth_type: authType,
-		auth_value: authValue,
-		enabled: document.getElementById('endpoint-enabled').checked,
-		tags: tags,
-		// 移除 supported_clients - 现在自动检测
-		max_tokens_field_name: document.getElementById('max-tokens-field-name').value || '', // New: max tokens field name
-		proxy: collectProxyData(), // New: collect proxy configuration
-		header_overrides: collectHeaderOverrideData(), // New: collect header override configuration
-		parameter_overrides: collectParameterOverrideData(), // New: collect parameter override configuration
-		enhanced_protection: document.getElementById('enhanced-protection-enabled').checked, // New: enhanced protection for official accounts
-		count_tokens_enabled: document.getElementById('count-tokens-enabled').checked
-	};
-	if (supportsResponsesSelect) {
-		if (supportsResponsesSelect.value === 'true') data.supports_responses = true;
-		else if (supportsResponsesSelect.value === 'false') data.supports_responses = false;
-		else data.supports_responses = null;
-	}
-	if (openaiPreferenceSelect) {
-		data.openai_preference = openaiPreferenceSelect.value || 'auto';
-	}
+    const responsesModeSelect = document.getElementById('responses-mode');
+    const data = {
+        name: document.getElementById('endpoint-name').value,
+        url_anthropic: urlAnthropic || undefined, // Anthropic URL
+        url_openai: urlOpenAI || undefined,       // OpenAI URL
+        // endpoint_type 和 path_prefix 自动推断，不再需要提交
+        auth_type: authType,
+        auth_value: authValue,
+        enabled: document.getElementById('endpoint-enabled').checked,
+        tags: tags,
+        // 移除 supported_clients - 现在自动检测
+        max_tokens_field_name: document.getElementById('max-tokens-field-name').value || '', // New: max tokens field name
+        proxy: collectProxyData(), // New: collect proxy configuration
+        header_overrides: collectHeaderOverrideData(), // New: collect header override configuration
+        parameter_overrides: collectParameterOverrideData(), // New: collect parameter override configuration
+        enhanced_protection: document.getElementById('enhanced-protection-enabled').checked, // New: enhanced protection for official accounts
+        count_tokens_enabled: document.getElementById('count-tokens-enabled').checked
+    };
+    if (responsesModeSelect) {
+        const mode = responsesModeSelect.value || 'auto';
+        if (mode === 'native') {
+            data.supports_responses = true;
+            data.openai_preference = 'responses';
+        } else if (mode === 'convert') {
+            data.supports_responses = false;
+            data.openai_preference = 'chat_completions';
+        } else {
+            data.supports_responses = null;
+            data.openai_preference = 'auto';
+        }
+    }
     
     // Add OAuth config if present
     if (oauthConfig) {
@@ -591,10 +587,12 @@ document.addEventListener('DOMContentLoaded', function() {
         // Add event listener for blur events (when field loses focus)
         urlInput.addEventListener('blur', checkEnhancedProtectionAvailability);
     }
+
+	const responsesModeSelect = document.getElementById('responses-mode');
+	if (responsesModeSelect) {
+		responsesModeSelect.addEventListener('change', function() {
+			const mode = responsesModeSelect.value || 'auto';
+			updateSupportsRuntimeIndicator(currentSupportsRuntimeState, mode);
+		});
+	}
 });
-    // Append tool settings if provided
-    const nativeToolVal = document.getElementById('native-tool-support').value;
-    if (nativeToolVal === 'true') data.native_tool_support = true;
-    else if (nativeToolVal === 'false') data.native_tool_support = false;
-    const enhModeVal = document.getElementById('tool-enhancement-mode').value;
-    if (enhModeVal) data.tool_enhancement_mode = enhModeVal;

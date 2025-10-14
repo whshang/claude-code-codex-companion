@@ -171,8 +171,9 @@ func (v *ResponseValidator) ValidateSSEChunk(chunk []byte, endpointType string) 
 			// OpenAI格式通常不使用event字段，或者使用不同的事件类型，这里不做严格验证
 		}
 
-		if bytes.HasPrefix(line, []byte("data: ")) {
-			dataContent := line[6:]
+        // 兼容 "data:" 和 "data: " 两种写法
+        if bytes.HasPrefix(line, []byte("data:")) {
+            dataContent := bytes.TrimSpace(line[len("data:"):])
 			if len(dataContent) == 0 || string(dataContent) == "[DONE]" {
 				continue
 			}
@@ -192,16 +193,23 @@ func (v *ResponseValidator) ValidateSSEChunk(chunk []byte, endpointType string) 
 				if err := v.ValidateMessageStartUsage(data); err != nil {
 					return err
 				}
-			} else if endpointType == "openai" {
-				// OpenAI格式验证：只检查基本字段
-				// 注意：Responses API 格式的 id 在 response.id 中，而不是顶层
-				// Chat Completions 格式的 id 在顶层
-				// 因此不强制要求顶层 id 字段
-				if _, hasModel := data["model"]; !hasModel {
-					// model 字段在两种格式中都应该存在
-					return fmt.Errorf("missing 'model' field in OpenAI SSE data")
-				}
-				// OpenAI格式不要求type和object字段
+            } else if endpointType == "openai" {
+                // OpenAI格式：允许两种流式形态
+                // 1) Chat Completions chunk: 可能包含 choices / delta / finish_reason
+                // 2) Responses API 事件: {"type":"response.*", ...} 或 顶层包含 response 对象
+                if _, hasModel := data["model"]; !hasModel {
+                    // 容忍无顶层model的情况，但需命中至少一种已知结构
+                    isResponsesEvent := false
+                    if t, ok := data["type"].(string); ok && strings.HasPrefix(t, "response.") {
+                        isResponsesEvent = true
+                    }
+                    _, hasResponseObj := data["response"].(map[string]interface{})
+                    _, hasChoices := data["choices"].([]interface{})
+                    if !(isResponsesEvent || hasResponseObj || hasChoices) {
+                        return fmt.Errorf("missing 'model' field in OpenAI SSE data")
+                    }
+                }
+                // OpenAI格式不要求type和object字段
 			}
 		}
 	}

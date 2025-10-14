@@ -19,7 +19,6 @@ CCCC (Claude Code and Codex Companion) delivers:
 - 🎯 **Adaptive routing** that selects endpoints per client, learns `/responses` vs `/chat/completions` preferences, and persists them when desired.
 - 🛡️ **High availability** via multi-endpoint load balancing, health checks, tag-based routing, and granular blacklist strategies.
 - 🧠 **Runtime learning** of parameters, authentication headers, `supports_responses`, and `count_tokens` capabilities, with optional `config.yaml` persistence.
-- ⚙️ **Tool calling enhancement** that injects prompts and parses results without global configuration.
 - 📊 **Operations toolkit** including a web console, request logs, statistics dashboards, and debug bundle exports.
 
 | Capability | Claude Code native | Codex native | CCCC |
@@ -27,11 +26,10 @@ CCCC (Claude Code and Codex Companion) delivers:
 | Multi-endpoint load balancing | ❌ | ❌ | ✅ |
 | Format auto-conversion | ❌ | ❌ | ✅ |
 | Model rewriting | ❌ | ❌ | ✅ |
-| Tool calling enhancement | ❌ | ❌ | ✅ |
 | Runtime learning & persistence | ❌ | ❌ | ✅ |
 | Web console / logs / stats | ❌ | ❌ | ✅ |
 
-Deeper details live in the `docs/` folder, e.g. [Transparent Proxy Optimisation Plan](docs/透明代理优化计划_Transparent_Proxy_Optimisation_Plan.md), [Tool Calling Enhancement](docs/工具调用增强_Tool_Calling_Enhancement.md), and more.
+Deeper details live in the `docs/` folder, e.g. [Transparent Proxy Optimisation Plan](docs/透明代理优化计划_Transparent_Proxy_Optimisation_Plan.md) and more.
 
 ---
 
@@ -53,12 +51,6 @@ Deeper details live in the `docs/` folder, e.g. [Transparent Proxy Optimisation 
 - Learns unsupported parameters from 400 errors (e.g. `tools`, `tool_choice`), strips them, and retries instantly.
 - Records `supports_responses`, auth headers, `openai_preference`, and `count_tokens` support; `/admin` can save them back to `config.yaml`.
 - See [Learning Persistence Implementation](docs/学习持久化实现_Learning_Persistence_Implementation.md).
-
-### Tool calling enhancement
-- Injects guidance when `tools` appear, parses results, and emits native responses (OpenAI tool calls or Anthropic `tool_use` blocks).
-- Controlled per endpoint via `native_tool_support` and `tool_enhancement_mode`, with automatic learning and fallback.
-- Logs tool usage metrics (`tool_enhancement_applied`, `tool_call_count`, etc.).
-- See [Tool Calling Guide](docs/工具调用增强_Tool_Calling_Enhancement.md).
 
 ### Advanced configuration
 - Model rewriting (wildcards, implicit defaults, response rewrites).
@@ -140,7 +132,6 @@ See the [Configuration Guide](docs/配置指南_Configuration_Guide.md) for fiel
 
 ## 🧭 Advanced topic index
 - Transparent proxy & downgrade state machine: [Transparent Proxy Optimisation Plan](docs/透明代理优化计划_Transparent_Proxy_Optimisation_Plan.md)
-- Tool calling metrics & enhancement: [Tool Calling Enhancement](docs/工具调用增强_Tool_Calling_Enhancement.md)
 - Auth/parameter learning & persistence: [Learning Persistence Implementation](docs/学习持久化实现_Learning_Persistence_Implementation.md)
 - SSE streaming refactor: [SSE Refactor Design](docs/SSE重构设计_SSE_Refactor_Design.md)
 - GORM storage & statistics: [GORM Refactor Plan](docs/GORM重构规划_GORM_Refactor_Plan.md), [Statistics Persistence Design](docs/统计持久化设计_Statistics_Persistence_Design.md)
@@ -164,7 +155,6 @@ Changes are grouped by date in [CHANGELOG.md](CHANGELOG.md).
 ## 🙏 Acknowledgements
 
 - **Foundation**: Built with [Gin](https://github.com/gin-gonic/gin) and SQLite for persistence.
-- **Community collaboration**: Thanks to the Toolify community for sharing zero-config tool-calling ideas and real-world feedback.
 - **Upstream inspiration**: CCCC forked from [kxn/claude-code-companion](https://github.com/kxn/claude-code-companion) and aims to stay compatible with Claude Code and OpenAI Codex CLI ecosystems.
 
 If this project helps you, please consider starring ⭐ the repository. Made with ❤️ for Claude Code & Codex users.

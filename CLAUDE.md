@@ -2,19 +2,21 @@
 
 ## 📋 概述
 
-CCCC (Claude Code and Codex Companion) 为 Claude Code 提供了完整的 API 代理支持，实现多端点负载均衡、故障转移和模型重写功能。零配置工具调用能力由 Toolify 社区鼎力协助打造，文档中也包含相关指引。
+CCCC (Claude Code and Codex Companion) 为 Claude Code 提供了完整的 API 代理支持，实现多端点负载均衡、故障转移和模型重写功能。支持标准的 OpenAI 工具调用格式转换，确保与 Claude Code 的完全兼容。
 
 ### Codex 兼容性增强
 
 CCCC 完整支持 Codex 客户端，自动处理各种格式转换场景：
 
 **流式响应转换**：
-- ✅ **真实流式 SSE**：上游返回 `text/event-stream` 时，自动转换 Chat Completions SSE → Responses API SSE
+- ✅ **真实流式 SSE**：上游返回 `text/event-stream` 时，自动转换 Chat Completions SSE → Responses API SSE，兼容 "data:" 和 "data: " 两种格式
 - ✅ **模拟流式 SSE**：上游返回 JSON 但客户端期望流式时（`stream: true`），自动执行三阶段转换：
   1. Chat Completions JSON → Responses JSON
   2. Responses JSON → Responses SSE 流
   3. 立即发送并返回，避免被后续逻辑覆盖
 - ✅ **格式探测**：根据 `response_keys` 智能判断响应类型并提取内容
+- ✅ **工具调用流式映射**：基于触发信号实时检测并转换工具调用为 `response.function_call.*` 事件
+- ✅ **容错能力**：上游未产生 chunk 时构造最小响应，避免流中断
 - ✅ **事件完整性**：确保发送 `response.created`、`response.output_text.delta`、`response.completed` 三个核心事件
 
 **路径自适应**：
@@ -138,12 +140,12 @@ endpoints:
     count_tokens_enabled: false   # 可选：如上游不支持 /messages/count_tokens，可关闭以避免探测
 ```
 
-## 🧠 Tool Calling 零配置增强（感谢 Toolify）
+## 🧠 工具调用支持
 
-- 无需自定义系统提示，CCCC 会在检测到 `tools` 字段时自动注入规范化提示，并解析模型返回的 XML 函数调用。
-- 支持端点级控制：`native_tool_support` 与 `tool_enhancement_mode`（auto/force/disable），留空时会根据测试结果自动学习。
-- 请求日志会记录 `tool_enhancement_applied`、`tool_call_count` 等字段，在 `/admin/logs` 页面即可验证函数调用是否触发。
-- 若上游返回工具调用相关的业务错误，代理会自动将该端点切换到增强模式并持久化，避免持续失败。
+- CCCC 完全支持 OpenAI 标准的工具调用格式，在 Chat Completions 和 Responses API 之间正确转换工具调用。
+- 支持 `tools`、`tool_choice` 参数的标准处理。
+- 自动处理工具调用消息的格式转换，确保 `tool_calls` 和 `tool_results` 在不同 API 格式间正确映射。
+- 流式响应中支持工具调用的增量更新转换。
 
 ## 🎯 模型重写机制
 

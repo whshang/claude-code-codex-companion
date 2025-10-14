@@ -53,7 +53,6 @@
                                         <th data-t="endpoint">端点</th>
                                         <th data-t="model">模型</th>
                                         <th data-t="tags">标签</th>
-                                        <th>工具</th>
                                         <th data-t="thinking">思考</th>
                                         <th data-t="status">状态</th>
                                         <th data-t="retry">重试</th>
@@ -150,46 +149,6 @@
                                                 {{range $i, $tag := .Tags}}
                                                     <span class="badge bg-primary">{{$tag}}</span>
                                                 {{end}}
-                                            {{else}}
-                                                <small class="text-muted">-</small>
-                                            {{end}}
-                                        </td>
-                                        <td class="tools-cell">
-                                            {{if and (gt .StatusCode 0) (lt .StatusCode 400)}}
-                                                <div class="mb-1">
-                                                    {{if .ToolEnhancementMode}}
-                                                        <span class="badge bg-dark" data-bs-toggle="tooltip" data-bs-placement="top" title="工具增强模式 (auto/force/disable)">Mode: {{.ToolEnhancementMode}}</span>
-                                                    {{else}}
-                                                        <span class="badge bg-secondary" data-bs-toggle="tooltip" data-bs-placement="top" title="未配置工具增强">Mode: n/a</span>
-                                                    {{end}}
-                                                </div>
-                                                <div class="mb-1">
-                                                    {{if .ToolEnhancementApplied}}
-                                                        <span class="badge bg-info text-dark" data-bs-toggle="tooltip" data-bs-placement="top" title="本次请求已注入增强提示">Enh: applied</span>
-                                                    {{else if .ToolEnhancementMode}}
-                                                        <span class="badge bg-light text-dark border" data-bs-toggle="tooltip" data-bs-placement="top" title="计划增强但本次未注入提示">Enh: skipped</span>
-                                                    {{else}}
-                                                        <span class="badge bg-secondary" data-bs-toggle="tooltip" data-bs-placement="top" title="未启用工具增强">Enh: n/a</span>
-                                                    {{end}}
-                                                </div>
-                                                <div class="mb-1">
-                                                    {{if .ToolCallsDetected}}
-                                                        <span class="badge bg-success" data-bs-toggle="tooltip" data-bs-placement="top" title="已解析并回写工具调用响应">Calls: {{.ToolCallCount}}</span>
-                                                    {{else if .ToolEnhancementApplied}}
-                                                        <span class="badge bg-warning text-dark" data-bs-toggle="tooltip" data-bs-placement="top" title="已增强但未解析到工具调用">Calls: 0</span>
-                                                    {{else}}
-                                                        <span class="badge bg-secondary" data-bs-toggle="tooltip" data-bs-placement="top" title="请求未触发工具调用流程">Calls: -</span>
-                                                    {{end}}
-                                                </div>
-                                                <div>
-                                                    {{if .ToolNativeSupport}}
-                                                        <span class="badge bg-primary" data-bs-toggle="tooltip" data-bs-placement="top" title="该端点被判定为原生支持工具调用">Native</span>
-                                                    {{else if (and (not .ToolNativeSupport) (ne .ToolNativeSupport nil))}}
-                                                        <span class="badge bg-danger" data-bs-toggle="tooltip" data-bs-placement="top" title="该端点被判定为不支持工具调用，需增强">Non-native</span>
-                                                    {{else}}
-                                                        <span class="badge bg-secondary" data-bs-toggle="tooltip" data-bs-placement="top" title="尚未学习到端点的原生工具支持情况">Native: ?</span>
-                                                    {{end}}
-                                                </div>
                                             {{else}}
                                                 <small class="text-muted">-</small>
                                             {{end}}

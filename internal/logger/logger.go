@@ -78,13 +78,6 @@ type RequestLog struct {
 	FormatConverted     bool    `json:"format_converted"`               // 是否进行了格式转换
 	DetectionConfidence float64 `json:"detection_confidence,omitempty"` // 格式检测置信度 (0.0-1.0)
 	DetectedBy          string  `json:"detected_by,omitempty"`          // 检测方法: "path" | "body-structure" | "default"
-
-	// 新增：工具调用增强监控
-	ToolEnhancementApplied bool   `json:"tool_enhancement_applied"`        // 是否注入了工具调用增强提示
-	ToolEnhancementMode    string `json:"tool_enhancement_mode,omitempty"` // 当次请求使用的增强模式(auto/force/disable)
-	ToolCallsDetected      bool   `json:"tool_calls_detected"`             // 是否检测并改写了工具调用响应
-	ToolCallCount          int    `json:"tool_call_count,omitempty"`       // 检测到的工具调用数量
-	ToolNativeSupport      *bool  `json:"tool_native_support,omitempty"`   // 端点是否原生支持工具调用（nil 表示未知）
 }
 
 // LoggerInterface 日志接口
@@ -189,21 +182,6 @@ func (l *Logger) LogRequest(log *RequestLog) {
 			fields["tags"] = log.Tags
 		}
 
-		if log.ToolEnhancementMode != "" {
-			fields["tool_mode"] = log.ToolEnhancementMode
-		}
-
-		if log.ToolEnhancementApplied {
-			fields["tool_enhanced"] = true
-		}
-
-		if log.ToolCallsDetected {
-			fields["tool_calls"] = log.ToolCallCount
-		}
-
-		if log.ToolNativeSupport != nil {
-			fields["tool_native_support"] = *log.ToolNativeSupport
-		}
 
 		// Note: Request and response bodies are not logged to console
 		// They are available in the web admin interface

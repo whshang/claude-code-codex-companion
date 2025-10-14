@@ -2,7 +2,7 @@
 
 ## 中文
 
-代理会在运行时或端点测试时学习 `auth_type`、`openai_preference`、`supports_responses`、`native_tool_support` 等信息，并通过 `PersistEndpointLearning` 写回 `config.yaml`，确保重启后仍然生效。
+代理会在运行时或端点测试时学习 `auth_type`、`openai_preference`、`supports_responses` 等信息，并通过 `PersistEndpointLearning` 写回 `config.yaml`，确保重启后仍然生效。
 
 ### 流程
 
@@ -22,7 +22,7 @@
 
 ## English
 
-During runtime or endpoint tests, CCCC learns fields such as `auth_type`, `openai_preference`, `supports_responses`, and `native_tool_support`, then persists them via `PersistEndpointLearning` so the settings survive restarts.
+During runtime or endpoint tests, CCCC learns fields such as `auth_type`, `openai_preference`, and `supports_responses`, then persists them via `PersistEndpointLearning` so the settings survive restarts.
 
 ### Flow
 

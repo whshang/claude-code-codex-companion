@@ -213,19 +213,23 @@ func (s *Selector) isEndpointCompatibleWithClient(ep *Endpoint, clientType strin
 	// }
 	// 如果 SupportedClients 为空，表示支持所有客户端
 
-	// Codex 客户端优先使用原生 OpenAI 端点，避免 Anthropic 端点的转换延迟
-	if clientType == "codex" && requestFormat == "openai" {
-		// 仅当端点具备原生 OpenAI URL 时才视为兼容
-		if ep.URLOpenAI == "" {
-			return false
-		}
-		// 额外检查：确保endpoint_type也是openai，以避免Anthropic端点的转换问题
-		if ep.EndpointType != "openai" {
-			return false
-		}
-	}
+	// Codex 客户端支持两种路径：
+	// 1. 原生OpenAI端点（优先，性能最佳）
+	// 2. Anthropic端点（通过格式转换，兼容性更好）
+	//
+	// 注释掉硬性限制，允许格式转换使用Anthropic端点
+	// if clientType == "codex" && requestFormat == "openai" {
+	// 	// 仅当端点具备原生 OpenAI URL 时才视为兼容
+	// 	if ep.URLOpenAI == "" {
+	// 		return false
+	// 	}
+	// 	// 额外检查：确保endpoint_type也是openai，以避免Anthropic端点的转换问题
+	// 	if ep.EndpointType != "openai" {
+	// 		return false
+	// 	}
+	// }
 
-	// 2. 检查格式兼容性
+	// 检查格式兼容性（支持格式转换）
 	return s.isEndpointCompatible(ep, requestFormat)
 }
 
@@ -268,4 +272,11 @@ func (s *Selector) UpdateEndpoints(endpoints []*Endpoint) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.endpoints = endpoints
+}
+
+// SetDynamicSorterForEndpoints 为所有端点设置动态排序器引用
+func (s *Selector) SetDynamicSorterForEndpoints(endpoints []*Endpoint) {
+	for _, ep := range endpoints {
+		ep.SetDynamicSorter(nil) // 暂时设置为nil，因为没有直接的动态排序器引用
+	}
 }

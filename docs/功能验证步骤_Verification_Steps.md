@@ -13,7 +13,7 @@
    - 运行 `./cccc-setup-claude-code.sh` 与 `./cccc-setup-codex.sh` 生成配置。  
    - 分别执行 `claude`、`codex`，确认命令成功且路由到预期端点。  
 3. **工具调用**  
-   - 构造携带 `tools` 的请求，确认日志中 `tool_enhancement_applied=true` 且响应包含工具调用结果。  
+   - 构造携带 `tools` 的请求，确认响应中返回的工具调用内容被正确转发。  
 4. **降级学习**  
    - 对仅支持 `/chat/completions` 的端点发送 `/responses`，观察第二次请求成功且配置自动更新 `openai_preference=chat_completions`。  
 5. **日志导出**  
@@ -37,7 +37,7 @@ Use the following checklist to confirm that proxy routing, tool calling, downgra
    - Execute `./cccc-setup-claude-code.sh` and `./cccc-setup-codex.sh`.  
    - Run `claude` and `codex`, verifying that requests hit the intended endpoints.  
 3. **Tool calling**  
-   - Submit a request with `tools`; confirm `tool_enhancement_applied=true` and that the response embeds tool results.  
+   - Submit a request with `tools`; confirm the upstream returns valid tool call data in the response.  
 4. **Downgrade learning**  
    - Send `/responses` to an endpoint that only supports `/chat/completions`; the second attempt should succeed and set `openai_preference=chat_completions`.  
 5. **Debug export**  

@@ -20,8 +20,9 @@ type I18nConfig struct {
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host              string `yaml:"host"`
+	Port              int    `yaml:"port"`
+	AutoSortEndpoints bool   `yaml:"auto_sort_endpoints" json:"auto_sort_endpoints"` // 是否自动调整端点排序
 }
 
 type EndpointConfig struct {
@@ -44,10 +45,6 @@ type EndpointConfig struct {
 	EnhancedProtection bool                `yaml:"enhanced_protection,omitempty" json:"enhanced_protection,omitempty"`     // 官方帐号增强保护：allowed_warning时即禁用端点
 	SSEConfig          *SSEConfig          `yaml:"sse_config,omitempty" json:"sse_config,omitempty"`                       // SSE行为配置
 	OpenAIPreference   string              `yaml:"openai_preference,omitempty" json:"openai_preference,omitempty"`         // OpenAI格式偏好："responses"|"chat_completions"|"auto"
-	// 新增：原生工具调用支持（学习或手动设置）。nil 表示未知/未学习。
-	NativeToolSupport *bool `yaml:"native_tool_support,omitempty" json:"native_tool_support,omitempty"`
-	// 新增：工具调用增强模式："auto"(默认) | "force"(总是注入增强) | "disable"(从不注入增强)
-	ToolEnhancementMode string `yaml:"tool_enhancement_mode,omitempty" json:"tool_enhancement_mode,omitempty"`
 	// 新增：是否允许使用 /count_tokens 接口（默认开启）
 	CountTokensEnabled *bool `yaml:"count_tokens_enabled,omitempty" json:"count_tokens_enabled,omitempty"`
 	// 新增：显式声明是否原生支持 /responses 接口（true 表示支持，false 表示需要转换）
@@ -111,7 +108,7 @@ type PythonJSONFixingConfig struct {
 	MaxAttempts  int      `yaml:"max_attempts" json:"max_attempts"`   // 最大修复尝试次数
 }
 
-// 新增：超时配置结构
+// 网络超时配置（代理和健康检查共用）
 type TimeoutConfig struct {
 	// 网络超时设置（代理和健康检查共用）
 	TLSHandshake   string `yaml:"tls_handshake" json:"tls_handshake"`     // TLS握手超时，默认10s

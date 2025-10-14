@@ -7,7 +7,45 @@ import (
 	"strings"
 )
 
-// LegacyConvertChatResponseJSONToResponses mirrors the historical Codex conversion logic
+// ⚠️ DEPRECATED: This file contains legacy conversion functions that are no longer recommended.
+//
+// 🔧 Migration Guide:
+//
+// OLD APPROACH (legacy functions):
+//   body, err := LegacyConvertChatResponseJSONToResponses(respBody)
+//   body, err := LegacyConvertResponsesRequestJSONToChat(reqBody)
+//
+// NEW APPROACH (adapter pattern):
+//   factory := NewAdapterFactory(logger)
+//   chatAdapter := factory.OpenAIChatAdapter()
+//   responsesAdapter := factory.OpenAIResponsesAdapter()
+//
+//   // Chat → Internal → Responses
+//   internalReq, err := chatAdapter.ParseRequestJSON(chatJSON)
+//   responsesJSON, err := responsesAdapter.BuildRequestJSON(internalReq)
+//
+//   // Responses → Internal → Chat
+//   internalReq, err := responsesAdapter.ParseRequestJSON(responsesJSON)
+//   chatJSON, err := chatAdapter.BuildRequestJSON(internalReq)
+//
+// 🎯 Benefits of New Approach:
+//   ✅ Complete field mapping (presence_penalty, frequency_penalty, logit_bias, n, response_format)
+//   ✅ Dual-path fallback (支持 input 和 messages 字段)
+//   ✅ Type-safe conversions with comprehensive validation
+//   ✅ Bidirectional format support (Chat ↔ Responses)
+//   ✅ Better error handling and logging
+//   ✅ 100+ unit tests covering all edge cases
+//
+// 📌 Note: ConversionManager automatically falls back to these legacy functions if unified conversion fails.
+//         See internal/conversion/conversion_manager.go for details.
+
+// LegacyConvertChatResponseJSONToResponses mirrors the historical Codex conversion logic.
+//
+// Deprecated: Use OpenAIChatAdapter and OpenAIResponsesAdapter instead.
+// This function only maps basic fields and lacks support for:
+//   - sampling parameters (presence_penalty, frequency_penalty, logit_bias, n)
+//   - response format control (json_object, json_schema)
+//   - dual-path fallback (input vs messages)
 func LegacyConvertChatResponseJSONToResponses(body []byte) ([]byte, error) {
 	var completion map[string]interface{}
 	if err := json.Unmarshal(body, &completion); err != nil {
@@ -39,7 +77,13 @@ func LegacyConvertChatResponseJSONToResponses(body []byte) ([]byte, error) {
 	return json.Marshal(response)
 }
 
-// LegacyConvertResponsesRequestJSONToChat converts Codex /responses requests to Chat Completions format
+// LegacyConvertResponsesRequestJSONToChat converts Codex /responses requests to Chat Completions format.
+//
+// Deprecated: Use OpenAIResponsesAdapter.ParseRequestJSON() followed by OpenAIChatAdapter.BuildRequestJSON().
+// This function only handles basic field mapping and lacks:
+//   - sampling parameters (presence_penalty, frequency_penalty, logit_bias, n)
+//   - response format control
+//   - proper message content type handling (only extracts text, ignores other content types)
 func LegacyConvertResponsesRequestJSONToChat(body []byte) ([]byte, error) {
 	var requestData map[string]interface{}
 	if err := json.Unmarshal(body, &requestData); err != nil {
@@ -115,7 +159,13 @@ func LegacyConvertResponsesRequestJSONToChat(body []byte) ([]byte, error) {
 	return json.Marshal(requestData)
 }
 
-// LegacyStreamChatCompletionsToResponses keeps the original SSE conversion logic
+// LegacyStreamChatCompletionsToResponses keeps the original SSE conversion logic.
+//
+// Deprecated: Use StreamChatCompletionsToResponsesUnified() for better streaming support.
+// This function only handles basic text deltas and lacks:
+//   - complete tool call streaming with response.function_call.* events
+//   - proper event sequencing (response.created → deltas → response.completed)
+//   - robust error recovery and incomplete stream handling
 func LegacyStreamChatCompletionsToResponses(r io.Reader, w io.Writer) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, defaultScannerBuffer), defaultScannerMaxCapacity)

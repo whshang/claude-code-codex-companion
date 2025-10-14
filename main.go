@@ -37,25 +37,16 @@ func NewEmbeddedAssetProvider() *EmbeddedAssetProvider {
 
 // GetTemplateFS returns the embedded template filesystem
 func (p *EmbeddedAssetProvider) GetTemplateFS() (fs.FS, error) {
-	if UseEmbedded {
-		return fs.Sub(WebAssets, "web/templates")
-	}
 	return os.DirFS("web/templates"), nil
 }
 
-// GetStaticFS returns the embedded static filesystem  
+// GetStaticFS returns the embedded static filesystem
 func (p *EmbeddedAssetProvider) GetStaticFS() (fs.FS, error) {
-	if UseEmbedded {
-		return fs.Sub(WebAssets, "web/static")
-	}
 	return os.DirFS("web/static"), nil
 }
 
 // GetLocalesFS returns the embedded locales filesystem
 func (p *EmbeddedAssetProvider) GetLocalesFS() (fs.FS, error) {
-	if UseEmbedded {
-		return fs.Sub(WebAssets, "web/locales")
-	}
 	return os.DirFS("web/locales"), nil
 }
 

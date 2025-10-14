@@ -22,7 +22,7 @@
                         <span data-t="cccc_help">CCCC 统一配置向导</span>
                     </h2>
                     <p class="mb-2 text-muted small">
-                        感谢 <a href="https://github.com/kxn/claude-code-companion" target="_blank" rel="noopener noreferrer">原项目</a> 与 <a href="https://toolify.ai/" target="_blank" rel="noopener noreferrer">Toolify 社区</a> 的贡献支持。<br />
+                        感谢 <a href="https://github.com/kxn/claude-code-companion" target="_blank" rel="noopener noreferrer">原项目</a> 的贡献支持。<br />
                         请确认已安装 Claude Code 或 Codex，并持有任一可用模型的 API 密钥。
                     </p>
                     <div class="d-flex flex-wrap gap-2">
@@ -152,8 +152,6 @@
                                 <ul class="small">
                                     <li><strong>OpenAI:chat</strong> = 使用 Chat Completions 接口（/v1/chat/completions）</li>
                                     <li><strong>OpenAI:resp</strong> = 使用 Responses 新接口（/v1/responses）</li>
-                                    <li><strong>Tool:native</strong> = 原生支持工具调用（不注入增强）</li>
-                                    <li><strong>Tool:auto/force/disable</strong> = 工具增强模式（自动/强制/禁用）</li>
                                     <li><strong>MR:on/off</strong> = 模型重写规则开关</li>
                                     <li><strong>Enabled/Disabled & Active/Idle/Check</strong> = “端点专题”列的纯文字徽章，展示启用状态与实时健康情况</li>
                                     <li>将鼠标悬停在徽章上可查看详细提示（tooltip）</li>
@@ -167,7 +165,6 @@
                                     <li><strong>重写规则:</strong> 自定义请求/响应内容重写</li>
                             <li><strong>负载均衡:</strong> 多端点之间的负载分配策略</li>
                             <li><strong>故障转移:</strong> 主端点失败时自动切换策略</li>
-                            <li><strong>工具调用增强（零配置）:</strong> 客户端请求包含 <code>tools</code> 时自动注入提示并解析函数调用；支持端点级学习 <code>native_tool_support</code> 与增强模式 <code>tool_enhancement_mode</code>（auto/force/disable）。功能由 Toolify 社区协同打造，非流式已集成，流式（SSE）将于后续接入。详见 <code>docs/工具调用增强_Tool_Calling_Enhancement.md</code></li>
                             <li><strong>count_tokens 本地兜底:</strong> 针对不兼容供应商，可关闭端点级 <code>count_tokens</code> 支持；全部端点不支持时，CCCC 会返回标记 <code>proxy_estimated=true</code> 的轻量估算结果。</li>
                         </ul>
 
