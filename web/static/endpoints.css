@@ -81,8 +81,53 @@
     padding: 2px 5px;
 }
 
-.response-cell {
+/* 状态和测试单元格优化 */
+.status-cell {
     min-width: 120px;
+}
+
+.test-cell {
+    min-width: 120px;
+}
+
+
+.config-section {
+    border-bottom: 1px solid #e9ecef;
+    padding-bottom: 0.25rem;
+    margin-bottom: 0.25rem;
+}
+
+.config-section .btn-group-sm .btn {
+    padding: 1px 3px;
+    font-size: 0.7rem;
+}
+
+.status-section .badge {
+    margin-right: 2px;
+    margin-bottom: 2px;
+}
+
+/* Actions grid: 2 rows x 3 columns to reduce width */
+.action-buttons .actions-grid {
+    display: grid;
+    grid-template-columns: repeat(3, auto);
+    gap: 4px 6px;
+    align-items: center;
+}
+.action-buttons .btn {
+    padding: 2px 6px;
+}
+
+/* URL cell: smaller font & wrap to reduce horizontal scroll */
+.url-cell code {
+    font-size: 12px;
+    word-break: break-all;
+    white-space: normal;
+}
+
+/* 工具提示优化 */
+[data-bs-toggle="tooltip"] {
+    cursor: help;
 }
 
 /* Actions grid: 2 rows x 3 columns to reduce width */

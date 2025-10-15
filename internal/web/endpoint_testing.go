@@ -116,18 +116,38 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		testModel := s.selectTestModel(ep, "openai")
 		originalModel = testModel
 
-		// OpenAI格式请求体
-		reqBody := map[string]interface{}{
-			"model":      testModel,
-			"max_tokens": 10,
-			"stream":     stream, // 支持流式测试
-			"messages": []map[string]interface{}{
-				{
-					"role":    "user",
-					"content": "Hi",
+		// 🔧 修复: 根据路径选择正确的请求体格式
+		var reqBody map[string]interface{}
+		if openaiPath == "/responses" {
+			// Codex/Responses API格式 (OpenAI新版)
+			reqBody = map[string]interface{}{
+				"model": testModel,
+				"input": []map[string]interface{}{
+					{
+						"role": "user",
+						"content": []map[string]interface{}{
+							{"type": "input_text", "text": "Hi"},
+						},
+					},
 				},
-			},
+				"max_tokens": 10,
+				"stream":     stream,
+			}
+		} else {
+			// Chat Completions格式 (传统格式)
+			reqBody = map[string]interface{}{
+				"model":      testModel,
+				"max_tokens": 10,
+				"stream":     stream,
+				"messages": []map[string]interface{}{
+					{
+						"role":    "user",
+						"content": "Hi",
+					},
+				},
+			}
 		}
+
 		requestBody, err = json.Marshal(reqBody)
 		if err != nil {
 			result.Error = fmt.Sprintf("failed to marshal request: %v", err)
@@ -441,7 +461,8 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 	s.logger.Debug(fmt.Sprintf("Endpoint test response (%s): %s", format, responsePreview), nil)
 
 	// 先检查是否是错误响应（某些端点可能用200状态码返回错误）
-	if errorField, hasError := jsonResp["error"]; hasError {
+	// 🔧 修复: 忽略 error 字段为 null 的情况（某些API在正常响应中也包含 "error": null）
+	if errorField, hasError := jsonResp["error"]; hasError && errorField != nil {
 		if errorMap, ok := errorField.(map[string]interface{}); ok {
 			if msg, ok := errorMap["message"].(string); ok {
 				result.Error = fmt.Sprintf("API error: %s", msg)
@@ -605,10 +626,17 @@ func (s *AdminServer) testOpenAIPath(ep *endpoint.Endpoint, path string, timeout
 	// 构建请求体（根据路径选择格式）
 	var reqBody map[string]interface{}
 	if path == "/responses" {
-		// Codex新格式
+		// Codex新格式 - 使用结构化的input数组（与testEndpointFormatWithStream保持一致）
 		reqBody = map[string]interface{}{
 			"model": testModel,
-			"input": "Hi",
+			"input": []map[string]interface{}{
+				{
+					"role": "user",
+					"content": []map[string]interface{}{
+						{"type": "input_text", "text": "Hi"},
+					},
+				},
+			},
 			"max_tokens": 10,
 			"stream": false,
 		}

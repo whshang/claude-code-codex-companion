@@ -114,76 +114,90 @@ function rebuildTable(endpoints) {
             tagsDisplay = '<span class="text-muted" data-bs-toggle="tooltip" title="通用端点"><i class="fas fa-globe"></i></span>';
         }
 
-        // Build config chips
+        // Build config chips - 使用span而不是button，因为这些是状态显示，不是可交互按钮
         const chips = [];
-        // Auth first (merged column)
+        // Auth status - 使用span表示状态信息
         chips.push(authTypeBadge);
-        // OpenAI preference
+        // OpenAI preference - 使用span表示状态信息
         const pref = (endpoint.openai_preference || 'auto');
         const prefShort = pref === 'chat_completions' ? 'chat' : (pref === 'responses' ? 'resp' : 'auto');
         let prefTip = 'OpenAI 偏好：auto（自动探测并学习）';
         if (prefShort === 'chat') prefTip = 'OpenAI 偏好：chat_completions（/v1/chat/completions）';
         if (prefShort === 'resp') prefTip = 'OpenAI 偏好：responses（/v1/responses）';
         chips.push(`<span class="badge bg-primary" data-bs-toggle="tooltip" title="${prefTip}"><i class="fas fa-robot"></i></span>`);
-        // Model rewrite
+        // Model rewrite - 使用span表示状态信息
         const mrEnabled = endpoint.model_rewrite && endpoint.model_rewrite.enabled === true;
         chips.push(`<span class="badge ${mrEnabled ? 'bg-info' : 'bg-secondary'}" data-bs-toggle="tooltip" title="模型重写：${mrEnabled ? '启用（应用映射规则）' : '关闭'}"><i class="fas fa-exchange-alt"></i></span>`);
-        // Proxy auth note already shown in proxyDisplay
         const configDisplay = chips.join(' ');
 
         const supportsConfig = endpoint.supports_responses;
         const activeSupportsMode = supportsConfig === true ? 'native' : supportsConfig === false ? 'convert' : 'auto';
 
+        // 根据配置状态和学习状态生成综合状态信息 - 优化显示逻辑，避免重复
+        const nativeFormat = endpoint.native_codex_format;
+        const prefValue = (endpoint.openai_preference || 'auto');
+
+        // 简化状态显示：只显示最重要的信息
+        let statusBadges = [];
+
+        // 1. 首先显示配置与学习状态的综合信息（最重要的）
+        if (supportsConfig === true && nativeFormat === true) {
+            // 都是原生支持
+            statusBadges.push('<span class="badge bg-success" data-bs-toggle="tooltip" title="配置与学习状态一致：原生支持 /responses">原生支持</span>');
+        } else if (supportsConfig === false && nativeFormat === false) {
+            // 都是需要转换
+            statusBadges.push('<span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="配置与学习状态一致：需要转换为 /chat/completions">需要转换</span>');
+        } else if (supportsConfig !== null && nativeFormat !== null && supportsConfig !== nativeFormat) {
+            // 配置和学习状态不一致，显示冲突警告
+            statusBadges.push('<span class="badge bg-danger" data-bs-toggle="tooltip" title="警告：配置与学习状态不一致">状态冲突</span>');
+        } else {
+            // 至少一个未知，显示详细信息
+            if (supportsConfig === true) {
+                statusBadges.push('<span class="badge bg-success" data-bs-toggle="tooltip" title="显式声明：始终视为原生支持 /responses">配置: 原生</span>');
+            } else if (supportsConfig === false) {
+                statusBadges.push('<span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="显式声明：始终转换为 /chat/completions">配置: 转换</span>');
+            } else {
+                statusBadges.push('<span class="badge bg-secondary" data-bs-toggle="tooltip" title="显式声明：自动探测并按学习结果切换">配置: 自动</span>');
+            }
+
+            if (nativeFormat === true) {
+                statusBadges.push('<span class="badge bg-success" data-bs-toggle="tooltip" title="最近探测结果：端点返回原生 /responses">学习: 原生</span>');
+            } else if (nativeFormat === false) {
+                statusBadges.push('<span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="最近探测结果：端点需转换为 /chat/completions">学习: 转换</span>');
+            } else {
+                statusBadges.push('<span class="badge bg-secondary" data-bs-toggle="tooltip" title="尚未探测或缺少近期请求">学习: 待探测</span>');
+            }
+        }
+
+        // 2. 显示OpenAI偏好（重要配置信息）
+        let prefLabel = 'Auto';
+        let prefTip2 = 'OpenAI 偏好：auto（自动探测并学习）';
+        if (prefValue === 'responses') {
+            prefLabel = 'Responses';
+            prefTip2 = 'OpenAI 偏好：responses（优先请求 /v1/responses）';
+        } else if (prefValue === 'chat_completions') {
+            prefLabel = 'Chat';
+            prefTip2 = 'OpenAI 偏好：chat_completions（直接请求 /v1/chat/completions）';
+        }
+        statusBadges.push(`<span class="badge bg-info" data-bs-toggle="tooltip" title="${prefTip2}">偏好: ${prefLabel}</span>`);
+
+        // 3. 支持模式切换按钮组（可交互元素使用button）
         const renderSupportsButton = (mode, tooltip, icon) => {
             const isActive = activeSupportsMode === mode;
             const baseClass = isActive ? 'btn btn-primary btn-sm' : 'btn btn-outline-secondary btn-sm';
             return `<button type="button" class="${baseClass}" data-action="set-supports" data-endpoint="${escapeHtml(endpoint.name)}" data-mode="${mode}" data-bs-toggle="tooltip" title="${tooltip}"><i class="fas ${icon}"></i></button>`;
         };
 
-        let configBadge;
-        if (supportsConfig === true) {
-            configBadge = '<span class="badge bg-success" data-bs-toggle="tooltip" title="显式声明：始终视为原生支持 /responses">配置: 原生</span>';
-        } else if (supportsConfig === false) {
-            configBadge = '<span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="显式声明：始终转换为 /chat/completions">配置: 转换</span>';
-        } else {
-            configBadge = '<span class="badge bg-secondary" data-bs-toggle="tooltip" title="显式声明：自动探测并按学习结果切换">配置: 自动</span>';
-        }
+        const configCellHTML = `
+            <div class="config-section">
+                <div class="mb-2">${configDisplay}</div>
+            </div>
+        `;
 
-        const nativeFormat = endpoint.native_codex_format;
-        let runtimeBadge;
-        if (nativeFormat === true) {
-            runtimeBadge = '<span class="badge bg-success" data-bs-toggle="tooltip" title="最近探测结果：端点返回原生 /responses">学习: 原生</span>';
-        } else if (nativeFormat === false) {
-            runtimeBadge = '<span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="最近探测结果：端点需转换为 /chat/completions">学习: 转换</span>';
-        } else {
-            runtimeBadge = '<span class="badge bg-secondary" data-bs-toggle="tooltip" title="尚未探测或缺少近期请求">学习: 待探测</span>';
-        }
-
-        const prefValue = (endpoint.openai_preference || 'auto');
-        let prefLabel = 'Auto';
-        prefTip = 'OpenAI 偏好：auto（自动探测并学习）';
-        if (prefValue === 'responses') {
-            prefLabel = 'Responses';
-            prefTip = 'OpenAI 偏好：responses（优先请求 /v1/responses）';
-        } else if (prefValue === 'chat_completions') {
-            prefLabel = 'Chat';
-            prefTip = 'OpenAI 偏好：chat_completions（直接请求 /v1/chat/completions）';
-        }
-        const preferenceBadge = `<span class="badge bg-info" data-bs-toggle="tooltip" title="${prefTip}">偏好: ${prefLabel}</span>`;
-
-        const responseCellHTML = `
-            <div class="supports-responses-cell">
-                <div class="mb-2 d-flex flex-wrap gap-1">
-                    ${configBadge}
-                    ${runtimeBadge}
-                    ${preferenceBadge}
-                </div>
-                <div class="btn-group btn-group-sm" role="group" aria-label="supports responses toggle">
-                    ${renderSupportsButton('auto', '自动探测：保持代理自适应策略', 'fa-sync')}
-                    ${renderSupportsButton('native', '锁定原生：始终请求 /responses', 'fa-plug')}
-                    ${renderSupportsButton('convert', '强制转换：始终请求 /chat/completions', 'fa-random')}
-                </div>
-                <small class="text-muted d-block mt-1">配置影响后续请求；学习状态来自最近健康检查</small>
+        // 构建状态信息
+        const statusCellHTML = `
+            <div class="status-section">
+                ${profileBadgesHTML}
             </div>
         `;
 
@@ -199,11 +213,15 @@ function rebuildTable(endpoints) {
             <td class="url-cell">${urlDisplay}</td>
             <td>${proxyDisplay}</td>
             <td>${tagsDisplay}</td>
-            <td>${configDisplay}</td>
-            <td class="response-cell">
-                ${responseCellHTML}
+            <td class="config-cell">${configCellHTML}</td>
+            <td class="status-cell">${statusCellHTML}</td>
+            <td class="test-cell">
+                <div class="test-results-container">
+                    <div class="test-result-item">
+                        <span class="text-muted">-</span>
+                    </div>
+                </div>
             </td>
-            <td data-cell-type="status">${profileBadgesHTML}</td>
             <td class="action-buttons">
                 <div class="actions-grid">
                     <button class="btn ${endpoint.enabled ? 'btn-success' : 'btn-secondary'} btn-sm" data-action="toggle-endpoint" onclick="event.stopPropagation(); toggleEndpointEnabled('${escapeHtml(endpoint.name)}', ${endpoint.enabled})" data-bs-toggle="tooltip" title="${endpoint.enabled ? '点击禁用' : '点击启用'}"><i class="fas ${endpoint.enabled ? 'fa-toggle-on' : 'fa-toggle-off'}"></i></button>
@@ -275,29 +293,5 @@ function updateEndpointToggleButton(endpointName, enabled) {
     }
 }
 
-function updateEndpointStatusBadge(endpointName, enabled, status) {
-    // Try to find in special endpoint list first
-    let row = document.querySelector(`#special-endpoint-list tr[data-endpoint-name="${endpointName}"]`);
-    if (!row) {
-        // If not found, search in general endpoint list
-        row = document.querySelector(`#general-endpoint-list tr[data-endpoint-name="${endpointName}"]`);
-    }
-
-	if (row) {
-		const statusCell = row.querySelector('[data-cell-type="status"]');
-		if (!statusCell) return;
-
-		const badges = [];
-		badges.push(enabled ? '<span class="badge bg-success">Enabled</span>' : '<span class="badge bg-secondary text-dark">Disabled</span>');
-
-		if (status === 'active') {
-			badges.push('<span class="badge bg-primary">Active</span>');
-		} else if (status === 'inactive') {
-			badges.push('<span class="badge bg-warning text-dark">Idle</span>');
-		} else {
-			badges.push('<span class="badge bg-info text-dark">Check</span>');
-		}
-
-		statusCell.innerHTML = badges.join(' ');
-	}
-}
+// Note: updateEndpointStatusBadge function has been removed as status is now part of the combined status cell
+// that gets rebuilt entirely when endpoints are refreshed

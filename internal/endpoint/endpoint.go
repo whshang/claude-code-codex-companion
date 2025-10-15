@@ -41,7 +41,7 @@ type Endpoint struct {
 	ID                 string                     `json:"id"`
 	Name               string                     `json:"name"`
 	URLAnthropic       string                     `json:"url_anthropic,omitempty"` // Anthropic格式URL
-	URLOpenAI          string                     `json:"url_openai,omitempty"`    // OpenAI格式URL
+	URLOpenAI          string                     `json:"url_openai"`    // OpenAI格式URL
 	EndpointType       string                     `json:"endpoint_type"`           // 自动推断的端点类型（内部使用）
 	AuthType           string                     `json:"auth_type"`
 	AuthValue          string                     `json:"auth_value"`

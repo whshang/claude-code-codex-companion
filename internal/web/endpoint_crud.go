@@ -281,12 +281,9 @@ func (s *AdminServer) handleUpdateEndpoint(c *gin.Context) {
 			if request.Name != "" {
 				currentEndpoints[i].Name = request.Name
 			}
-			if request.URLAnthropic != "" {
-				currentEndpoints[i].URLAnthropic = request.URLAnthropic
-			}
-			if request.URLOpenAI != "" {
-				currentEndpoints[i].URLOpenAI = request.URLOpenAI
-			}
+			// 允许空字符串更新现有的URL值（用于清除URL）
+			currentEndpoints[i].URLAnthropic = request.URLAnthropic
+			currentEndpoints[i].URLOpenAI = request.URLOpenAI
 			if request.AuthType != "" {
 				if request.AuthType != "api_key" && request.AuthType != "auth_token" && request.AuthType != "oauth" && request.AuthType != "auto" {
 					c.JSON(http.StatusBadRequest, gin.H{"error": "auth_type must be 'api_key', 'auth_token', 'oauth', or 'auto'"})

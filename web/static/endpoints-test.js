@@ -192,10 +192,10 @@ async function testEndpoint(endpointName) {
     }
 
     // 更新UI显示测试中状态
-    const responseCell = document.querySelector(`tr[data-endpoint-name="${endpointName}"] .response-cell`);
-    if (responseCell) {
-        responseCell.innerHTML = '<span class="text-muted"><i class="fas fa-spinner fa-spin"></i> 测试中...</span>';
-        setupResponseCellTooltip(responseCell, 'Testing...');
+    const testCell = document.querySelector(`tr[data-endpoint-name="${endpointName}"] .test-cell`);
+    if (testCell) {
+        testCell.innerHTML = '<span class="text-muted"><i class="fas fa-spinner fa-spin"></i> 测试中...</span>';
+        setupResponseCellTooltip(testCell, 'Testing...');
     }
 
     try {
@@ -215,13 +215,19 @@ async function testEndpoint(endpointName) {
         saveTestResultsCache();
 
         // 更新UI显示测试结果
-        if (responseCell) {
-            applyResponseCellContent(endpointName, responseCell);
+        if (testCell) {
+            const view = getEndpointTestResultsView(endpointName);
+            testCell.innerHTML = view.html;
+            setupResponseCellTooltip(testCell, view.tooltip);
+            if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
+                const tooltipEls = [].slice.call(testCell.querySelectorAll('[data-bs-toggle="tooltip"]'));
+                tooltipEls.forEach(refreshTooltip);
+            }
         }
     } catch (error) {
         console.warn('Test endpoint error:', error);
-        if (responseCell) {
-            setResponseCellError(responseCell, '测试失败');
+        if (testCell) {
+            setResponseCellError(testCell, '测试失败');
         }
     } finally {
         if (btn) {
@@ -244,13 +250,13 @@ async function testAllEndpoints() {
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 批量测试中...';
     }
 
-    // 更新所有端点的响应列显示测试中状态
+    // 更新所有端点的状态列显示测试中状态
     const allRows = document.querySelectorAll('tr[data-endpoint-name]');
     allRows.forEach(row => {
-        const responseCell = row.querySelector('.response-cell');
-        if (responseCell) {
-            responseCell.innerHTML = '<span class="text-muted"><i class="fas fa-spinner fa-spin"></i> 测试中...</span>';
-            setupResponseCellTooltip(responseCell, 'Testing...');
+        const testCell = row.querySelector('.test-cell');
+        if (testCell) {
+            testCell.innerHTML = '<span class="text-muted"><i class="fas fa-spinner fa-spin"></i> 测试中...</span>';
+            setupResponseCellTooltip(testCell, 'Testing...');
         }
     });
 
@@ -268,9 +274,11 @@ async function testAllEndpoints() {
                 testResultsCache[result.endpoint_name] = result;
 
                 // 实时更新UI
-                const responseCell = document.querySelector(`tr[data-endpoint-name="${result.endpoint_name}"] .response-cell`);
-            if (responseCell) {
-                applyResponseCellContent(result.endpoint_name, responseCell);
+                const testCell = document.querySelector(`tr[data-endpoint-name="${result.endpoint_name}"] .test-cell`);
+            if (testCell) {
+                const view = getEndpointTestResultsView(result.endpoint_name);
+                testCell.innerHTML = view.html;
+                setupResponseCellTooltip(testCell, view.tooltip);
             }
 
                 // 更新进度
@@ -304,8 +312,8 @@ async function testAllEndpoints() {
             eventSource.close();
 
             // 对所有仍在测试中的端点显示失败状态
-            document.querySelectorAll('tr[data-endpoint-name] .response-cell').forEach(cell => {
-                if (cell.innerHTML.includes('fa-spinner')) {
+            document.querySelectorAll('tr[data-endpoint-name] .test-cell').forEach(cell => {
+                if (cell && cell.innerHTML.includes('fa-spinner')) {
                     setResponseCellError(cell, '测试失败');
                 }
             });
@@ -321,9 +329,10 @@ async function testAllEndpoints() {
         console.error('Batch test error:', error);
 
         // 对所有端点显示测试失败状态
-        document.querySelectorAll('tr[data-endpoint-name] .response-cell').forEach(cell => {
-            if (cell.innerHTML.includes('fa-spinner')) {
-                setResponseCellError(cell, '测试失败');
+        document.querySelectorAll('tr[data-endpoint-name] .status-cell').forEach(cell => {
+            const responseCell = cell.querySelector('.supports-responses-cell');
+            if (responseCell && responseCell.innerHTML.includes('fa-spinner')) {
+                setResponseCellError(responseCell, '测试失败');
             }
         });
 
@@ -341,9 +350,15 @@ function restoreCachedTestResults() {
     document.querySelectorAll('tr[data-endpoint-name]').forEach(row => {
         const endpointName = row.getAttribute('data-endpoint-name');
         if (endpointName && testResultsCache[endpointName]) {
-            const responseCell = row.querySelector('.response-cell');
-            if (responseCell) {
-                applyResponseCellContent(endpointName, responseCell);
+            const testCell = row.querySelector('.test-cell');
+            if (testCell) {
+                const view = getEndpointTestResultsView(endpointName);
+                testCell.innerHTML = view.html;
+                setupResponseCellTooltip(testCell, view.tooltip);
+                if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
+                    const tooltipEls = [].slice.call(testCell.querySelectorAll('[data-bs-toggle="tooltip"]'));
+                    tooltipEls.forEach(refreshTooltip);
+                }
             }
         }
     });
@@ -379,9 +394,12 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('tr[data-endpoint-name]').forEach(row => {
         const endpointName = row.getAttribute('data-endpoint-name');
         if (endpointName && testResultsCache[endpointName]) {
-            const responseCell = row.querySelector('.response-cell');
-            if (responseCell) {
-                applyResponseCellContent(endpointName, responseCell);
+            const statusCell = row.querySelector('.status-cell');
+            if (statusCell) {
+                const responseCell = statusCell.querySelector('.supports-responses-cell');
+                if (responseCell) {
+                    applyResponseCellContent(endpointName, responseCell);
+                }
             }
         }
     });
@@ -397,9 +415,12 @@ document.addEventListener('endpointsLoaded', () => {
     document.querySelectorAll('tr[data-endpoint-name]').forEach(row => {
         const endpointName = row.getAttribute('data-endpoint-name');
         if (endpointName && testResultsCache[endpointName]) {
-            const responseCell = row.querySelector('.response-cell');
-            if (responseCell) {
-                applyResponseCellContent(endpointName, responseCell);
+            const statusCell = row.querySelector('.status-cell');
+            if (statusCell) {
+                const responseCell = statusCell.querySelector('.supports-responses-cell');
+                if (responseCell) {
+                    applyResponseCellContent(endpointName, responseCell);
+                }
             }
         }
     });

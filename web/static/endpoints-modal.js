@@ -286,8 +286,8 @@ function saveEndpoint() {
     const responsesModeSelect = document.getElementById('responses-mode');
     const data = {
         name: document.getElementById('endpoint-name').value,
-        url_anthropic: urlAnthropic || undefined, // Anthropic URL
-        url_openai: urlOpenAI || undefined,       // OpenAI URL
+        url_anthropic: urlAnthropic === '' ? '' : urlAnthropic || undefined, // Anthropic URL - 明确发送空字符串来清空
+        url_openai: urlOpenAI === '' ? '' : urlOpenAI || undefined,       // OpenAI URL - 明确发送空字符串来清空
         // endpoint_type 和 path_prefix 自动推断，不再需要提交
         auth_type: authType,
         auth_value: authValue,
@@ -443,7 +443,6 @@ async function toggleEndpointEnabled(endpointName, currentEnabled) {
 
         showAlert(T('endpoint_action_success', '端点 "{0}" 已{1}').replace('{0}', endpointName).replace('{1}', actionText), 'success');
         updateEndpointToggleButton(endpointName, newEnabled);
-        updateEndpointStatusBadge(endpointName, newEnabled, currentStatus);
         if (currentEndpoint) {
             currentEndpoint.enabled = newEnabled;
         }
