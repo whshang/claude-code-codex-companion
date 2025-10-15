@@ -62,6 +62,31 @@
     margin-right: 0.25rem;
     color: #6c757d;
 }
+/* 名称和URL组合单元格样式 */
+.endpoint-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.endpoint-name {
+    font-weight: bold;
+    color: #333;
+}
+
+.endpoint-url {
+    font-size: 0.875rem;
+}
+
+.endpoint-url .small {
+    font-size: 0.875rem;
+}
+
+.endpoint-url .badge {
+    font-size: 0.75rem;
+    margin-bottom: 2px;
+}
+
 /* 测试结果样式 */
 .test-results-container {
     display: flex;
@@ -118,13 +143,6 @@
     padding: 2px 6px;
 }
 
-/* URL cell: smaller font & wrap to reduce horizontal scroll */
-.url-cell code {
-    font-size: 12px;
-    word-break: break-all;
-    white-space: normal;
-}
-
 /* 工具提示优化 */
 [data-bs-toggle="tooltip"] {
     cursor: help;
@@ -139,13 +157,6 @@
 }
 .action-buttons .btn {
     padding: 2px 6px;
-}
-
-/* URL cell: smaller font & wrap to reduce horizontal scroll */
-.url-cell code {
-    font-size: 12px;
-    word-break: break-all;
-    white-space: normal;
 }
 
 /* 工具提示优化 */

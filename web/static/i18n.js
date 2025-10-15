@@ -113,16 +113,11 @@
             if (this.translations.has(lang)) {
                 return Promise.resolve();
             }
-            
+
             // Create empty map first
             this.translations.set(lang, new Map());
-            
-            // For default language (zh-cn), we don't need to load from server
-            if (lang === this.config.defaultLanguage) {
-                return Promise.resolve();
-            }
-            
-            // Load from server for non-default languages
+
+            // Always load from server for all languages (including default)
             return fetch(`/admin/api/translations`)
                 .then(response => {
                     if (!response.ok) {
@@ -168,22 +163,17 @@
         // Main translation function
         translate: function(key, fallback = null) {
             if (!key) return fallback || '';
-            
-            // For default language, return fallback or key
-            if (this.config.currentLanguage === this.config.defaultLanguage) {
-                return fallback || key;
-            }
-            
+
             // Check cache first
             const cacheKey = this.config.currentLanguage + ':' + key;
             if (this.cache.has(cacheKey)) {
                 return this.cache.get(cacheKey);
             }
-            
+
             // Get translation
             let translation = null;
             const langData = this.translations.get(this.config.currentLanguage);
-            
+
             if (langData && langData.has(key)) {
                 translation = langData.get(key);
             } else if (this.config.fallbackEnabled && fallback) {
@@ -191,10 +181,10 @@
             } else {
                 translation = key;
             }
-            
+
             // Cache the result
             this.cache.set(cacheKey, translation);
-            
+
             return translation;
         },
         

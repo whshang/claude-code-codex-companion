@@ -369,6 +369,32 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 	// 检查状态码
 	errorMessage := ""
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// 🔧 特殊处理：OpenAI格式404错误（端点不支持/responses路径）
+		if format == "openai" && resp.StatusCode == 404 && strings.Contains(testURL, "/responses") {
+			result.Error = fmt.Sprintf("HTTP 404: Endpoint does not support /responses (Codex format). Only supports Claude Code (/messages).")
+			errorMessage = result.Error
+			// 记录测试请求
+			if s.logger != nil {
+				s.logger.LogRequest(&logger.RequestLog{
+					RequestID:      testRequestID,
+					Timestamp:      testStartTime,
+					Method:         "POST",
+					Path:           testURL,
+					Endpoint:       ep.Name,
+					ClientType:     "test",
+					RequestFormat:  format,
+					OriginalModel:  originalModel,
+					RewrittenModel: rewrittenModel,
+					StatusCode:     resp.StatusCode,
+					Error:          errorMessage,
+					DurationMs:     time.Since(testStartTime).Milliseconds(),
+					RequestBody:    string(requestBody),
+					ResponseBody:   string(body),
+				})
+			}
+			return result
+		}
+
 		// 尝试解析错误信息
 		var errResp map[string]interface{}
 		if json.Unmarshal(body, &errResp) == nil {
@@ -397,7 +423,8 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		// 🔍 检查是否为客户端验证失败（端点正常，但拒绝测试请求）
 		isClientValidationFailure := validator.CheckClientValidation(resp.StatusCode, string(body), errorMessage)
 
-		if isClientValidationFailure {
+		// 🔧 修复：404错误不应被视为客户端验证失败，应该标记为失败
+		if isClientValidationFailure && resp.StatusCode != 404 {
 			// 客户端验证失败视为"成功"（端点正常响应，只是拒绝了测试）
 			result.Success = true
 			result.Error = "" // 清除错误信息
@@ -426,8 +453,8 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 			})
 		}
 
-		// 如果是客户端验证失败，直接返回成功结果
-		if isClientValidationFailure {
+		// 如果是客户端验证失败且不是404，直接返回成功结果
+		if isClientValidationFailure && resp.StatusCode != 404 {
 			return result
 		}
 
@@ -442,7 +469,7 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		result.Error = errorMsg
 
 		// 🔍 检查JSON解析错误是否为客户端验证失败（通常是返回了HTML页面）
-		if validator.CheckClientValidation(resp.StatusCode, string(body), errorMsg) {
+		if validator.CheckClientValidation(resp.StatusCode, string(body), errorMsg) && resp.StatusCode != 404 {
 			result.Success = true
 			result.Error = ""
 			s.logger.Info(fmt.Sprintf("Endpoint %s (%s) rejected test request (non-JSON response): %s",
@@ -477,7 +504,7 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		}
 
 		// 🔍 检查API错误是否为客户端验证失败
-		if validator.CheckClientValidation(resp.StatusCode, string(body), errorMessage) {
+		if validator.CheckClientValidation(resp.StatusCode, string(body), errorMessage) && resp.StatusCode != 404 {
 			result.Success = true
 			result.Error = ""
 			s.logger.Info(fmt.Sprintf("Endpoint %s (%s) rejected test request (API error): %s",

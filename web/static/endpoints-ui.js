@@ -84,16 +84,16 @@ function rebuildTable(endpoints) {
             urlDisplay = ` ${escapeHtml(endpoint.url || '-')}`;
         }
 
-        // Build auth badge (will be merged into config chips)
+        // Build auth badge (will be merged into config chips) - 只用颜色区分，不需要图标
         let authTypeBadge;
         if (endpoint.auth_type === 'api_key') {
-            authTypeBadge = '<span class="badge bg-primary" data-bs-toggle="tooltip" title="认证方式：x-api-key (api_key)"><i class="fas fa-key"></i></span>';
+            authTypeBadge = `<span class="badge bg-primary" data-bs-toggle="tooltip" title="${T('authentication_method_api_key_tooltip')}">${T('auth_type_key')}</span>`;
         } else if (endpoint.auth_type === 'oauth') {
-            authTypeBadge = '<span class="badge bg-success" data-bs-toggle="tooltip" title="认证方式：OAuth（支持自动刷新）"><i class="fas fa-id-badge"></i></span>';
+            authTypeBadge = `<span class="badge bg-success" data-bs-toggle="tooltip" title="${T('authentication_method_oauth_tooltip')}">${T('auth_type_oauth')}</span>`;
         } else if (endpoint.auth_type === 'auto') {
-            authTypeBadge = '<span class="badge bg-info" data-bs-toggle="tooltip" title="认证方式：auto（自动探测并学习）"><i class="fas fa-magic"></i></span>';
+            authTypeBadge = `<span class="badge bg-info" data-bs-toggle="tooltip" title="${T('authentication_method_auto_tooltip')}">${T('auth_type_auto')}</span>`;
         } else {
-            authTypeBadge = '<span class="badge bg-secondary" data-bs-toggle="tooltip" title="认证方式：Authorization Bearer (auth_token)"><i class="fas fa-lock"></i></span>';
+            authTypeBadge = `<span class="badge bg-secondary" data-bs-toggle="tooltip" title="${T('authentication_method_auth_token_tooltip')}">${T('auth_type_auth')}</span>`;
         }
         
         // Build proxy status display
@@ -101,33 +101,48 @@ function rebuildTable(endpoints) {
         if (endpoint.proxy && endpoint.proxy.type && endpoint.proxy.address) {
             const proxyType = endpoint.proxy.type.toUpperCase();
             const hasAuth = endpoint.proxy.username;
-            proxyDisplay = `<span class="badge bg-warning" data-bs-toggle="tooltip" title="代理: ${endpoint.proxy.type}://${endpoint.proxy.address}${hasAuth ? ' (已认证)' : ''}">${proxyType}</span>`;
+            proxyDisplay = `<span class="badge bg-warning" data-bs-toggle="tooltip" title="${T('proxy_with_auth')}: ${endpoint.proxy.type}://${endpoint.proxy.address}${hasAuth ? ` (${T('proxy_auth')})` : ''}">${proxyType}</span>`;
         } else {
-            proxyDisplay = '<span class="text-muted" data-bs-toggle="tooltip" title="无代理配置"><i class="fas fa-times-circle"></i></span>';
+            proxyDisplay = `<span class="text-muted" data-bs-toggle="tooltip" title="${T('no_proxy')}"><i class="fas fa-times-circle"></i></span>`;
         }
         
         // Build tags display
         let tagsDisplay = '';
         if (endpoint.tags && endpoint.tags.length > 0) {
-            tagsDisplay = endpoint.tags.map(tag => `<span class="badge bg-info me-1 mb-1" data-bs-toggle="tooltip" title="标签">${escapeHtml(tag)}</span>`).join('');
+            tagsDisplay = endpoint.tags.map(tag => `<span class="badge bg-info me-1 mb-1" data-bs-toggle="tooltip" title="${T('tags')}">${escapeHtml(tag)}</span>`).join('');
         } else {
-            tagsDisplay = '<span class="text-muted" data-bs-toggle="tooltip" title="通用端点"><i class="fas fa-globe"></i></span>';
+            tagsDisplay = `<span class="text-muted" data-bs-toggle="tooltip" title="${T('general_endpoints')}"><i class="fas fa-globe"></i></span>`;
         }
 
         // Build config chips - 使用span而不是button，因为这些是状态显示，不是可交互按钮
         const chips = [];
         // Auth status - 使用span表示状态信息
         chips.push(authTypeBadge);
-        // OpenAI preference - 使用span表示状态信息
+        // OpenAI preference - 使用颜色区分三种模式
         const pref = (endpoint.openai_preference || 'auto');
-        const prefShort = pref === 'chat_completions' ? 'chat' : (pref === 'responses' ? 'resp' : 'auto');
-        let prefTip = 'OpenAI 偏好：auto（自动探测并学习）';
-        if (prefShort === 'chat') prefTip = 'OpenAI 偏好：chat_completions（/v1/chat/completions）';
-        if (prefShort === 'resp') prefTip = 'OpenAI 偏好：responses（/v1/responses）';
-        chips.push(`<span class="badge bg-primary" data-bs-toggle="tooltip" title="${prefTip}"><i class="fas fa-robot"></i></span>`);
-        // Model rewrite - 使用span表示状态信息
+        const prefShort = pref === 'chat_completions' ? 'Chat' : (pref === 'responses' ? 'Resp' : 'Auto');
+        let prefTip = T('openai_preference_auto_tooltip');
+        let prefColor = 'secondary'; // auto 模式用灰色
+        if (prefShort === 'Chat') {
+            prefTip = T('openai_preference_chat_tooltip');
+            prefColor = 'warning'; // chat 模式用黄色
+        } else if (prefShort === 'Resp') {
+            prefTip = T('openai_preference_resp_tooltip');
+            prefColor = 'success'; // responses 模式用绿色
+        }
+        chips.push(`<span class="badge bg-${prefColor}" data-bs-toggle="tooltip" title="${prefTip}">${prefShort}</span>`);
+        // Model rewrite - 在tooltip里展示重写的结果
         const mrEnabled = endpoint.model_rewrite && endpoint.model_rewrite.enabled === true;
-        chips.push(`<span class="badge ${mrEnabled ? 'bg-info' : 'bg-secondary'}" data-bs-toggle="tooltip" title="模型重写：${mrEnabled ? '启用（应用映射规则）' : '关闭'}"><i class="fas fa-exchange-alt"></i></span>`);
+        let mrTooltip = T('model_rewrite_disabled');
+        if (mrEnabled && endpoint.model_rewrite.rules && endpoint.model_rewrite.rules.length > 0) {
+            const rules = endpoint.model_rewrite.rules.map(rule =>
+                `${rule.source_pattern} → ${rule.target_model}`
+            ).join('; ');
+            mrTooltip = `${T('model_rewrite_enabled')} (${rules})`;
+        } else if (mrEnabled) {
+            mrTooltip = `${T('model_rewrite_enabled')} (no specific rules)`;
+        }
+        chips.push(`<span class="badge ${mrEnabled ? 'bg-info' : 'bg-secondary'}" data-bs-toggle="tooltip" title="${mrTooltip}">MR</span>`);
         const configDisplay = chips.join(' ');
 
         const supportsConfig = endpoint.supports_responses;
@@ -209,8 +224,12 @@ function rebuildTable(endpoints) {
             <td>
                 <span class="badge bg-info priority-badge">${endpoint.priority}</span>
             </td>
-            <td><strong>${escapeHtml(endpoint.name)}</strong></td>
-            <td class="url-cell">${urlDisplay}</td>
+            <td>
+                <div class="endpoint-info">
+                    <div class="endpoint-name"><strong>${escapeHtml(endpoint.name)}</strong></div>
+                    <div class="endpoint-url">${urlDisplay}</div>
+                </div>
+            </td>
             <td>${proxyDisplay}</td>
             <td>${tagsDisplay}</td>
             <td class="config-cell">${configCellHTML}</td>
@@ -224,12 +243,12 @@ function rebuildTable(endpoints) {
             </td>
             <td class="action-buttons">
                 <div class="actions-grid">
-                    <button class="btn ${endpoint.enabled ? 'btn-success' : 'btn-secondary'} btn-sm" data-action="toggle-endpoint" onclick="event.stopPropagation(); toggleEndpointEnabled('${escapeHtml(endpoint.name)}', ${endpoint.enabled})" data-bs-toggle="tooltip" title="${endpoint.enabled ? '点击禁用' : '点击启用'}"><i class="fas ${endpoint.enabled ? 'fa-toggle-on' : 'fa-toggle-off'}"></i></button>
-                    <button class="btn btn-outline-secondary btn-sm" onclick="event.stopPropagation(); testEndpoint('${escapeHtml(endpoint.name)}');" data-endpoint="${escapeHtml(endpoint.name)}" data-action="test-endpoint" data-bs-toggle="tooltip" title="测试端点"><i class="fas fa-vial"></i></button>
-                    <button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation(); showEditEndpointModal('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="编辑"><i class="fas fa-edit"></i></button>
-                    <button class="btn btn-outline-info btn-sm" onclick="event.stopPropagation(); copyEndpoint('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="复制"><i class="fas fa-copy"></i></button>
-                    <button class="btn btn-outline-warning btn-sm" onclick="event.stopPropagation(); resetEndpointStatus('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="重置状态"><i class="fas fa-redo"></i></button>
-                    <button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); deleteEndpoint('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="删除"><i class="fas fa-trash"></i></button>
+                    <button class="btn ${endpoint.enabled ? 'btn-success' : 'btn-secondary'} btn-sm" data-action="toggle-endpoint" onclick="event.stopPropagation(); toggleEndpointEnabled('${escapeHtml(endpoint.name)}', ${endpoint.enabled})" data-bs-toggle="tooltip" title="${endpoint.enabled ? T('click_to_disable') : T('click_to_enable')}"><i class="fas ${endpoint.enabled ? 'fa-toggle-on' : 'fa-toggle-off'}"></i></button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="event.stopPropagation(); testEndpoint('${escapeHtml(endpoint.name)}');" data-endpoint="${escapeHtml(endpoint.name)}" data-action="test-endpoint" data-bs-toggle="tooltip" title="${T('test_endpoint')}"><i class="fas fa-vial"></i></button>
+                    <button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation(); showEditEndpointModal('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="${T('edit')}"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-outline-info btn-sm" onclick="event.stopPropagation(); copyEndpoint('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="${T('copy')}"><i class="fas fa-copy"></i></button>
+                    <button class="btn btn-outline-warning btn-sm" onclick="event.stopPropagation(); resetEndpointStatus('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="${T('reset_status')}"><i class="fas fa-redo"></i></button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); deleteEndpoint('${escapeHtml(endpoint.name)}')" data-bs-toggle="tooltip" title="${T('delete')}"><i class="fas fa-trash"></i></button>
                 </div>
             </td>
         `;
@@ -281,7 +300,7 @@ function updateEndpointToggleButton(endpointName, enabled) {
             const icon = toggleButton.querySelector('i');
             icon.className = `fas ${enabled ? 'fa-toggle-on' : 'fa-toggle-off'}`;
             // Update button title
-            toggleButton.title = enabled ? '点击禁用' : '点击启用';
+            toggleButton.title = enabled ? T('click_to_disable') : T('click_to_enable');
             toggleButton.setAttribute('data-bs-original-title', toggleButton.title);
             refreshTooltip(toggleButton);
             // Update button onclick

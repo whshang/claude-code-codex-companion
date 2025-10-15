@@ -145,9 +145,9 @@ function refreshEndpointStatus() {
 }
 
 function updateEndpointRowStatus(row, endpoint) {
-    // 使用data属性选择器,而不是依赖列的位置
-    const statusCell = row.querySelector('[data-cell-type="status"]');
-    if (!statusCell) return; // 如果找不到状态单元格,直接返回
+    // Update status cell using the correct selector
+    const statusCell = row.querySelector('.status-cell');
+    if (!statusCell) return;
 
     const badges = [];
     badges.push(endpoint.enabled ? '<span class="badge bg-success">Enabled</span>' : '<span class="badge bg-secondary text-dark">Disabled</span>');

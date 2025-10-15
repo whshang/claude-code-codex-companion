@@ -91,14 +91,23 @@ func IsClientValidationFailure(errorMsg string, statusCode int) bool {
 	}
 
 	// 3. 特定HTTP状态码 + 空响应或HTML
-	if statusCode == 403 || statusCode == 404 {
-		// 403/404 + 包含HTML标签 = 客户端验证失败
+	if statusCode == 403 {
+		// 403 + 包含HTML标签 = 客户端验证失败
 		for _, htmlPattern := range HTMLResponsePatterns {
 			if strings.Contains(errorMsg, htmlPattern) {
 				return true
 			}
 		}
 	}
+	// 🔧 404错误表示路径不存在，不是客户端验证失败
+	// if statusCode == 404 {
+	//     // 404 + 包含HTML标签 = 客户端验证失败
+	//     for _, htmlPattern := range HTMLResponsePatterns {
+	//         if strings.Contains(errorMsg, htmlPattern) {
+	//             return true
+	//         }
+	//     }
+	// }
 
 	return false
 }

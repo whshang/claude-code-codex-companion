@@ -133,9 +133,22 @@ function getEndpointTestResultsView(endpointName) {
             const errorMsg = result.error || `HTTP ${result.status_code || 'Error'}`;
             const escapedUrl = escapeHtml(result.url || '');
             const escapedError = escapeHtml(errorMsg);
+
+            // 🔧 特殊处理：404错误表示端点不支持该格式
+            let displayText = result.status_code || 'Err';
+            let displayClass = 'text-danger';
+            let displayIcon = '<i class="fas fa-exclamation-circle"></i>';
+
+            if (result.status_code === 404 && result.format === 'openai') {
+                // OpenAI 404: 端点不支持Codex格式
+                displayText = '不支持';
+                displayIcon = '<i class="fas fa-ban"></i>';
+                displayClass = 'text-danger'; // 404错误应该用红色
+            }
+
             htmlParts.push(`<div class="test-result-item" data-bs-toggle="tooltip" title="${labelText}: ${escapedUrl}&#10;Error: ${escapedError}">
                 <span class="badge ${formatBadge}">${formatLabel}</span>
-                <span class="text-danger"><i class="fas fa-exclamation-circle"></i> ${result.status_code || 'Err'}</span>
+                <span class="${displayClass}">${displayIcon} ${displayText}</span>
             </div>`);
             summaryParts.push(`${labelText}: ${errorMsg}`);
         }
@@ -155,7 +168,8 @@ function applyResponseCellContent(endpointName, responseCell) {
     if (!responseCell) return;
     const view = getEndpointTestResultsView(endpointName);
     responseCell.innerHTML = view.html;
-    setupResponseCellTooltip(responseCell, view.tooltip);
+    // 不在test-cell上设置tooltip，避免与子元素tooltip重复
+    // setupResponseCellTooltip(responseCell, view.tooltip);
     if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
         const tooltipEls = [].slice.call(responseCell.querySelectorAll('[data-bs-toggle="tooltip"]'));
         tooltipEls.forEach(refreshTooltip);
@@ -164,10 +178,11 @@ function applyResponseCellContent(endpointName, responseCell) {
 
 function setupResponseCellTooltip(element, text) {
     if (!element) return;
-    element.setAttribute('data-bs-toggle', 'tooltip');
-    element.setAttribute('title', text || '');
-    element.setAttribute('data-bs-original-title', text || '');
-    refreshTooltip(element);
+    // 不再在test-cell上设置tooltip，避免重复
+    // element.setAttribute('data-bs-toggle', 'tooltip');
+    // element.setAttribute('title', text || '');
+    // element.setAttribute('data-bs-original-title', text || '');
+    // refreshTooltip(element);
 }
 
 function setResponseCellError(responseCell, message) {
@@ -218,7 +233,7 @@ async function testEndpoint(endpointName) {
         if (testCell) {
             const view = getEndpointTestResultsView(endpointName);
             testCell.innerHTML = view.html;
-            setupResponseCellTooltip(testCell, view.tooltip);
+            // 不在test-cell上设置tooltip，避免与子元素tooltip重复
             if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
                 const tooltipEls = [].slice.call(testCell.querySelectorAll('[data-bs-toggle="tooltip"]'));
                 tooltipEls.forEach(refreshTooltip);
@@ -278,7 +293,11 @@ async function testAllEndpoints() {
             if (testCell) {
                 const view = getEndpointTestResultsView(result.endpoint_name);
                 testCell.innerHTML = view.html;
-                setupResponseCellTooltip(testCell, view.tooltip);
+                // 不在test-cell上设置tooltip，避免与子元素tooltip重复
+                if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
+                    const tooltipEls = [].slice.call(testCell.querySelectorAll('[data-bs-toggle="tooltip"]'));
+                    tooltipEls.forEach(refreshTooltip);
+                }
             }
 
                 // 更新进度
@@ -354,7 +373,7 @@ function restoreCachedTestResults() {
             if (testCell) {
                 const view = getEndpointTestResultsView(endpointName);
                 testCell.innerHTML = view.html;
-                setupResponseCellTooltip(testCell, view.tooltip);
+                // 不在test-cell上设置tooltip，避免与子元素tooltip重复
                 if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
                     const tooltipEls = [].slice.call(testCell.querySelectorAll('[data-bs-toggle="tooltip"]'));
                     tooltipEls.forEach(refreshTooltip);
