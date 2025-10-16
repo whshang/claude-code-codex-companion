@@ -18,9 +18,12 @@ import (
 type Status string
 
 const (
-	StatusActive   Status = "active"
-	StatusInactive Status = "inactive"
-	StatusChecking Status = "checking"
+	StatusActive      Status = "active"
+	StatusInactive    Status = "inactive"
+	StatusChecking    Status = "checking"
+	StatusRecovering  Status = "recovering"  // 恢复中
+	StatusDegraded    Status = "degraded"    // 性能降级
+	StatusBlacklisted Status = "blacklisted" // 已拉黑
 )
 
 // BlacklistReason 记录端点被拉黑的原因
@@ -105,6 +108,14 @@ type Endpoint struct {
 	// 新增：动态排序器引用（用于状态变化时触发排序更新）
 	dynamicSorter *utils.DynamicEndpointSorter `json:"-"`
 
+	// 方案A新增字段：智能转换标记
+	NativeFormat bool   `json:"native_format"` // 是否原生支持客户端格式（true=无需转换）
+	TargetFormat string `json:"target_format"` // 转换目标格式："anthropic"|"openai_chat"|"openai_responses"
+	ClientType   string `json:"client_type"`   // 客户端类型过滤："claude_code"|"codex"|"openai"|""（空表示通用）
+
+	// 统计信息
+	Stats *statistics.EndpointStatistics `json:"-"`
+
 	mutex sync.RWMutex
 }
 
@@ -134,6 +145,30 @@ func NewEndpoint(cfg config.EndpointConfig) *Endpoint {
 		}
 	}
 
+	// 方案A：推断NativeFormat和TargetFormat
+	nativeFormat := cfg.NativeFormat
+	targetFormat := cfg.TargetFormat
+	clientType := cfg.ClientType
+
+	// 如果用户未明确配置，根据URL自动推断
+	if !nativeFormat && targetFormat == "" {
+		// 有Anthropic URL且无OpenAI URL -> 原生支持Anthropic
+		if cfg.URLAnthropic != "" && cfg.URLOpenAI == "" {
+			nativeFormat = true
+		}
+		// 有OpenAI URL -> 需要判断是否需要转换
+		if cfg.URLOpenAI != "" {
+			// 如果同时有两个URL，认为是智能路由，原生支持
+			if cfg.URLAnthropic != "" {
+				nativeFormat = true
+			} else {
+				// 只有OpenAI URL，可能需要转换
+				nativeFormat = false
+				targetFormat = "openai_chat" // 默认目标格式
+			}
+		}
+	}
+
 	return &Endpoint{
 		ID:                  generateID(cfg.Name),
 		Name:                cfg.Name,
@@ -148,6 +183,9 @@ func NewEndpoint(cfg config.EndpointConfig) *Endpoint {
 		ModelRewrite:        cfg.ModelRewrite,
 		Proxy:               cfg.Proxy,
 		OAuthConfig:         cfg.OAuthConfig,
+		NativeFormat:        nativeFormat,
+		TargetFormat:        targetFormat,
+		ClientType:          clientType,
 		HeaderOverrides:     cfg.HeaderOverrides,
 		ParameterOverrides:  cfg.ParameterOverrides,
 		MaxTokensFieldName:  cfg.MaxTokensFieldName,
