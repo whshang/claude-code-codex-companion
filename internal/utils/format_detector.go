@@ -37,10 +37,139 @@ var (
 	pathDetectionCache = make(map[string]*FormatDetectionResult)
 	cacheMutex         sync.RWMutex
 	cacheMaxSize       = 1000 // 限制缓存大小，避免内存泄漏
+	// LRU缓存用于更高效的缓存管理
+	lruCache *LRUCache
 )
+
+// LRUCache LRU缓存实现
+type LRUCache struct {
+	items map[string]*cacheItem
+	head  *cacheItem
+	tail  *cacheItem
+	max   int
+}
+
+type cacheItem struct {
+	key   string
+	value *FormatDetectionResult
+	prev  *cacheItem
+	next  *cacheItem
+}
+
+func NewLRUCache(max int) *LRUCache {
+	return &LRUCache{
+		items: make(map[string]*cacheItem),
+		head:  nil,
+		tail:  nil,
+		max:   max,
+	}
+}
+
+func (l *LRUCache) Get(key string) (*FormatDetectionResult, bool) {
+	if item, exists := l.items[key]; exists {
+		// 移动到头部
+		l.moveToHead(item)
+		return item.value, true
+	}
+	return nil, false
+}
+
+func (l *LRUCache) Put(key string, value *FormatDetectionResult) {
+	if item, exists := l.items[key]; exists {
+		item.value = value
+		l.moveToHead(item)
+		return
+	}
+
+	if len(l.items) >= l.max {
+		// 移除尾部元素
+		l.removeTail()
+	}
+
+	// 添加新元素到头部
+	newItem := &cacheItem{
+		key:   key,
+		value: value,
+	}
+	l.addToHead(newItem)
+	l.items[key] = newItem
+}
+
+// moveToHead 将节点移动到头部
+func (l *LRUCache) moveToHead(item *cacheItem) {
+	if item == l.head {
+		return
+	}
+
+	// 从当前位置移除
+	if item.prev != nil {
+		item.prev.next = item.next
+	}
+	if item.next != nil {
+		item.next.prev = item.prev
+	}
+
+	// 如果是尾部节点
+	if item == l.tail {
+		l.tail = item.prev
+	}
+
+	// 移动到头部
+	item.prev = nil
+	item.next = l.head
+	if l.head != nil {
+		l.head.prev = item
+	}
+	l.head = item
+
+	// 如果这是第一个元素
+	if l.tail == nil {
+		l.tail = item
+	}
+}
+
+// addToHead 添加节点到头部
+func (l *LRUCache) addToHead(item *cacheItem) {
+	item.prev = nil
+	item.next = l.head
+	if l.head != nil {
+		l.head.prev = item
+	}
+	l.head = item
+
+	if l.tail == nil {
+		l.tail = item
+	}
+}
+
+// removeTail 移除尾部节点
+func (l *LRUCache) removeTail() {
+	if l.tail == nil {
+		return
+	}
+
+	delete(l.items, l.tail.key)
+
+	if l.tail.prev != nil {
+		l.tail.prev.next = nil
+	} else {
+		// 只有一个元素
+		l.head = nil
+	}
+
+	l.tail = l.tail.prev
+}
 
 // getCachedPathDetection 从缓存获取路径检测结果
 func getCachedPathDetection(path string) (*FormatDetectionResult, bool) {
+	// 首先尝试LRU缓存
+	if lruCache != nil {
+		if result, exists := lruCache.Get(path); exists {
+			return result, true
+		}
+	}
+
+	// 回退到传统缓存
 	cacheMutex.RLock()
 	defer cacheMutex.RUnlock()
 	result, exists := pathDetectionCache[path]
@@ -49,6 +178,11 @@ func getCachedPathDetection(path string) (*FormatDetectionResult, bool) {
 
 // setCachedPathDetection 设置路径检测结果到缓存
 func setCachedPathDetection(path string, result *FormatDetectionResult) {
+	// 同时设置到两种缓存
+	if lruCache != nil {
+		lruCache.Put(path, result)
+	}
+
 	cacheMutex.Lock()
 	defer cacheMutex.Unlock()
 
@@ -58,6 +192,11 @@ func setCachedPathDetection(path string, result *FormatDetectionResult) {
 	}
 
 	pathDetectionCache[path] = result
+}
+
+// InitializeLRUCache 初始化LRU缓存
+func InitializeLRUCache(maxSize int) {
+	lruCache = NewLRUCache(maxSize)
 }
 
 // DetectRequestFormat automatically detects the API format from request path and body
@@ -188,6 +327,38 @@ func detectFromBody(reqData map[string]interface{}) *FormatDetectionResult {
 					}
 				}
 			}
+		}
+	}
+
+	// Enhanced tool detection for better accuracy
+	// Anthropic tools are in a separate "tools" array
+	if _, hasAnthropicTools := reqData["tools"]; hasAnthropicTools {
+		anthropicScore += 0.25
+	}
+
+	// OpenAI tools are in "tools" array within messages or top-level
+	if tools, ok := reqData["tools"].([]interface{}); ok && len(tools) > 0 {
+		// Check if tools have OpenAI format (function.type)
+		if len(tools) > 0 {
+			if tool, ok := tools[0].(map[string]interface{}); ok {
+				if toolType, hasType := tool["type"].(string); hasType && toolType == "function" {
+					openAIScore += 0.25
+				}
+			}
+		}
+	}
+
+	// Enhanced model name detection
+	if modelName, ok := reqData["model"].(string); ok {
+		// Claude 模型特征
+		if strings.Contains(modelName, "claude") || strings.Contains(modelName, "sonnet") ||
+		   strings.Contains(modelName, "opus") || strings.Contains(modelName, "haiku") {
+			anthropicScore += 0.3
+		}
+		// GPT 模型特征
+		if strings.Contains(modelName, "gpt") || strings.Contains(modelName, "chatgpt") ||
+		   strings.Contains(modelName, "davinci") || strings.Contains(modelName, "curie") {
+			openAIScore += 0.3
 		}
 	}
 

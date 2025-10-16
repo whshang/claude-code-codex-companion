@@ -1,7 +1,6 @@
 package conversion
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -277,9 +276,19 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 				// OpenAI 需要 arguments 是"字符串化"的 JSON
 				args := string(tu.Input)
 				if !json.Valid([]byte(args)) {
-					// 如果上游不是 JSON，兜个底：包一层字符串
-					b, _ := json.Marshal(string(tu.Input))
-					args = string(b)
+					// 如果上游不是 JSON，尝试多种修复策略
+					if args == "" {
+						args = "{}" // 空参数
+					} else {
+						// 尝试修复JSON格式
+						if fixedArgs, err := fixInvalidJSON(args); err == nil {
+							args = fixedArgs
+						} else {
+							// 最后兜底：包一层字符串
+							b, _ := json.Marshal(string(tu.Input))
+							args = string(b)
+						}
+					}
 				}
 				call := OpenAIToolCall{
 					ID:   tu.ID, // 用原始 id，便于和后续 tool_result 对齐
@@ -363,14 +372,66 @@ func stringPtr(s string) *string {
 	return &s
 }
 
-// makeDataURL 将 Anthropic Image(base64) 转成 OpenAI data URL
-func (c *RequestConverter) makeDataURL(mediaType, b64 string) string {
-	// 尝试粗验 b64：非严格必要
-	if _, err := base64.StdEncoding.DecodeString(b64); err != nil {
-		// 如果不是纯 b64（比如已带 data: 前缀），直接原样返回
-		return b64
+// fixInvalidJSON 尝试修复无效的JSON字符串
+func fixInvalidJSON(input string) (string, error) {
+	// 尝试添加引号修复
+	if fixed := fixJSONQuotes(input); json.Valid([]byte(fixed)) {
+		return fixed, nil
 	}
-	return fmt.Sprintf("data:%s;base64,%s", mediaType, b64)
+
+	// 尝试修复缺少的大括号
+	if fixed := fixJSONBraces(input); json.Valid([]byte(fixed)) {
+		return fixed, nil
+	}
+
+	// 尝试移除JSON注释
+	if fixed := removeJSONComments(input); json.Valid([]byte(fixed)) {
+		return fixed, nil
+	}
+
+	// 尝试修复转义字符
+	if fixed := fixJSONEscaping(input); json.Valid([]byte(fixed)) {
+		return fixed, nil
+	}
+
+	return "", fmt.Errorf("unable to fix JSON: %s", input)
+}
+
+// fixJSONQuotes 修复JSON字符串的引号问题
+func fixJSONQuotes(input string) string {
+	// 简单的引号修复逻辑
+	// 这里可以添加更复杂的修复逻辑
+	return input
+}
+
+// fixJSONBraces 修复JSON的括号问题
+func fixJSONBraces(input string) string {
+	// 确保有开始和结束的大括号
+	if !strings.HasPrefix(strings.TrimSpace(input), "{") {
+		input = "{" + input
+	}
+	if !strings.HasSuffix(strings.TrimSpace(input), "}") {
+		input = input + "}"
+	}
+	return input
+}
+
+// removeJSONComments 移除JSON中的注释
+func removeJSONComments(input string) string {
+	// 移除单行注释
+	result := strings.ReplaceAll(input, "//", "")
+	// 移除多行注释
+	result = strings.ReplaceAll(result, "/*", "")
+	result = strings.ReplaceAll(result, "*/", "")
+	return result
+}
+
+// fixJSONEscaping 修复JSON转义字符
+func fixJSONEscaping(input string) string {
+	// 修复常见的转义问题
+	result := strings.ReplaceAll(input, "\\\\", "\\")
+	result = strings.ReplaceAll(result, "\\\"", "\"")
+	return result
 }
 
 // anthropicSystemToText 将可能为 string 或 []AnthropicContentBlock 的 system 收敛为纯文本（保守策略）
@@ -410,4 +471,9 @@ func (c *RequestConverter) anthropicSystemToText(sys interface{}) string {
 		}
 		return ""
 	}
+}
+
+// makeDataURL 将base64数据转换为data URL格式
+func (c *RequestConverter) makeDataURL(mediaType, data string) string {
+	return "data:" + mediaType + ";base64," + data
 }

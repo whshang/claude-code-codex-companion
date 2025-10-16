@@ -129,12 +129,13 @@ func ConvertToGormRequestLog(log *RequestLog) *GormRequestLog {
 		BlacklistCausingRequestIDs: marshalTagsToJSON(log.BlacklistCausingRequestIDs),
 		EndpointBlacklistedAt:      log.EndpointBlacklistedAt,
 		EndpointBlacklistReason:    log.EndpointBlacklistReason,
-		ClientType:                 log.ClientType,
-		RequestFormat:              log.RequestFormat,
-		TargetFormat:               log.TargetFormat,
-		FormatConverted:            log.FormatConverted,
-		DetectionConfidence:        log.DetectionConfidence,
-		DetectedBy:                 log.DetectedBy,
+		// 新增：客户端类型和请求格式检测字段
+		ClientType:          log.ClientType,
+		RequestFormat:       log.RequestFormat,
+		TargetFormat:        log.TargetFormat,
+		FormatConverted:     log.FormatConverted,
+		DetectionConfidence: log.DetectionConfidence,
+		DetectedBy:          log.DetectedBy,
 	}
 
 	// 转换JSON字段
@@ -190,12 +191,13 @@ func ConvertFromGormRequestLog(gormLog *GormRequestLog) *RequestLog {
 		BlacklistCausingRequestIDs: unmarshalTagsFromJSON(gormLog.BlacklistCausingRequestIDs),
 		EndpointBlacklistedAt:      gormLog.EndpointBlacklistedAt,
 		EndpointBlacklistReason:    gormLog.EndpointBlacklistReason,
-		ClientType:                 gormLog.ClientType,
-		RequestFormat:              gormLog.RequestFormat,
-		TargetFormat:               gormLog.TargetFormat,
-		FormatConverted:            gormLog.FormatConverted,
-		DetectionConfidence:        gormLog.DetectionConfidence,
-		DetectedBy:                 gormLog.DetectedBy,
+		// 新增：客户端类型和请求格式检测字段
+		ClientType:          gormLog.ClientType,
+		RequestFormat:       gormLog.RequestFormat,
+		TargetFormat:        gormLog.TargetFormat,
+		FormatConverted:     gormLog.FormatConverted,
+		DetectionConfidence: gormLog.DetectionConfidence,
+		DetectedBy:          gormLog.DetectedBy,
 	}
 
 	// 转换JSON字段

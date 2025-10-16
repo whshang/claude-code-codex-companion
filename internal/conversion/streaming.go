@@ -12,19 +12,108 @@ import (
 const (
 	defaultScannerBuffer      = 64 * 1024
 	defaultScannerMaxCapacity = 2 * 1024 * 1024
+	// 流式转换超时设置
+	streamTimeout = 30 * time.Second
+	// 最大重试次数
+	maxRetries = 3
+	// 最小数据包大小，避免处理过小的chunk
+	minChunkSize = 10
 )
 
-// StreamChatCompletionsToResponsesUnified 将 OpenAI Chat SSE 转换为 Responses SSE（统一模式实现）
-func StreamChatCompletionsToResponsesUnified(r io.Reader, w io.Writer) error {
-	return StreamChatToResponsesRealtime(r, w)
-}
-
-// StreamChatCompletionsToResponses 保持原函数名，默认指向实时流式转换
+// StreamChatCompletionsToResponses 将OpenAI Chat Completions SSE转换为Responses SSE (标准版本)
 func StreamChatCompletionsToResponses(r io.Reader, w io.Writer) error {
-	return StreamChatToResponsesRealtime(r, w)
+	return StreamChatCompletionsToResponsesRobust(r, w)
 }
 
-func streamChatCompletionsToResponsesUnified(r io.Reader, w io.Writer) error {
+// StreamChatCompletionsToResponsesRobust 增强容错性的流式转换
+func StreamChatCompletionsToResponsesRobust(r io.Reader, w io.Writer) error {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, defaultScannerBuffer), defaultScannerMaxCapacity)
+
+	var chunks []OpenAIStreamChunk
+	respID := generateResponseID()
+	var model string
+
+	// 流式读取和处理SSE数据
+    for scanner.Scan() {
+        line := strings.TrimSpace(scanner.Text())
+
+        // 跳过空行和注释
+        if line == "" || strings.HasPrefix(line, ":") {
+            continue
+        }
+
+        // 处理data行（兼容 "data:" 与 "data: ")
+        if strings.HasPrefix(line, "data:") {
+            dataContent := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+
+            // 检查结束标记
+            if dataContent == "[DONE]" {
+                break
+            }
+
+			// 检查最小数据包大小
+			if len(dataContent) < minChunkSize {
+				continue
+			}
+
+            // 解析JSON chunk
+            var chunk OpenAIStreamChunk
+            if err := json.Unmarshal([]byte(dataContent), &chunk); err != nil {
+				// 记录错误但不中断流式处理
+				continue // 跳过无效chunk
+            }
+
+			// 验证chunk的基本结构
+			if chunk.ID == "" && len(chunks) == 0 {
+				continue // 跳过没有ID的初始chunk
+			}
+
+            chunks = append(chunks, chunk)
+
+            // 记录响应信息
+            if chunk.ID != "" {
+                respID = chunk.ID
+            }
+            if chunk.Model != "" {
+                model = chunk.Model
+            }
+        }
+    }
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	// 如果没有有效的chunks，生成一个最小响应避免空流
+	if len(chunks) == 0 {
+		chunks = append(chunks, OpenAIStreamChunk{
+			ID:     respID,
+			Model:  model,
+			Choices: []OpenAIStreamChoice{
+				{
+					Index: 0,
+					Delta: OpenAIMessage{
+						Role: "assistant",
+						Content: "",
+					},
+					FinishReason: "",
+				},
+			},
+		})
+	}
+
+	// 构建并写入Responses格式的SSE
+    sse, err := buildResponsesSSEFromChunks(chunks, respID, model, nil)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(sse)
+	return err
+}
+
+func StreamChatCompletionsToResponsesUnified(r io.Reader, w io.Writer) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, defaultScannerBuffer), defaultScannerMaxCapacity)
 

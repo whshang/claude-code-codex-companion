@@ -149,7 +149,7 @@ logging:
   log_directory: ./logs
 ```
 
-更多字段与示例见 [《配置指南》](docs/配置指南_Configuration_Guide.md)。
+更多字段与示例（如 `streaming`、`tools`、`http_client`、`monitoring` 等）见 [《配置指南》](docs/配置指南_Configuration_Guide.md)。
 
 ---
 

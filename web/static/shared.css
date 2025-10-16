@@ -1,5 +1,42 @@
 /* Claude Code Companion Web Admin - Shared Styles */
 
+/* Global font size adjustment */
+body {
+    font-size: 0.875rem; /* 14px, Bootstrap default is 1rem (16px) */
+}
+
+.table {
+    font-size: 0.8125rem; /* 13px for tables */
+}
+
+.card-title, .card-header {
+    font-size: 0.9375rem; /* 15px for card headers */
+}
+
+.btn {
+    font-size: 0.8125rem; /* 13px for buttons */
+}
+
+.badge {
+    font-size: 0.7rem; /* 11.2px for badges - smaller default */
+}
+
+.form-label {
+    font-size: 0.8125rem; /* 13px for form labels */
+}
+
+.form-control, .form-select {
+    font-size: 0.8125rem; /* 13px for form inputs */
+}
+
+.modal-title {
+    font-size: 1rem; /* 16px for modal titles */
+}
+
+.nav-link {
+    font-size: 0.8125rem; /* 13px for navigation links */
+}
+
 /* Common log-related styles */
 .log-body {
     max-width: 300px;

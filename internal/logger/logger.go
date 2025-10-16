@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"claude-code-codex-companion/internal/utils"
@@ -68,9 +69,6 @@ type RequestLog struct {
 	// 新增：端点失效时间（如果适用）
 	EndpointBlacklistedAt *time.Time `json:"endpoint_blacklisted_at,omitempty"`
 
-	// 新增：端点失效原因摘要
-	EndpointBlacklistReason string `json:"endpoint_blacklist_reason,omitempty"`
-
 	// 新增：客户端类型和请求格式检测
 	ClientType          string  `json:"client_type,omitempty"`          // "claude-code" | "codex" | "unknown"
 	RequestFormat       string  `json:"request_format,omitempty"`       // "anthropic" | "openai" | "unknown"
@@ -78,29 +76,43 @@ type RequestLog struct {
 	FormatConverted     bool    `json:"format_converted"`               // 是否进行了格式转换
 	DetectionConfidence float64 `json:"detection_confidence,omitempty"` // 格式检测置信度 (0.0-1.0)
 	DetectedBy          string  `json:"detected_by,omitempty"`          // 检测方法: "path" | "body-structure" | "default"
-}
 
-// LoggerInterface 日志接口
-type LoggerInterface interface {
-	// 基本日志功能
-	LogRequest(req *RequestLog)
-	GetLogs(limit, offset int, failedOnly bool) ([]*RequestLog, int, error)
-	GetAllLogsByRequestID(requestID string) ([]*RequestLog, error)
-	CleanupLogsByDays(days int) (int64, error)
-	Close() error
+	// 新增：端点失效原因摘要
+	EndpointBlacklistReason string `json:"endpoint_blacklist_reason,omitempty"`
 
-	// 统计功能
-	GetStats() (map[string]interface{}, error)
+	// 新增：性能监控和分析字段
+	PerformanceMetrics struct {
+		NetworkLatencyMs   int64 `json:"network_latency_ms,omitempty"`   // 网络延迟
+		ProcessingLatencyMs int64 `json:"processing_latency_ms,omitempty"` // 处理延迟
+		TotalLatencyMs     int64 `json:"total_latency_ms,omitempty"`     // 总延迟
+		BandwidthUsageKB   int64 `json:"bandwidth_usage_kb,omitempty"`   // 带宽使用量
+		MemoryUsageMB      int64 `json:"memory_usage_mb,omitempty"`      // 内存使用量
+	} `json:"performance_metrics,omitempty"`
 
-	// 健康检查功能
-	GetDatabaseHealth() map[string]interface{}
-	GetStorage() interface{} // 返回底层存储实现
-}
+	// 新增：错误分类和详细信息
+	ErrorCategory    string            `json:"error_category,omitempty"`    // 错误类别: "network" | "timeout" | "auth" | "validation" | "server"
+	ErrorDetails     map[string]interface{} `json:"error_details,omitempty"` // 错误详细信息
+	RetryAttempts    int               `json:"retry_attempts"`            // 重试次数
+	LastRetryError   string            `json:"last_retry_error,omitempty"`  // 最后一次重试的错误
 
-type Logger struct {
-	logger  *logrus.Logger
-	storage StorageInterface
-	config  LogConfig
+	// 新增：端点健康状态
+	EndpointHealthStatus string `json:"endpoint_health_status,omitempty"` // 端点健康状态: "healthy" | "degraded" | "unhealthy"
+	EndpointResponseTime int64  `json:"endpoint_response_time,omitempty"` // 端点响应时间
+
+	// 新增：转换质量指标
+	ConversionQuality struct {
+		SuccessRate    float64 `json:"success_rate"`    // 转换成功率
+		ErrorRate      float64 `json:"error_rate"`      // 转换错误率
+		FormatAccuracy float64 `json:"format_accuracy"` // 格式转换准确率
+	} `json:"conversion_quality,omitempty"`
+
+	// 新增：客户端行为分析
+	ClientBehavior struct {
+		RequestsPerMinute float64 `json:"requests_per_minute"`
+		AverageSessionDuration int64 `json:"average_session_duration"`
+		PreferredModel     string  `json:"preferred_model"`
+		FeatureUsage       map[string]bool `json:"feature_usage"`
+	} `json:"client_behavior,omitempty"`
 }
 
 // StorageInterface 定义存储接口
@@ -113,6 +125,71 @@ type StorageInterface interface {
 	GetStats() (map[string]interface{}, error)
 }
 
+type Logger struct {
+	logger  *logrus.Logger
+	storage StorageInterface
+	config  LogConfig
+	monitor *PerformanceMonitor // 性能监控器
+	startTime time.Time         // 服务启动时间
+}
+
+// PerformanceMonitor 性能监控器
+type PerformanceMonitor struct {
+	requests       int64
+	errors         int64
+	totalLatency   int64
+	startTime      time.Time
+	memoryUsage    int64
+	bandwidthUsage int64
+}
+
+func NewPerformanceMonitor() *PerformanceMonitor {
+	return &PerformanceMonitor{
+		startTime: time.Now(),
+	}
+}
+
+// RecordRequest 记录请求性能数据
+func (p *PerformanceMonitor) RecordRequest(latency time.Duration, bytesSent, bytesReceived int) {
+	atomic.AddInt64(&p.requests, 1)
+	atomic.AddInt64(&p.totalLatency, latency.Nanoseconds()/1000000)
+	atomic.AddInt64(&p.bandwidthUsage, int64(bytesSent+bytesReceived))
+}
+
+// RecordError 记录错误
+func (p *PerformanceMonitor) RecordError() {
+	atomic.AddInt64(&p.errors, 1)
+}
+
+// GetStats 获取性能统计
+func (p *PerformanceMonitor) GetStats() map[string]interface{} {
+	requests := atomic.LoadInt64(&p.requests)
+	errors := atomic.LoadInt64(&p.errors)
+	totalLatency := atomic.LoadInt64(&p.totalLatency)
+	uptime := time.Since(p.startTime).Seconds()
+
+	stats := map[string]interface{}{
+		"total_requests":    requests,
+		"total_errors":      errors,
+		"error_rate":        0.0,
+		"avg_latency_ms":    0.0,
+		"uptime_seconds":    uptime,
+		"requests_per_second": 0.0,
+		"bandwidth_usage_mb": float64(atomic.LoadInt64(&p.bandwidthUsage)) / (1024 * 1024),
+	}
+
+	if requests > 0 {
+		stats["avg_latency_ms"] = float64(totalLatency) / float64(requests)
+		stats["error_rate"] = float64(errors) / float64(requests) * 100
+	}
+
+	if uptime > 0 {
+		stats["requests_per_second"] = float64(requests) / uptime
+	}
+
+	return stats
+}
+
 type LogConfig struct {
 	Level           string
 	LogRequestTypes string
@@ -122,6 +199,7 @@ type LogConfig struct {
 	ExcludePaths    []string
 }
 
+// NewLogger 创建新的日志记录器
 func NewLogger(config LogConfig) (*Logger, error) {
 	logger := logrus.New()
 
@@ -141,10 +219,15 @@ func NewLogger(config LogConfig) (*Logger, error) {
 		return nil, fmt.Errorf("failed to initialize GORM log storage: %v", err)
 	}
 
+	// 初始化性能监控器
+	monitor := NewPerformanceMonitor()
+
 	return &Logger{
-		logger:  logger,
-		storage: storage,
-		config:  config,
+		logger:     logger,
+		storage:    storage,
+		config:     config,
+		monitor:    monitor,
+		startTime:  time.Now(),
 	}, nil
 }
 

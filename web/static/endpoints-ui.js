@@ -69,16 +69,16 @@ function rebuildTable(endpoints) {
             // Both URLs available
             urlDisplay = `
                 <div class="small">
-                    <div><span class="badge bg-warning">Claude</span> ${escapeHtml(endpoint.url_anthropic)}</div>
-                    <div class="mt-1"><span class="badge bg-primary">Codex</span> ${escapeHtml(endpoint.url_openai)}</div>
+                    <div><span class="badge bg-warning">Anthropic</span> ${escapeHtml(endpoint.url_anthropic)}</div>
+                    <div class="mt-1"><span class="badge bg-primary">OpenAI</span> ${escapeHtml(endpoint.url_openai)}</div>
                 </div>
             `;
         } else if (endpoint.url_anthropic) {
             // Only Anthropic URL
-            urlDisplay = `<span class="badge bg-warning">Claude</span> ${escapeHtml(endpoint.url_anthropic)}`;
+            urlDisplay = `<span class="badge bg-warning">Anthropic</span> ${escapeHtml(endpoint.url_anthropic)}`;
         } else if (endpoint.url_openai) {
             // Only OpenAI URL
-            urlDisplay = `<span class="badge bg-primary">Codex</span> ${escapeHtml(endpoint.url_openai)}`;
+            urlDisplay = `<span class="badge bg-primary">OpenAI</span> ${escapeHtml(endpoint.url_openai)}`;
         } else {
             // Fallback for old single URL field
             urlDisplay = ` ${escapeHtml(endpoint.url || '-')}`;

@@ -10,6 +10,11 @@ type Config struct {
 	I18n       I18nConfig       `yaml:"i18n"`      // 国际化配置
 	Blacklist  BlacklistConfig  `yaml:"blacklist"` // 端点拉黑配置
 	Conversion ConversionConfig `yaml:"conversion"` // 格式转换配置
+	Streaming  StreamingConfig  `yaml:"streaming"` // 流式转换配置
+	Tools      ToolsConfig      `yaml:"tools"`     // 工具调用配置
+	HTTPClient HTTPClientConfig `yaml:"http_client"` // HTTP客户端配置
+	Monitoring MonitoringConfig `yaml:"monitoring"` // 性能监控配置
+	FormatDetection FormatDetectionConfig `yaml:"format_detection"` // 格式检测配置
 }
 
 // I18nConfig 国际化配置
@@ -200,3 +205,46 @@ type ConversionConfig struct {
 }
 
 // （已移除）全局 ToolCallingConfig：采用零配置 + 端点级自动学习/开关
+
+// StreamingConfig 流式转换配置
+type StreamingConfig struct {
+	Timeout           string `yaml:"timeout" json:"timeout"`                           // 流式超时时间，默认30s
+	MaxRetries        int    `yaml:"max_retries" json:"max_retries"`                   // 最大重试次数，默认3
+	MinChunkSize      int    `yaml:"min_chunk_size" json:"min_chunk_size"`             // 最小数据包大小，默认10
+	EnableSSEValidation bool `yaml:"enable_sse_validation" json:"enable_sse_validation"` // 是否启用SSE格式验证
+	EnableCaching     bool `yaml:"enable_caching" json:"enable_caching"`               // 是否启用流式缓存
+}
+
+// ToolsConfig 工具调用配置
+type ToolsConfig struct {
+	Timeout           string `yaml:"timeout" json:"timeout"`                         // 工具调用超时时间，默认60s
+	MaxParallel       int    `yaml:"max_parallel" json:"max_parallel"`                 // 最大并行工具数，默认10
+	EnableValidation  bool `yaml:"enable_validation" json:"enable_validation"`         // 是否启用工具验证
+	EnableCaching     bool `yaml:"enable_caching" json:"enable_caching"`               // 是否启用工具缓存
+}
+
+// HTTPClientConfig HTTP客户端配置
+type HTTPClientConfig struct {
+	MaxConnsPerHost   int    `yaml:"max_conns_per_host" json:"max_conns_per_host"`     // 每主机最大连接数，默认10
+	WriteBufferSize int    `yaml:"write_buffer_size" json:"write_buffer_size"`       // 写缓冲区大小，默认4096
+	ReadBufferSize  int    `yaml:"read_buffer_size" json:"read_buffer_size"`         // 读缓冲区大小，默认4096
+	ForceAttemptHTTP2 bool `yaml:"force_attempt_http2" json:"force_attempt_http2"`   // 是否强制使用HTTP/2
+	EnableCompression bool `yaml:"enable_compression" json:"enable_compression"`       // 是否启用压缩
+	EnableKeepAlive bool `yaml:"enable_keep_alive" json:"enable_keep_alive"`         // 是否启用长连接
+}
+
+// MonitoringConfig 性能监控配置
+type MonitoringConfig struct {
+	CollectionInterval string `yaml:"collection_interval" json:"collection_interval"` // 指标收集间隔，默认60s
+	SlowRequestThreshold string `yaml:"slow_request_threshold" json:"slow_request_threshold"` // 慢请求阈值，默认5s
+	EnableDetailedMetrics bool `yaml:"enable_detailed_metrics" json:"enable_detailed_metrics"` // 是否启用详细指标
+	EnableRequestTracing bool `yaml:"enable_request_tracing" json:"enable_request_tracing"` // 是否启用请求追踪
+}
+
+// FormatDetectionConfig 格式检测配置
+type FormatDetectionConfig struct {
+	CacheMaxSize      int  `yaml:"cache_max_size" json:"cache_max_size"`             // 缓存最大大小，默认1000
+	LRUCacheSize      int  `yaml:"lru_cache_size" json:"lru_cache_size"`             // LRU缓存大小，默认500
+	EnablePathCaching bool `yaml:"enable_path_caching" json:"enable_path_caching"`   // 是否启用路径缓存
+	EnableBodyStructureDetection bool `yaml:"enable_body_structure_detection" json:"enable_body_structure_detection"` // 是否启用请求体结构检测
+}

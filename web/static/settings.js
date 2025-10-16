@@ -112,6 +112,39 @@ function collectFormData() {
             config_error_safe: document.getElementById('configErrorSafe').checked,
             server_error_safe: document.getElementById('serverErrorSafe').checked,
             sse_validation_safe: document.getElementById('sseValidationSafe').checked
+        },
+        streaming: {
+            timeout: document.getElementById('streamTimeout').value,
+            max_retries: parseInt(document.getElementById('maxRetries').value),
+            min_chunk_size: parseInt(document.getElementById('minChunkSize').value),
+            enable_sse_validation: document.getElementById('enableSSEValidation').checked,
+            enable_caching: document.getElementById('enableStreamCaching').checked
+        },
+        tools: {
+            timeout: document.getElementById('toolCallTimeout').value,
+            max_parallel: parseInt(document.getElementById('maxParallelTools').value),
+            enable_validation: document.getElementById('enableToolValidation').checked,
+            enable_caching: document.getElementById('enableToolCaching').checked
+        },
+        http_client: {
+            max_conns_per_host: parseInt(document.getElementById('maxConnsPerHost').value),
+            write_buffer_size: parseInt(document.getElementById('writeBufferSize').value),
+            read_buffer_size: parseInt(document.getElementById('readBufferSize').value),
+            force_attempt_http2: document.getElementById('forceHTTP2').checked,
+            enable_compression: document.getElementById('enableCompression').checked,
+            enable_keep_alive: document.getElementById('enableKeepAlive').checked
+        },
+        monitoring: {
+            collection_interval: document.getElementById('metricsCollectionInterval').value,
+            slow_request_threshold: document.getElementById('slowRequestThreshold').value,
+            enable_detailed_metrics: document.getElementById('enableDetailedMetrics').checked,
+            enable_request_tracing: document.getElementById('enableRequestTracing').checked
+        },
+        format_detection: {
+            cache_max_size: parseInt(document.getElementById('cacheMaxSize').value),
+            lru_cache_size: parseInt(document.getElementById('lruCacheSize').value),
+            enable_path_caching: document.getElementById('enablePathCaching').checked,
+            enable_body_structure_detection: document.getElementById('enableBodyStructureDetection').checked
         }
     };
 }
@@ -188,7 +221,16 @@ function checkIfRestartRequired(newConfig) {
         // Server settings always require restart when changed
         'server.host',
         'server.port',
-        'logging.log_directory'
+        'logging.log_directory',
+        // Network and timeout settings that affect connections
+        'timeouts.tls_handshake',
+        'timeouts.response_header',
+        'timeouts.idle_connection',
+        'timeouts.health_check_timeout',
+        'http_client.max_conns_per_host',
+        'http_client.write_buffer_size',
+        'http_client.read_buffer_size',
+        'http_client.force_attempt_http2'
     ];
 
     // Check if any restart-required settings have changed
@@ -244,6 +286,49 @@ function resetSettings() {
         document.getElementById('configErrorSafe').checked = originalConfig.blacklist.config_error_safe;
         document.getElementById('serverErrorSafe').checked = originalConfig.blacklist.server_error_safe;
         document.getElementById('sseValidationSafe').checked = originalConfig.blacklist.sse_validation_safe;
+    }
+
+    // Restore streaming settings
+    if (originalConfig.streaming) {
+        document.getElementById('streamTimeout').value = originalConfig.streaming.timeout;
+        document.getElementById('maxRetries').value = originalConfig.streaming.max_retries;
+        document.getElementById('minChunkSize').value = originalConfig.streaming.min_chunk_size;
+        document.getElementById('enableSSEValidation').checked = originalConfig.streaming.enable_sse_validation;
+        document.getElementById('enableStreamCaching').checked = originalConfig.streaming.enable_caching;
+    }
+
+    // Restore tools settings
+    if (originalConfig.tools) {
+        document.getElementById('toolCallTimeout').value = originalConfig.tools.timeout;
+        document.getElementById('maxParallelTools').value = originalConfig.tools.max_parallel;
+        document.getElementById('enableToolValidation').checked = originalConfig.tools.enable_validation;
+        document.getElementById('enableToolCaching').checked = originalConfig.tools.enable_caching;
+    }
+
+    // Restore HTTP client settings
+    if (originalConfig.http_client) {
+        document.getElementById('maxConnsPerHost').value = originalConfig.http_client.max_conns_per_host;
+        document.getElementById('writeBufferSize').value = originalConfig.http_client.write_buffer_size;
+        document.getElementById('readBufferSize').value = originalConfig.http_client.read_buffer_size;
+        document.getElementById('forceHTTP2').checked = originalConfig.http_client.force_attempt_http2;
+        document.getElementById('enableCompression').checked = originalConfig.http_client.enable_compression;
+        document.getElementById('enableKeepAlive').checked = originalConfig.http_client.enable_keep_alive;
+    }
+
+    // Restore monitoring settings
+    if (originalConfig.monitoring) {
+        document.getElementById('metricsCollectionInterval').value = originalConfig.monitoring.collection_interval;
+        document.getElementById('slowRequestThreshold').value = originalConfig.monitoring.slow_request_threshold;
+        document.getElementById('enableDetailedMetrics').checked = originalConfig.monitoring.enable_detailed_metrics;
+        document.getElementById('enableRequestTracing').checked = originalConfig.monitoring.enable_request_tracing;
+    }
+
+    // Restore format detection settings
+    if (originalConfig.format_detection) {
+        document.getElementById('cacheMaxSize').value = originalConfig.format_detection.cache_max_size;
+        document.getElementById('lruCacheSize').value = originalConfig.format_detection.lru_cache_size;
+        document.getElementById('enablePathCaching').checked = originalConfig.format_detection.enable_path_caching;
+        document.getElementById('enableBodyStructureDetection').checked = originalConfig.format_detection.enable_body_structure_detection;
     }
 
     showAlert('配置已重置为初始值', 'info');

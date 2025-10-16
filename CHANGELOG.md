@@ -1,5 +1,37 @@
 # Changelog
 
+## 2025-10-16
+### Added
+- **配置系统全面增强**：新增五大配置模块提升系统可配置性和性能
+  - `streaming` 配置：流式响应超时、重试次数、最小数据包大小、SSE 验证和缓存
+  - `tools` 配置：工具调用超时、最大并行数、验证和缓存选项
+  - `http_client` 配置：连接池大小、缓冲区配置、HTTP/2 支持、压缩和长连接
+  - `monitoring` 配置：指标收集间隔、慢请求阈值、详细指标和请求追踪
+  - `format_detection` 配置：缓存优化、LRU 支持、路径缓存和请求体结构检测
+- **动态端点排序**：`server.auto_sort_endpoints` 选项，根据可用性和响应速度动态调整端点优先级
+- **Web 界面优化**：设置页面从两栏布局优化为四栏布局，显著提高空间利用率
+- **完整国际化支持**：所有新增配置项完整支持中英文切换，包括：
+  - 端口、自动排序端点、流式超时、流式缓存等关键配置项
+  - 所有帮助文本和占位符的英文翻译
+  - 确保英文界面无中文遗漏
+
+### Changed
+- **配置文件结构**：在 `internal/config/types.go` 中新增配置结构体
+  - `StreamingConfig`：流式转换配置
+  - `ToolsConfig`：工具调用配置
+  - `HTTPClientConfig`：HTTP 客户端配置
+  - `MonitoringConfig`：性能监控配置
+  - `FormatDetectionConfig`：格式检测配置
+- **默认配置优化**：所有新配置模块设置合理的生产环境默认值
+- **HTTP 客户端工厂**：在 `internal/common/httpclient/factory.go` 中集成新配置系统
+- **格式检测增强**：在 `internal/utils/format_detector.go` 中实现缓存优化和结构检测
+- **日志模型优化**：在 `internal/logger/gorm_models.go` 中增强请求记录字段
+
+### Improved
+- **设置页面 UI**：采用响应式四栏布局（col-md-3），更好地利用屏幕空间
+- **配置项分组**：按功能模块分组显示，提高配置可读性和管理效率
+- **表单体验**：优化输入框、开关和下拉菜单的布局和对齐方式
+
 ## 2025-10-13
 ### Fixed
 - **关键修复**：修复 Codex 非流式响应转 SSE 时无内容的问题

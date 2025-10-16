@@ -35,6 +35,11 @@ type ClientConfig struct {
 	MaxIdlePerHost  int
 	DisableKeepAlive bool
 	InsecureSkipVerify bool
+	// 新增内存和连接优化配置
+	MaxConnsPerHost int // 最大连接数限制
+	ForceAttemptHTTP2 bool // 强制使用HTTP/2
+	WriteBufferSize int // 写缓冲区大小
+	ReadBufferSize  int // 读缓冲区大小
 }
 
 // Factory HTTP客户端工厂
@@ -56,6 +61,11 @@ func NewFactory() *Factory {
 				},
 				MaxIdleConns:   config.Default.HTTPClient.MaxIdleConns,
 				MaxIdlePerHost: config.Default.HTTPClient.MaxIdlePerHost,
+				// 新增优化配置
+				MaxConnsPerHost: 100, // 限制每个主机的最大连接数
+				ForceAttemptHTTP2: true,
+				WriteBufferSize: 32 * 1024, // 32KB写缓冲区
+				ReadBufferSize:  32 * 1024, // 32KB读缓冲区
 			},
 			ClientTypeHealth: {
 				Type: ClientTypeHealth,
@@ -67,6 +77,10 @@ func NewFactory() *Factory {
 				},
 				MaxIdleConns:   config.Default.HTTPClient.MaxIdleConns,
 				MaxIdlePerHost: config.Default.HTTPClient.MaxIdlePerHost,
+				// 健康检查使用较小的连接池
+				MaxConnsPerHost: 10,
+				WriteBufferSize: 8 * 1024,
+				ReadBufferSize:  8 * 1024,
 			},
 			ClientTypeEndpoint: {
 				Type: ClientTypeEndpoint,
@@ -78,6 +92,11 @@ func NewFactory() *Factory {
 				},
 				MaxIdleConns:   config.Default.HTTPClient.MaxIdleConns,
 				MaxIdlePerHost: config.Default.HTTPClient.MaxIdlePerHost,
+				// 端点客户端使用最大连接池
+				MaxConnsPerHost: 200,
+				ForceAttemptHTTP2: true,
+				WriteBufferSize: 64 * 1024, // 64KB写缓冲区
+				ReadBufferSize:  64 * 1024, // 64KB读缓冲区
 			},
 		},
 	}
@@ -97,6 +116,10 @@ func (f *Factory) CreateClient(config ClientConfig) (*http.Client, error) {
 		DisableKeepAlives:     config.DisableKeepAlive,
 		MaxIdleConns:          config.MaxIdleConns,
 		MaxIdleConnsPerHost:   config.MaxIdlePerHost,
+		MaxConnsPerHost:       config.MaxConnsPerHost, // 新增连接限制
+		ForceAttemptHTTP2:     config.ForceAttemptHTTP2, // 强制使用HTTP/2
+		WriteBufferSize:       config.WriteBufferSize, // 优化缓冲区
+		ReadBufferSize:        config.ReadBufferSize,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: config.InsecureSkipVerify,
 		},

@@ -159,13 +159,13 @@
                                         <td class="url-cell">
                                             {{if .URLAnthropic}}
                                                 {{if .URLOpenAI}}
-                                                    <div class="small"><span class="badge bg-warning">Claude</span>{{.URLAnthropic}}</div>
-                                                    <div class="small mt-1"><span class="badge bg-primary">Codex</span>{{.URLOpenAI}}</div>
+                                                    <div class="small"><span class="badge bg-warning">Anthropic</span>{{.URLAnthropic}}</div>
+                                                    <div class="small mt-1"><span class="badge bg-primary">OpenAI</span>{{.URLOpenAI}}</div>
                                                 {{else}}
-                                                    <span class="badge bg-warning">Claude</span>{{.URLAnthropic}}
+                                                    <span class="badge bg-warning">Anthropic</span>{{.URLAnthropic}}
                                                 {{end}}
                                             {{else if .URLOpenAI}}
-                                                <span class="badge bg-primary">Codex</span>{{.URLOpenAI}}
+                                                <span class="badge bg-primary">OpenAI</span>{{.URLOpenAI}}
                                             {{else}}
                                                 <span class="text-muted">-</span>
                                             {{end}}
