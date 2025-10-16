@@ -13,57 +13,35 @@
 
 ## 📖 Overview
 
-CCCC (Claude Code and Codex Companion) delivers:
+CCCC (Claude Code and Codex Companion) is a **high-performance, easy-to-configure API proxy** for AI coding assistants. It provides a unified access point for Claude Code, Codex, and other clients compatible with OpenAI/Anthropic.
 
-- 🔄 **Format conversion** between `/v1/messages`, `/v1/chat/completions`, and `/v1/responses`, keeping old and new APIs transparent to clients.
-- 🎯 **Adaptive routing** that selects endpoints per client, learns `/responses` vs `/chat/completions` preferences, and persists them when desired.
-- 🛡️ **High availability** via multi-endpoint load balancing, health checks, tag-based routing, and granular blacklist strategies.
-- 🧠 **Runtime learning** of parameters, authentication headers, `supports_responses`, and `count_tokens` capabilities, with optional `config.yaml` persistence.
-- 📊 **Operations toolkit** including a web console, request logs, statistics dashboards, and debug bundle exports.
+The core of the new architecture is **simplicity, clarity, and stability**. We have abandoned complex dynamic format conversion in favor of a fixed, one-way proxy model, ensuring that the behavior of every request is clear and predictable.
 
-| Capability | Claude Code native | Codex native | CCCC |
+- 🎯 **Static Endpoint Proxy**: Provides three independent, fixed-function proxy endpoints: `/claude`, `/openai_chat`, and `/openai_responses`.
+- ⚙️ **Simplified Configuration**: Uses a clear YAML structure to configure separate URLs and authentication details for each type of upstream service.
+- 🛡️ **High Availability**: (Retained) Supports health checks, tag-based routing, automatic failover, and blacklisting.
+- 📊 **Full Observability**: (Retained) Provides a web console, request logs, statistics dashboard, and debug bundle exports.
+
+| Capability | Claude Code native | Codex native | CCCC (New) |
 | --- | --- | --- | --- |
 | Multi-endpoint load balancing | ❌ | ❌ | ✅ |
-| Format auto-conversion | ❌ | ❌ | ✅ |
-| Model rewriting | ❌ | ❌ | ✅ |
-| Runtime learning & persistence | ❌ | ❌ | ✅ |
+| Format auto-conversion | ❌ | ❌ | ❌ (Removed by design) |
+| Static one-way proxy | ❌ | ❌ | ✅ |
 | Web console / logs / stats | ❌ | ❌ | ✅ |
 
-Deeper details live in the `docs/` folder, e.g. [Transparent Proxy Optimisation Plan](docs/透明代理优化计划_Transparent_Proxy_Optimisation_Plan.md) and more.
+Deeper details live in the `docs/` folder.
 
 ---
 
-## ✨ Core Features
+## ✨ API Endpoints
 
-### Dual-client compatibility
-- Detects Claude Code / Codex / OpenAI payloads and converts between `/responses`, `/chat/completions`, and `/messages` when needed.
-- Supports dual URLs (`url_anthropic` + `url_openai`) or a single URL with transparent conversion.
-- Learns `supports_responses` and `openai_preference` at runtime and persists them if desired.
-- See [OpenAI Integration Design](docs/OpenAI集成设计_OpenAI_Integration_Design.md) for the conversion flow.
+This project provides the following proxy endpoints, which forward incoming requests to your configured upstream services. You need to select the correct endpoint that matches the API format of your client or target model.
 
-### Intelligent routing & self-adaptation
-- Tag-based routing, priority control, health checks, and fine-grained blacklist configuration.
-- `auth_type: auto` tries `x-api-key` and `Authorization`, remembering the winning strategy.
-- 404/405 or keyword-filtered 400 errors trigger `/responses` downgrades; other errors avoid false positives.
-- See [Tag-based Routing Design](docs/标签路由设计_Tag_based_Routing_Design.md) and [Auth Method Auto-Learning](docs/认证方式自动学习_Auth_Method_Auto_Learning.md).
-
-### Runtime learning & persistence
-- Learns unsupported parameters from 400 errors (e.g. `tools`, `tool_choice`), strips them, and retries instantly.
-- Records `supports_responses`, auth headers, `openai_preference`, and `count_tokens` support; `/admin` can save them back to `config.yaml`.
-- See [Learning Persistence Implementation](docs/学习持久化实现_Learning_Persistence_Implementation.md).
-
-### Advanced configuration
-- Model rewriting (wildcards, implicit defaults, response rewrites).
-- Parameter overrides per endpoint (`temperature`, `max_tokens`, etc.).
-- Dual URL support: configure both Anthropic and OpenAI endpoints in a single entry.
-- See [Configuration Guide](docs/配置指南_Configuration_Guide.md) and [Model Rewrite Design](docs/模型重写设计_Model_Rewrite_Design.md).
-
-### Observability & diagnostics
-- `/admin` offers dashboards, endpoint management, request logs, and testing wizards.
-- Batch probe via `go run ./cmd/test_endpoints -config config.yaml -json` to validate connectivity and auth.
-- “Export Debug Info” packages raw and converted payloads, endpoint configs, and taggers into a ZIP.
-- Logs and statistics persist in SQLite (`logs.db`, `statistics.db`).
-- See [Logging Enhancements](docs/被拉黑端点日志增强_Blacklisted_Endpoint_Logging_Enhancements.md) and [Debug Export](docs/调试信息导出_Debug_Export.md).
+| Local Endpoint | Upstream Format | Primary Use Case |
+| :--- | :--- | :--- |
+| `POST /claude` | Anthropic Messages | Proxy to Claude series models |
+| `POST /openai_chat` | OpenAI Chat Completions | Proxy to modern models like GPT-3.5/4, etc. |
+| `POST /openai_responses` | OpenAI Responses (Legacy) | Compatibility with older or specific model endpoints |
 
 ---
 
@@ -92,27 +70,33 @@ The proxy listens on `127.0.0.1:8080` by default; the admin console lives at `ht
 - Scripts back up and regenerate `~/.claude/settings.json`, `~/.codex/config.toml`, and `auth.json`.
 
 ### Sample configuration
+
+The `config.yaml` has been greatly simplified. You only need to provide the URL and API key for the endpoint types you intend to use.
+
 ```yaml
+# Server listen address
 server:
-  host: 127.0.0.1
+  host: "127.0.0.1"
   port: 8080
 
-endpoints:
-  - name: universal-provider
-    url_anthropic: https://api.provider.com/anthropic
-    url_openai: https://api.provider.com/openai
-    auth_type: auto
-    auth_value: your-token
-    supports_responses: false
-    openai_preference: auto
-    model_rewrite:
-      enabled: true
-      rules:
-        - source_pattern: claude-*sonnet*
-          target_model: qwen-plus
-        - source_pattern: gpt-5*
-          target_model: qwen-max
+# --- Endpoint Configurations ---
+# Provide the upstream URL and API key for each endpoint type you need.
+# Providing the full URL is recommended, but the system will attempt to auto-complete it if missing.
 
+anthropic_endpoint:
+  url: "https://api.anthropic.com"
+  api_key: "YOUR_ANTHROPIC_API_KEY_HERE"
+
+openai_chat_endpoint:
+  url: "https://api.openai.com"
+  api_key: "YOUR_OPENAI_API_KEY_HERE"
+
+# Endpoint for the legacy /responses format, disabled by default
+# openai_responses_endpoint:
+#   url: "https://api.example.com/v1/responses"
+#   api_key: "YOUR_API_KEY_FOR_RESPONSES_ENDPOINT"
+
+# --- Other Configurations ---
 logging:
   level: info
   log_directory: ./logs

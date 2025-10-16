@@ -1,147 +1,102 @@
+# -----------------------------------------------------------------
+# Claude Code Codex Companion - Configuration Example
+# -----------------------------------------------------------------
+# This file provides an example configuration.
+# Please copy it to 'config.yaml' and modify it to your needs.
+
+# Address for the proxy server to listen on
 server:
-    host: 127.0.0.1                # Bind address (127.0.0.1 for local only, 0.0.0.0 for all interfaces)
-    port: 8080
+  host: "127.0.0.1"
+  port: 8080
+  # Whether to automatically sort endpoints based on performance (currently disabled)
+  auto_sort_endpoints: false
 
-# Endpoint failure detection: An endpoint is marked as inactive if within 140 seconds
-# there are more than 1 failed requests AND all requests in that window failed
-endpoints:
-    # Anthropic 端点示例
-    - name: anthropic-primary
-      url: https://api.anthropic.com
-      endpoint_type: anthropic         # 类型："anthropic" | "openai"
-      auth_type: api_key               # 认证类型："api_key" | "auth_token"
-      auth_value: sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-      enabled: true
-      priority: 1
-      tags: []                         # 可选：端点标签
-      # 系统自动检测客户端类型，无需配置 supported_clients
+# --- Endpoint URLs ---
+# Provide the full base URL and API key for each upstream service.
+# The system will automatically append the correct path (e.g., /v1/chat/completions) if it's missing.
+# It is recommended to provide the full URL for clarity.
 
-    # OpenAI 兼容端点示例（支持 Codex）
-    - name: openai-compatible
-      url: https://api.openai.com
-      endpoint_type: openai
-      path_prefix: "/v1"               # 可选：API 路径前缀
-      auth_type: auth_token
-      auth_value: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-      enabled: true
-      priority: 2
-      model_rewrite:                   # 可选：模型重写规则
-        enabled: true
-        rules:
-            - source_pattern: gpt-5*   # 支持通配符
-              target_model: gpt-4-turbo
-            - source_pattern: gpt-4*
-              target_model: gpt-4-turbo
+# For Anthropic models (proxied via /claude)
+# Example URL: https://api.anthropic.com/v1/messages
+anthropic_endpoint:
+  url: ""
+  api_key: "YOUR_ANTHROPIC_API_KEY_HERE"
 
-    # 通用端点示例（同时支持 Claude Code 和 Codex）
-    - name: universal-endpoint
-      url: https://api.example.com
-      endpoint_type: openai
-      auth_type: auth_token
-      auth_value: your-bearer-token-here
-      enabled: true
-      priority: 3
-      # 不设置 supported_clients 表示支持所有客户端
-      model_rewrite:
-        enabled: true
-        rules:
-            # Claude 模型映射到 GPT
-            - source_pattern: claude-*haiku*
-              target_model: gpt-3.5-turbo
-            - source_pattern: claude-*sonnet*
-              target_model: gpt-4-turbo
-            # GPT 模型映射
-            - source_pattern: gpt-5*
-              target_model: gpt-4-turbo
-      parameter_overrides:             # 可选：参数覆盖
-          - key: temperature
-            value: 0.7
-          - key: max_tokens
-            value: 4096
+# For OpenAI /chat/completions format (proxied via /openai_chat)
+# Use this for modern models like GPT-4, or providers like 88code.
+# Example URL: https://api.openai.com/v1/chat/completions
+openai_chat_endpoint:
+  url: ""
+  api_key: "YOUR_OPENAI_API_KEY_HERE"
+
+# For legacy OpenAI /responses format (proxied via /openai_responses)
+# This is optional and only needed for compatibility with older models.
+# Example URL: https://api.example.com/v1/responses
+#
+# openai_responses_endpoint:
+#   url: ""
+#   api_key: "YOUR_API_KEY_FOR_RESPONSES_ENDPOINT"
+
+
+# --- Core Service Configurations ---
 
 logging:
-    level: info                    # debug | info | warn | error
-    log_request_types: failed      # failed | success | all
-    log_request_body: truncated    # none | truncated | full
-    log_response_body: truncated   # none | truncated | full
-    log_directory: ./logs
-    exclude_paths:                 # 不记录日志的路径列表
-        - /v1/messages/count_tokens
+  level: "info" # "debug", "info", "warn", "error"
+  log_request_types: "failed" # "all", "failed", "none"
+  log_request_body: "truncated" # "full", "truncated", "none"
+  log_response_body: "truncated" # "full", "truncated", "none"
+  log_directory: "./logs"
 
-validation:
-    # 严格 Anthropic 格式校验和流式响应校验已永久启用
-    python_json_fixing:
-        enabled: false             # Python JSON 修复功能
-        target_tools: []           # 需要修复的工具名称列表
-        debug_logging: false
-        max_attempts: 0
-
-web_admin:
-    enabled: true                 # Admin interface runs on same host:port as proxy server
-
-# Timeout configurations for HTTP clients (统一配置)
+# Network timeouts for proxying and health checks
 timeouts:
-    tls_handshake: 10s            # TLS handshake timeout (default: 10s)
-    response_header: 60s          # Response header timeout (default: 60s)
-    idle_connection: 90s          # Idle connection timeout (default: 90s)
-    health_check_timeout: 30s     # Health check overall timeout (default: 30s)
-    check_interval: 30s           # Health check interval (default: 30s)
-    recovery_threshold: 1         # 连续成功多少次健康检查后恢复端点 (default: 1)
+  tls_handshake: "10s"
+  response_header: "60s"
+  idle_connection: "90s"
+  health_check_timeout: "30s"
+  check_interval: "30s"
+  recovery_threshold: 1
 
-# Tagging system - 根据请求特征为endpoint分配标签进行路由
-tagging:
-    enabled: false                # Enable tagging system
-    pipeline_timeout: 5s          # Timeout for tagger pipeline execution
-    taggers: []                   # 标签处理器列表
-    # 示例：
-    # taggers:
-    #     - name: path-based-tagger
-    #       type: builtin
-    #       enabled: true
-    #       config:
-    #           rules:
-    #               - pattern: "^/v1/messages"
-    #                 tag: "anthropic-api"
-    #               - pattern: "^/v1/chat/completions"
-    #                 tag: "openai-api"
+# Endpoint health checking and blacklisting configuration
+blacklist:
+  enabled: true
+  auto_blacklist: true
+  business_error_safe: true # Don't blacklist on 4xx errors
+  config_error_safe: false
+  server_error_safe: false # Blacklist on 5xx errors
+  sse_validation_safe: false
 
-# I18n 多语言支持（实验性功能）
+# Internationalization (i18n) settings
 i18n:
-    enabled: true
-    default_language: "zh-cn"
-    locales_path: "./web/locales"
+  enabled: true
+  default_language: "en" # "en", "zh"
+  locales_path: "web/locales"
 
-# ============================================================================
-# 配置说明
-# ============================================================================
-#
-# 1. 客户端类型支持
-#    - claude-code: Claude Code (Cursor) 客户端，使用 Anthropic API 格式
-#    - codex: Codex CLI 客户端，使用 OpenAI API 格式
-#    - 留空 supported_clients: 表示支持所有客户端类型
-#
-# 2. 端点类型
-#    - anthropic: Anthropic 原生 API 端点
-#    - openai: OpenAI 兼容端点（包括 GPT、Claude via OpenAI、国产大模型等）
-#
-# 3. 认证类型
-#    - api_key: 使用 x-api-key 头部（Anthropic 标准）
-#    - auth_token: 使用 Authorization: Bearer <token>（OpenAI 标准）
-#
-# 4. 模型重写
-#    - 支持通配符匹配（*, ?）
-#    - 按顺序匹配，第一个匹配的规则生效
-#    - 用于将客户端请求的模型映射到端点实际支持的模型
-#
-# 5. 端点选择策略
-#    - 优先级：数字越小优先级越高
-#    - 健康检查：不健康的端点会被自动跳过
-#    - 客户端过滤：只选择 supported_clients 匹配的端点
-#    - 标签路由：如果启用，根据请求标签选择端点
-#
-# 6. 安全提示
-#    ⚠️  不要将包含真实 API 密钥的 config.yaml 提交到 Git
-#    ⚠️  使用此示例文件作为模板，创建你自己的 config.yaml
-#    ⚠️  确保 config.yaml 已添加到 .gitignore
-#
-# ============================================================================
+# --- Advanced Configurations ---
+
+# HTTP client settings
+http_client:
+  max_conns_per_host: 10
+  write_buffer_size: 4096
+  read_buffer_size: 4096
+  force_attempt_http2: true
+  enable_compression: true
+  enable_keep_alive: true
+
+# Conversion settings (mostly deprecated)
+conversion:
+  adapter_mode: "unified" # "legacy", "unified", "auto"
+  validate_mode_switch: false
+  failback_threshold: 30
+
+# Tagging system for routing requests
+tagging:
+  pipeline_timeout: "5s"
+  taggers: []
+  # Example tagger:
+  # - name: "claude_model_tagger"
+  #   type: "body-json"
+  #   tag: "model:claude"
+  #   enabled: true
+  #   config:
+  #     json_path: "model"
+  #     value_pattern: "claude-*"

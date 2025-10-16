@@ -38,52 +38,8 @@ func LoadEmbeddedEndpointProfiles() (*ProfilesConfig, error) {
 	return &config, nil
 }
 
-// ToEndpointConfig 将预设配置转换为端点配置
-func (p *EndpointProfile) ToEndpointConfig(name, authValue, defaultModel, url string) EndpointConfig {
-	// 使用传入的url参数，如果为空则使用预设的URL
-	finalURL := url
-	if finalURL == "" {
-		finalURL = p.URL
-	}
-
-	endpoint := EndpointConfig{
-		Name:              name,
-		AuthType:          p.AuthType,
-		AuthValue:         authValue,
-		Enabled:           true,
-		Priority:          1, // 会在创建时重新计算
-		Tags:              []string{}, // 通过向导创建的端点默认无标签
-		ModelRewrite:      nil,
-		Proxy:             nil,
-		OAuthConfig:       nil,
-	}
-
-	// 根据预设的endpoint_type确定URL字段的赋值
-	// 新格式下使用url_anthropic或url_openai
-	if p.EndpointType == "anthropic" || p.EndpointType == "" {
-		endpoint.URLAnthropic = finalURL
-	} else if p.EndpointType == "openai" {
-		endpoint.URLOpenAI = finalURL
-	} else {
-		// 未知类型，默认为Anthropic
-		endpoint.URLAnthropic = finalURL
-	}
-
-	// 如果需要默认模型且提供了模型名称，添加模型重写配置
-	if p.RequireDefaultModel && defaultModel != "" {
-		endpoint.ModelRewrite = &ModelRewriteConfig{
-			Enabled: true,
-			Rules: []ModelRewriteRule{
-				{
-					SourcePattern: "*", // 匹配所有模型
-					TargetModel:   defaultModel,
-				},
-			},
-		}
-	}
-
-	return endpoint
-}
+// ToEndpointConfig has been removed as it generated the deprecated EndpointConfig struct.
+// The endpoint wizard feature needs to be refactored to work with the new configuration model.
 
 // GenerateUniqueEndpointName 生成唯一的端点名称
 func GenerateUniqueEndpointName(displayName string, existingNames []string) string {

@@ -13,93 +13,35 @@
 
 ## 📖 项目简介
 
-CCCC（Claude Code and Codex Companion）是一个面向 AI 编程助手的透明代理层，能够：
+CCCC（Claude Code and Codex Companion）是一个面向 AI 编程助手的**高性能、配置简单的 API 代理**。它为 Claude Code、Codex 以及其他 OpenAI/Anthropic 兼容的客户端提供统一的接入点。
 
-- 🔄 **自动格式转换**：在 `/v1/messages`、`/v1/chat/completions`、`/v1/responses` 之间双向转换，保障旧/新 API 兼容。
-- 🎯 **智能路由与自适应**：依照客户端类型优选端点，学习并记忆 `/responses` 与 `/chat/completions` 的兼容策略。
-- 🛡️ **高可用保障**：支持多端点、健康检查、标签路由、自动降级与黑名单策略。
-- 🧠 **运行时学习**：记录参数/认证/格式偏好与 `supports_responses` 状态，可选择写回 `config.yaml`。
-- 📊 **完整可观测性**：提供 Web 控制台、请求日志、统计面板与调试包导出。
+新架构的核心是**简单、明确、稳定**。我们摒弃了复杂的动态格式转换，采用固定的单向代理模式，确保每一个请求的行为都清晰可预测。
 
-| 能力 | Claude Code 原生 | Codex 原生 | CCCC |
+- 🎯 **静态端点代理**：提供 `/claude`, `/openai_chat`, `/openai_responses` 三个独立的、功能固定的代理端点。
+- ⚙️ **简化配置**：采用清晰的 YAML 结构，为每种上游服务类型配置独立的 URL 和认证信息。
+- 🛡️ **高可用保障**：(保留) 支持多端点、健康检查、标签路由、自动降级与黑名单策略。
+- 📊 **完整可观测性**：(保留) 提供 Web 控制台、请求日志、统计面板与调试包导出。
+
+| 能力 | Claude Code 原生 | Codex 原生 | CCCC (新版) |
 | --- | --- | --- | --- |
 | 多端点负载均衡 | ❌ | ❌ | ✅ |
-| 格式互转 | ❌ | ❌ | ✅ |
-| 模型重写 | ❌ | ❌ | ✅ |
-| 运行时学习与持久化 | ❌ | ❌ | ✅ |
+| 格式互转 | ❌ | ❌ | ❌ (设计上移除) |
+| 静态单向代理 | ❌ | ❌ | ✅ |
 | Web 管理/日志/统计 | ❌ | ❌ | ✅ |
 
-更多技术细节可参考 `docs/` 目录，如 [《透明代理优化计划》](docs/透明代理优化计划_Transparent_Proxy_Optimisation_Plan.md) 等。
+更多技术细节可参考 `docs/` 目录。
 
 ---
 
-## ✨ 核心特性
+## ✨ API 端点
 
-### 双客户端兼容与格式转换
+本项目提供以下代理端点，将传入的请求转发到您配置的上游服务。您需要根据客户端或目标模型的 API 格式，选择正确的端点进行调用。
 
-#### 端点智能路由
-- **双 URL 配置**：单端点可同时配置 `url_anthropic` 与 `url_openai`，根据客户端类型自动路由
-  - Claude Code 请求 → `url_anthropic`（Anthropic Messages API）
-  - Codex 请求 → `url_openai`（OpenAI Responses/Chat Completions API）
-- **单 URL 降级**：仅配置一个 URL 时，自动在代理侧进行格式转换
-  - 仅 `url_anthropic`：Codex 请求转换为 Anthropic 格式后转发
-  - 仅 `url_openai`：Claude Code 请求转换为 OpenAI 格式后转发
-
-#### Responses API 自适应学习
-- **首次请求**：优先尝试 `/v1/responses` 格式（OpenAI 新版 API）
-- **智能降级**：遇到 404/405 或特定 400 错误时自动切换 `/v1/chat/completions`
-- **学习记录**：成功格式持久化到 `openai_preference` 字段，下次直接使用
-- **手动控制**：可显式设置 `supports_responses: true/false` 或 `openai_preference: responses/chat_completions/auto`
-
-#### 流式响应转换（Codex 专用增强）
-- **真实流式 SSE**：上游返回 `text/event-stream` 时
-  - 自动转换 Chat Completions SSE → Responses API SSE
-  - 保持流式数据完整性，无需缓存
-  - 兼容 "data:" 和 "data: " 两种 SSE 格式
-- **模拟流式 SSE**：上游返回 JSON 但客户端期望流式时（`stream: true`）
-  1. **格式探测**：识别 Chat Completions JSON（`choices`）或 Responses JSON（`output`）
-  2. **格式转换**：Chat Completions JSON → Responses JSON
-  3. **SSE 生成**：Responses JSON → Responses API SSE 流
-  4. **立即返回**：写入并刷新 SSE 数据后立即返回，避免被后续逻辑覆盖
-- **工具调用流式映射**：基于触发信号实时检测文本中的工具调用并转换为结构化事件
-  - 发送 `response.function_call.started` 事件（包含 id 和 name）
-  - 发送 `response.function_call_arguments.delta` 事件（完整 JSON 参数）
-  - 发送 `response.function_call.completed` 事件
-  - 自动更新上下文标记 `tool_call_detected` 和 `tool_call_count`
-- **容错能力**：上游未产生任何 chunk 时仍构造最小响应，避免流中断
-- **事件完整性**：确保发送 `response.created`、`response.output_text.delta`、`response.completed` 三个核心事件
-
-详见 [OpenAI 集成设计](docs/OpenAI集成设计_OpenAI_Integration_Design.md)、[SSE 重构设计](docs/SSE重构设计_SSE_Refactor_Design.md)。
-
-### 智能路由与自适应系统
-- **动态端点排序**：根据实时性能指标（可用性、成功率、响应时间）自动调整端点优先级，确保始终优先使用最快、最稳定的端点
-  - 仅关注当前性能，不考虑历史请求量
-  - 客户端验证失败（如 "只允许 Claude Code CLI"）不视为端点故障
-  - 优先级变更自动持久化到配置文件
-  - 支持一键批量测试和手动排序
-- 标签路由、优先级控制、健康检查与自动黑名单。
-- `auth_type: auto` 动态尝试 `x-api-key` / `Authorization` 并记录成功结果。
-- 404/405 或特定 400 错误会自动降级 `/responses`，其他错误不会误伤。
-- 详见 [动态端点排序](docs/动态端点排序_Dynamic_Endpoint_Sorting.md)、[标签路由设计](docs/标签路由设计_Tag_based_Routing_Design.md)、[认证方式自动学习](docs/认证方式自动学习_Auth_Method_Auto_Learning.md)。
-
-### 运行时学习与配置持久化
-- 识别 400 错误中的不兼容参数（如 `tools`、`tool_choice`），立即移除并重试。
-- 记录 `supports_responses`、认证方式、`openai_preference`、`count_tokens` 能力并可回写配置。
-- `/admin` 中提供“保存配置”按钮同步学习结果。
-- 详见 [学习持久化实现](docs/学习持久化实现_Learning_Persistence_Implementation.md)。
-
-### 高级配置能力
-- 模型重写：通配符映射、隐式默认映射、响应模型回写。
-- 参数覆盖：按端点覆盖 `temperature`、`max_tokens` 等。
-- 双 URL 单端点：同时配置 `url_anthropic` 与 `url_openai`，缺失时自动格式转换。
-- 详见 [配置指南](docs/配置指南_Configuration_Guide.md)、[模型重写设计](docs/模型重写设计_Model_Rewrite_Design.md)。
-
-### 可观测性与调试
-- `/admin` 提供仪表盘、端点管理、请求日志、测试向导。
-- `go run ./cmd/test_endpoints -config config.yaml -json` 一键批量探针、验证认证。
-- “导出调试信息” 生成 ZIP 包含请求/响应、端点配置与 Tagger 信息。
-- 日志与统计持久化使用 SQLite（`logs.db`、`statistics.db`）。
-- 详见 [日志增强设计](docs/被拉黑端点日志增强_Blacklisted_Endpoint_Logging_Enhancements.md)、[调试信息导出](docs/调试信息导出_Debug_Export.md)。
+| 本地端点 | 上游格式 | 主要用途 |
+| :--- | :--- | :--- |
+| `POST /claude` | Anthropic Messages | 代理到 Claude 系列模型 |
+| `POST /openai_chat` | OpenAI Chat Completions | 代理到 GPT-3.5/4 等现代模型 |
+| `POST /openai_responses` | OpenAI Responses (Legacy) | 兼容旧版或特定的模型端点 |
 
 ---
 
@@ -128,28 +70,32 @@ go build -o claude-code-codex-companion .
 - 脚本会备份并更新 `~/.claude/settings.json`、`~/.codex/config.toml`、`auth.json`。
 
 ### 配置示例
+`config.yaml` 的配置已大幅简化。您只需为需要使用的端点类型提供 URL 和 API 密钥。
+
 ```yaml
+# 服务器监听地址
 server:
   host: 127.0.0.1
   port: 8080
-  auto_sort_endpoints: true  # 启用动态端点排序
 
-endpoints:
-  - name: universal-provider
-    url_anthropic: https://api.provider.com/anthropic
-    url_openai: https://api.provider.com/openai
-    auth_type: auto
-    auth_value: your-token
-    supports_responses: false
-    openai_preference: auto
-    model_rewrite:
-      enabled: true
-      rules:
-        - source_pattern: claude-*sonnet*
-          target_model: qwen-plus
-        - source_pattern: gpt-5*
-          target_model: qwen-max
+# --- 端点配置 ---
+# 为您需要使用的端点类型提供上游 URL 和 API 密钥。
+# URL 推荐使用完整路径，如果缺失，系统会尝试自动补全。
 
+anthropic_endpoint:
+  url: "https://api.anthropic.com"
+  api_key: "YOUR_ANTHROPIC_API_KEY_HERE"
+
+openai_chat_endpoint:
+  url: "https://api.openai.com"
+  api_key: "YOUR_OPENAI_API_KEY_HERE"
+
+# 为旧版 /responses 格式准备的端点，默认不启用
+# openai_responses_endpoint:
+#   url: "https://api.example.com/v1/responses"
+#   api_key: "YOUR_API_KEY_FOR_RESPONSES_ENDPOINT"
+
+# --- 其他配置 ---
 logging:
   level: info
   log_directory: ./logs

@@ -520,54 +520,13 @@ func (s *AdminServer) formatHeaders(headers map[string]string) string {
 	return result.String()
 }
 
-// addEndpointConfigsToZip 添加端点配置到ZIP
+// addEndpointConfigsToZip is a stub. The logic for adding endpoint configs to the debug zip
+// has been disabled as it depended on the old dynamic endpoint configuration.
 func (s *AdminServer) addEndpointConfigsToZip(zipWriter *zip.Writer, logs []*logger.RequestLog) error {
-	endpointNames := make(map[string]bool)
-	
-	// 收集所有涉及的端点名称
-	for _, log := range logs {
-		if log.Endpoint != "" {
-			endpointNames[log.Endpoint] = true
-		}
+	readmeContent := "Endpoint configuration export is disabled due to architectural refactoring."
+	if err := s.addFileToZip(zipWriter, "endpoints/README.txt", []byte(readmeContent)); err != nil {
+		return err
 	}
-
-	// 为每个端点创建配置文件
-	for endpointName := range endpointNames {
-		config := s.getEndpointConfigByName(endpointName)
-		if config != nil {
-			// 清空认证信息
-			sanitizedConfig := *config
-			sanitizedConfig.AuthValue = "[REDACTED]"
-			
-			// 清空OAuth配置中的敏感信息
-			if sanitizedConfig.OAuthConfig != nil {
-				sanitizedOAuth := *sanitizedConfig.OAuthConfig
-				sanitizedOAuth.AccessToken = "[REDACTED]"
-				sanitizedOAuth.RefreshToken = "[REDACTED]"
-				sanitizedOAuth.ClientID = "[REDACTED]"
-				sanitizedConfig.OAuthConfig = &sanitizedOAuth
-			}
-
-			// 清空代理配置中的敏感信息
-			if sanitizedConfig.Proxy != nil {
-				sanitizedProxy := *sanitizedConfig.Proxy
-				sanitizedProxy.Username = "[REDACTED]"
-				sanitizedProxy.Password = "[REDACTED]"
-				sanitizedConfig.Proxy = &sanitizedProxy
-			}
-
-			configJSON, err := json.MarshalIndent(sanitizedConfig, "", "  ")
-			if err != nil {
-				return err
-			}
-
-			filename := fmt.Sprintf("endpoints/endpoint_%s.json", sanitizeForFilename(endpointName))
-			if err := s.addFileToZip(zipWriter, filename, configJSON); err != nil {
-				return err
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -606,13 +565,9 @@ func (s *AdminServer) addTaggerConfigsToZip(zipWriter *zip.Writer, logs []*logge
 	return nil
 }
 
-// getEndpointConfigByName 根据名称获取端点配置
-func (s *AdminServer) getEndpointConfigByName(name string) *config.EndpointConfig {
-	for i, endpoint := range s.config.Endpoints {
-		if endpoint.Name == name {
-			return &s.config.Endpoints[i]
-		}
-	}
+// getEndpointConfigByName is a stub for a deprecated feature.
+// It returns nil as the dynamic endpoint list no longer exists.
+func (s *AdminServer) getEndpointConfigByName(name string) interface{} {
 	return nil
 }
 

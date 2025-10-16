@@ -148,7 +148,7 @@ func (s *AdminServer) handleDiagnostics(c *gin.Context) {
 		"server_host":     s.config.Server.Host,
 		"web_admin_enabled": true, // Web admin is now integrated into main server
 		"logging_level":   s.config.Logging.Level,
-		"endpoints_count": len(s.config.Endpoints),
+		"endpoints_count": 0, // Deprecated: Dynamic endpoints removed.
 	}
 	
 	c.JSON(http.StatusOK, diagnostics)

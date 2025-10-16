@@ -1,5 +1,13 @@
 package conversion
 
+import "net/http"
+
+// RequestAdapter defines the interface for the new static request conversion logic.
+type RequestAdapter interface {
+	ConvertRequest(req *http.Request) (*http.Request, error)
+}
+
+
 // EndpointInfo 包含转换器需要的端点信息
 type EndpointInfo struct {
 	Type               string

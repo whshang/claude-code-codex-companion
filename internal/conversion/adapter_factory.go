@@ -1,3 +1,12 @@
+// ==================================================================================
+//
+// DEPRECATED: This file contains logic for a conversion adapter factory.
+// As of the October 2025 refactor, the proxy architecture has shifted to static handlers,
+// where each route instantiates its required adapter directly (e.g., NewOpenAIChatAdapter).
+// This factory is no longer used by the main proxy logic and is slated for removal.
+// See internal/proxy/server.go for the new handler implementations.
+//
+// ==================================================================================
 package conversion
 
 import "claude-code-codex-companion/internal/logger"

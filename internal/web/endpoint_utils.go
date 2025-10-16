@@ -2,75 +2,31 @@ package web
 
 import (
 	"fmt"
-
-	"claude-code-codex-companion/internal/config"
 )
 
-// saveEndpointsToConfig 将端点配置保存到配置文件
-func (s *AdminServer) saveEndpointsToConfig(endpointConfigs []config.EndpointConfig) error {
-	// 更新配置
-	s.config.Endpoints = endpointConfigs
-
-	// 保存到文件
-	return config.SaveConfig(s.config, s.configFilePath)
+// saveEndpointsToConfig is a stub for a deprecated feature.
+func (s *AdminServer) saveEndpointsToConfig(endpointConfigs []interface{}) error {
+	return fmt.Errorf(disabledError)
 }
 
-// createEndpointConfigFromRequest 从请求创建端点配置，自动设置优先级
-func createEndpointConfigFromRequest(name, urlAnthropic, urlOpenAI, authType, authValue string, enabled bool, priority int, tags []string, proxy *config.ProxyConfig, oauthConfig *config.OAuthConfig, headerOverrides map[string]string, parameterOverrides map[string]string, countTokensEnabled *bool, supportsResponses *bool) config.EndpointConfig {
-	return config.EndpointConfig{
-		Name:               name,
-		URLAnthropic:       urlAnthropic,
-		URLOpenAI:          urlOpenAI,
-		AuthType:           authType,
-		AuthValue:          authValue,
-		Enabled:            enabled,
-		Priority:           priority,
-		Tags:               tags,
-		Proxy:              proxy,
-		OAuthConfig:        oauthConfig,
-		HeaderOverrides:    headerOverrides,
-		ParameterOverrides: parameterOverrides,
-		CountTokensEnabled: countTokensEnabled,
-		SupportsResponses:  supportsResponses,
-	}
+// createEndpointConfigFromRequest is a stub for a deprecated feature.
+// It returns nil because the config.EndpointConfig struct no longer exists.
+func createEndpointConfigFromRequest(name, urlAnthropic, urlOpenAI, authType, authValue string, enabled bool, priority int, tags []string, proxy interface{}, oauthConfig interface{}, headerOverrides map[string]string, parameterOverrides map[string]string, countTokensEnabled *bool, supportsResponses *bool) interface{} {
+	return nil
 }
 
-// generateUniqueEndpointName 生成唯一的端点名称，如果存在重名则添加数字后缀
+// generateUniqueEndpointName is a stub for a deprecated feature.
+// It now simply returns the base name as there is no list to check for uniqueness.
 func (s *AdminServer) generateUniqueEndpointName(baseName string) string {
-	currentEndpoints := s.config.Endpoints
-
-	// 检查基础名称是否已存在
-	nameExists := func(name string) bool {
-		for _, ep := range currentEndpoints {
-			if ep.Name == name {
-				return true
-			}
-		}
-		return false
-	}
-
-	// 如果基础名称不存在，直接返回
-	if !nameExists(baseName) {
-		return baseName
-	}
-
-	// 如果存在，添加数字后缀
-	counter := 1
-	for {
-		newName := generateEndpointNameWithSuffix(baseName, counter)
-		if !nameExists(newName) {
-			return newName
-		}
-		counter++
-	}
+	return baseName
 }
 
-// generateEndpointNameWithSuffix 生成带数字后缀的端点名称
+// generateEndpointNameWithSuffix is a stub for a deprecated feature.
 func generateEndpointNameWithSuffix(baseName string, counter int) string {
-	return generateEndpointNameFormat(baseName, counter)
+	return fmt.Sprintf("%s (%d)", baseName, counter)
 }
 
-// generateEndpointNameFormat 格式化端点名称
+// generateEndpointNameFormat is a stub for a deprecated feature.
 func generateEndpointNameFormat(baseName string, counter int) string {
 	return fmt.Sprintf("%s (%d)", baseName, counter)
 }

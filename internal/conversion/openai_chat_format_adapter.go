@@ -3,6 +3,7 @@ package conversion
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"claude-code-codex-companion/internal/logger"
@@ -566,3 +567,16 @@ func convertInternalResponseFormatToOpenAI(irf *InternalResponseFormat) *OpenAIR
 	}
 	return openai
 }
+
+// NewOpenAIChatAdapter creates a new adapter for the static proxy.
+func NewOpenAIChatAdapter() RequestAdapter {
+	return &OpenAIChatFormatAdapter{}
+}
+
+// ConvertRequest implements the RequestAdapter interface for the new static proxy.
+// It currently acts as a pass-through, as the new architecture prioritizes routing over conversion.
+func (a *OpenAIChatFormatAdapter) ConvertRequest(req *http.Request) (*http.Request, error) {
+	// No-op for now. The request is passed through as is.
+	return req, nil
+}
+

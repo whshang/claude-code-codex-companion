@@ -303,71 +303,14 @@ func calculateSuccessRate(successRequests, totalRequests int) string {
 	return fmt.Sprintf("%.1f%%", rate)
 }
 
-// hotUpdateEndpoints performs hot update of endpoints configuration
-func (s *AdminServer) hotUpdateEndpoints(endpoints []config.EndpointConfig) error {
-	// 首先验证端点配置的基本有效性
-	if err := s.validateEndpointsConfig(endpoints); err != nil {
-		return fmt.Errorf("endpoint validation failed: %v", err)
-	}
-
-	if s.hotUpdateHandler == nil {
-		// 回退到旧的更新方式
-		return s.saveEndpointsToConfig(endpoints)
-	}
-
-	// 创建新配置，只更新端点部分
-	newConfig := *s.config
-	newConfig.Endpoints = endpoints
-
-	// 验证完整的配置
-	if err := config.ValidateConfig(&newConfig); err != nil {
-		return fmt.Errorf("configuration validation failed: %v", err)
-	}
-
-	if err := s.hotUpdateHandler.HotUpdateConfig(&newConfig); err != nil {
-		return fmt.Errorf("failed to hot update: %v", err)
-	}
-
-	// 保存配置到文件
-	if err := config.SaveConfig(&newConfig, s.configFilePath); err != nil {
-		s.logger.Error("Failed to save configuration file after endpoint update", err)
-		// 不返回错误，因为内存更新已成功
-	}
-
-	// 更新本地配置引用
-	s.config = &newConfig
-	return nil
+// hotUpdateEndpoints is deprecated due to the removal of the dynamic endpoints list.
+func (s *AdminServer) hotUpdateEndpoints(endpoints []interface{}) error {
+	return fmt.Errorf("endpoint list hot-update is disabled due to architectural refactoring")
 }
 
-// validateEndpointsConfig 验证端点配置的基本有效性
-func (s *AdminServer) validateEndpointsConfig(endpoints []config.EndpointConfig) error {
-	if len(endpoints) == 0 {
-		return fmt.Errorf("at least one endpoint must be configured")
-	}
-
-	// 检查端点名称唯一性
-	nameSet := make(map[string]bool)
-	for _, ep := range endpoints {
-		if ep.Name == "" {
-			return fmt.Errorf("endpoint name cannot be empty")
-		}
-		if nameSet[ep.Name] {
-			return fmt.Errorf("duplicate endpoint name: %s", ep.Name)
-		}
-		nameSet[ep.Name] = true
-
-		// 检查URL格式
-		if ep.URLAnthropic == "" && ep.URLOpenAI == "" {
-			return fmt.Errorf("endpoint %s must have at least one URL configured", ep.Name)
-		}
-
-		// 检查认证配置
-		if ep.AuthValue == "" {
-			return fmt.Errorf("endpoint %s must have authentication configured", ep.Name)
-		}
-	}
-
-	return nil
+// validateEndpointsConfig is deprecated.
+func (s *AdminServer) validateEndpointsConfig(endpoints []interface{}) error {
+	return fmt.Errorf("endpoint list validation is disabled due to architectural refactoring")
 }
 
 // updateConfigWithRollback 执行配置更新，失败时自动回滚

@@ -1,3 +1,13 @@
+// ==================================================================================
+//
+// DEPRECATED: This file contains the ConversionManager, which was designed to
+// dynamically switch between 'legacy' and 'unified' conversion pipelines.
+// As of the October 2025 refactor, this dynamic behavior has been removed in favor
+// of static, route-specific adapters. The ConversionManager is no longer used by
+// the main proxy logic and is slated for removal.
+// See internal/proxy/server.go for the new static handler implementations.
+//
+// ==================================================================================
 package conversion
 
 import (

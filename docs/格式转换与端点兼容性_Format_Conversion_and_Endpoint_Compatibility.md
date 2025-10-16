@@ -1,241 +1,128 @@
 # 格式转换与端点兼容性 | Format Conversion and Endpoint Compatibility
 
-## 中文
+## 核心架构变更：从动态转换到静态代理
 
-### 概述
+**重要提示**：本项目的核心架构已于 2025 年 10 月进行了重大重构。旧的动态、双向格式转换功能已被**完全移除**，取而代之的是一个更简单、更稳定、更明确的**静态单向代理模型**。
 
-CCCC 支持 Claude Code 和 Codex 客户端的双向格式转换，实现"单URL多客户端"的灵活配置。
+本文档描述的是当前（新版）架构。
 
-### 核心能力
+---
 
-#### 双URL智能路由
-- **Claude Code 请求** → `url_anthropic`（Anthropic Messages API）
-- **Codex 请求** → `url_openai`（OpenAI Responses/Chat Completions API）
-- **单URL降级**：自动在代理侧进行格式转换
+### 架构概述 (New Architecture)
 
-#### 完整格式转换
-支持 OpenAI Chat Completions ↔ Responses API ↔ Anthropic Messages 之间的完整转换：
+新系统的核心思想是“一个端点，一种格式”。每个暴露给客户端的 API 端点都硬性绑定一个特定的上游 API 格式。不再有运行时的格式猜测或自动转换。
 
-**新增字段支持**：
-- 采样控制：`presence_penalty`, `frequency_penalty`, `logit_bias`, `n`
-- 输出格式：`response_format`（json_object, json_schema）
-- 双路径回退：`input` → `messages` 兼容性
+#### 数据流路径
 
-**转换流程**：
-1. **请求转换**：客户端格式 → 统一中间格式 → 上游格式
-2. **响应转换**：上游格式 → 统一中间格式 → 客户端格式
-3. **流式支持**：SSE 实时转换，保持事件完整性
+系统的行为现在是完全可预测的：
 
-#### 技术实现
+*   **Claude 路径**:
+    `客户端 -> POST /claude -> [Anthropic 适配器] -> 上游 (anthropic_endpoint.url)`
 
-**Adapter 模式**：
-- `OpenAIChatAdapter`：处理 Chat Completions 格式
-- `OpenAIResponsesAdapter`：处理 Responses API 格式
-- `InternalRequest`：统一中间层，解耦格式差异
+*   **OpenAI Chat 路径**:
+    `客户端 -> POST /openai_chat -> [OpenAI Chat 适配器] -> 上游 (openai_chat_endpoint.url)`
 
-**深拷贝安全**：
-- 防止 `LogitBias`、`Stop` 等集合字段的引用共享
-- 线程安全的并发处理
+*   **OpenAI Responses (旧版) 路径**:
+    `客户端 -> POST /openai_responses -> [OpenAI Responses 适配器] -> 上游 (openai_responses_endpoint.url)`
 
-### 端点配置策略
+这种设计消除了所有模糊性。如果你向 `/claude` 端点发送请求，它将永远被当作 Anthropic Messages 格式处理并转发。
 
-#### 推荐配置模式
+---
 
-**模式1：双URL（最佳）**
-```yaml
-- name: example-dual-url
-  url_anthropic: https://api.provider.com
-  url_openai: https://api.provider.com/v1
-  openai_preference: chat_completions  # 大部分第三方支持 chat_completions
-  model_rewrite:
-    enabled: true
-    rules:
-      - source_pattern: gpt-5*
-        target_model: provider-actual-model
-```
+### 为何做出此项改变？ (Motivation)
 
-**模式2：仅OpenAI URL（可用）**
-```yaml
-- name: example-openai-only
-  url_openai: https://api.provider.com/v1
-  openai_preference: chat_completions
-  model_rewrite:
-    enabled: true
-    rules:
-      - source_pattern: gpt-5*
-        target_model: provider-actual-model
-```
+旧的动态转换架构虽然功能强大，但也带来了几个难以解决的问题：
 
-**模式3：仅Anthropic URL（需转换）**
-```yaml
-- name: example-anthropic-only
-  url_anthropic: https://api.provider.com
-  # Codex请求自动转换为Anthropic格式
-  model_rewrite:
-    enabled: true
-    rules:
-      - source_pattern: claude-*sonnet*
-        target_model: provider-actual-model
-      - source_pattern: gpt-5*  # 支持Codex
-        target_model: provider-actual-model
-```
+1.  **兼容性地狱**：不同的上游服务对 API 格式有严格但细微的差别，动态转换很难完美适配所有情况。
+2.  **配置困惑**：用户难以理解 `url_openai` 和 `url_anthropic` 的组合会产生何种行为。
+3.  **不稳定的行为**：运行时的“学习”和“降级”机制可能导致代理的行为在两次请求之间发生变化，使调试变得异常困难。
 
-### 兼容性状态
+通过切换到静态代理模型，我们用**明确性**换取了**灵活性**，从而获得了更高的**稳定性和可靠性**。
 
-| 端点类型 | Claude Code | Codex | 说明 |
-|---------|-----------|-------|------|
-| 双URL | ✅ 直接路由 | ✅ 直接路由 | 最佳性能 |
-| 仅OpenAI | ✅ 转换 | ✅ 直接 | 需要格式转换 |
-| 仅Anthropic | ✅ 直接 | ✅ 转换 | 需要格式转换 |
+---
 
-### 故障排除
+### 这对用户意味着什么？
 
-#### 常见问题
-1. **"no available endpoints"错误**：检查端点是否配置了对应URL或格式转换支持
-2. **400 Bad Request**：上游可能不兼容转换后的格式，尝试其他端点
-3. **工具调用失败**：确认上游端点是否支持工具调用
+1.  **您必须选择正确的端点**：作为用户，您现在需要知道您的客户端应用期望何种 API 格式，并将其指向正确的代理端点。
+    *   如果您的客户端（如最新版的 VSCode Claude 插件）使用 Anthropic Messages API，请将其指向 `http://localhost:8080/claude`。
+    *   如果您的客户端（如大多数现代 AI 工具）使用 OpenAI Chat Completions API，请将其指向 `http://localhost:8080/openai_chat`。
 
-#### 调试步骤
-1. 查看日志：`grep "format conversion" logs/proxy.log`
-2. 测试端点：`go run ./cmd/test_endpoints -config config.yaml`
-3. 启用详细日志：
-   ```yaml
-   logging:
-     level: debug
-     log_request_body: full
-     log_response_body: full
-   ```
+2.  **配置文件极大简化**：您不再需要在 `config.yaml` 中配置如 `supports_responses` 或 `openai_preference` 等字段。只需为 `anthropic_endpoint` 或 `openai_chat_endpoint` 提供 URL 和 API 密钥即可。
 
-### 测试验证
+---
 
-**成功案例**：
-- ThatAPI：3/3 测试通过，工具增强正常
-- kkyyxx.xyz：3/3 测试通过，响应速度快
+### 已废弃的概念
 
-**已修复问题**：
-- 移除硬编码的端点选择限制
-- 实现智能URL回退机制
-- 完整的字段映射支持
+以下概念和配置项在当前版本中已**不再适用**：
 
-## English
+*   双向格式转换 (Bidirectional format conversion)
+*   运行时端点能力学习 (Runtime learning of endpoint capabilities)
+*   `endpoints` 列表中的 `url_anthropic` 和 `url_openai` 双 URL 配置
+*   `supports_responses` 和 `openai_preference` 字段
 
-### Overview
+我们相信，新的架构虽然在功能上有所简化，但其实用性和稳定性远超从前。
 
-CCCC supports bidirectional format conversion between Claude Code and Codex clients, enabling "single URL, multiple clients" flexible configuration.
+---
+## English Version
 
-### Core Capabilities
+## Core Architectural Change: From Dynamic Conversion to Static Proxy
 
-#### Dual-URL Smart Routing
-- **Claude Code requests** → `url_anthropic` (Anthropic Messages API)
-- **Codex requests** → `url_openai` (OpenAI Responses/Chat Completions API)
-- **Single URL fallback** → automatic format conversion on proxy side
+**IMPORTANT**: The core architecture of this project was significantly refactored in October 2025. The old dynamic, bidirectional format conversion feature has been **completely removed** in favor of a simpler, more stable, and more explicit **static one-way proxy model**.
 
-#### Complete Format Conversion
-Supports full conversion between OpenAI Chat Completions ↔ Responses API ↔ Anthropic Messages:
+This document describes the current (new) architecture.
 
-**New field support**:
-- Sampling control: `presence_penalty`, `frequency_penalty`, `logit_bias`, `n`
-- Output format: `response_format` (json_object, json_schema)
-- Dual-path fallback: `input` → `messages` compatibility
+---
 
-**Conversion flow**:
-1. **Request conversion**: Client format → unified intermediate → upstream format
-2. **Response conversion**: Upstream format → unified intermediate → client format
-3. **Streaming support**: Real-time SSE conversion with event integrity
+### Architecture Overview (New Architecture)
 
-### Technical Implementation
+The core idea of the new system is "one endpoint, one format." Each API endpoint exposed to the client is hard-wired to a specific upstream API format. There is no more runtime format guessing or automatic conversion.
 
-**Adapter Pattern**:
-- `OpenAIChatAdapter`: Handles Chat Completions format
-- `OpenAIResponsesAdapter`: Handles Responses API format
-- `InternalRequest`: Unified intermediate layer, decouples format differences
+#### Data Flow Paths
 
-**Deep copy safety**:
-- Prevents reference sharing in collection fields like `LogitBias`, `Stop`
-- Thread-safe concurrent processing
+The system's behavior is now entirely predictable:
 
-### Endpoint Configuration Strategies
+*   **Claude Path**:
+    `Client -> POST /claude -> [Anthropic Adapter] -> Upstream (anthropic_endpoint.url)`
 
-#### Recommended Patterns
+*   **OpenAI Chat Path**:
+    `Client -> POST /openai_chat -> [OpenAI Chat Adapter] -> Upstream (openai_chat_endpoint.url)`
 
-**Pattern 1: Dual URL (Best)**
-```yaml
-- name: example-dual-url
-  url_anthropic: https://api.provider.com
-  url_openai: https://api.provider.com/v1
-  openai_preference: chat_completions  # Most third-party support chat_completions
-  model_rewrite:
-    enabled: true
-    rules:
-      - source_pattern: gpt-5*
-        target_model: provider-actual-model
-```
+*   **OpenAI Responses (Legacy) Path**:
+    `Client -> POST /openai_responses -> [OpenAI Responses Adapter] -> Upstream (openai_responses_endpoint.url)`
 
-**Pattern 2: OpenAI Only (Workable)**
-```yaml
-- name: example-openai-only
-  url_openai: https://api.provider.com/v1
-  openai_preference: chat_completions
-  model_rewrite:
-    enabled: true
-    rules:
-      - source_pattern: gpt-5*
-        target_model: provider-actual-model
-```
+This design eliminates all ambiguity. If you send a request to the `/claude` endpoint, it will always be processed as the Anthropic Messages format and forwarded accordingly.
 
-**Pattern 3: Anthropic Only (Requires conversion)**
-```yaml
-- name: example-anthropic-only
-  url_anthropic: https://api.provider.com
-  # Codex requests automatically converted to Anthropic format
-  model_rewrite:
-    enabled: true
-    rules:
-      - source_pattern: claude-*sonnet*
-        target_model: provider-actual-model
-      - source_pattern: gpt-5*  # Support for Codex
-        target_model: provider-actual-model
-```
+---
 
-### Compatibility Status
+### Why This Change? (Motivation)
 
-| Endpoint Type | Claude Code | Codex | Notes |
-|-------------|-----------|-------|-------|
-| Dual URL | ✅ Direct routing | ✅ Direct routing | Best performance |
-| OpenAI Only | ✅ Conversion | ✅ Direct | Requires format conversion |
-| Anthropic Only | ✅ Direct | ✅ Conversion | Requires format conversion |
+The old dynamic conversion architecture, while powerful, introduced several difficult problems:
 
-### Troubleshooting
+1.  **Compatibility Hell**: Different upstream services have strict but subtle differences in their API formats, which dynamic conversion struggled to adapt to perfectly.
+2.  **Configuration Confusion**: It was difficult for users to understand what behavior the combination of `url_openai` and `url_anthropic` would produce.
+3.  **Unstable Behavior**: Runtime "learning" and "fallback" mechanisms could cause the proxy's behavior to change between requests, making debugging extremely difficult.
 
-#### Common Issues
-1. **"no available endpoints" error**: Check endpoint URL configuration or format conversion support
-2. **400 Bad Request**: Upstream may not support converted format, try other endpoints
-3. **Tool call failures**: Verify upstream tool-call support
+By switching to a static proxy model, we traded **flexibility** for **explicitness**, gaining much higher **stability and reliability**.
 
-#### Debug Steps
-1. Check logs: `grep "format conversion" logs/proxy.log`
-2. Test endpoints: `go run ./cmd/test_endpoints -config config.yaml`
-3. Enable detailed logging:
-   ```yaml
-   logging:
-     level: debug
-     log_request_body: full
-     log_response_body: full
-   ```
+---
 
-### Test Results
+### What This Means for Users
 
-**Successful cases**:
-- ThatAPI: 3/3 tests passed
-- kkyyxx.xyz: 3/3 tests passed, fast response
+1.  **You Must Choose the Right Endpoint**: As a user, you are now responsible for knowing what API format your client application expects and pointing it to the correct proxy endpoint.
+    *   If your client (like recent versions of the VSCode Claude plugin) uses the Anthropic Messages API, point it to `http://localhost:8080/claude`.
+    *   If your client (like most modern AI tools) uses the OpenAI Chat Completions API, point it to `http://localhost:8080/openai_chat`.
 
-**Fixed issues**:
-- Removed hardcoded endpoint selection restrictions
-- Implemented smart URL fallback mechanism
-- Complete field mapping support
+2.  **Configuration is Greatly Simplified**: You no longer need to configure fields like `supports_responses` or `openai_preference` in `config.yaml`. Simply provide a URL and API key for `anthropic_endpoint` or `openai_chat_endpoint`.
 
-### Related Files
-- Core conversion: `internal/conversion/` directory
-- Endpoint selection: `internal/endpoint/selector.go`
-- Proxy logic: `internal/proxy/proxy_logic.go`
-- Configuration: `docs/配置指南_Configuration_Guide.md`
+---
+
+### Deprecated Concepts
+
+The following concepts and configuration items are **no longer applicable** in the current version:
+
+*   Bidirectional format conversion
+*   Runtime learning of endpoint capabilities
+*   Dual URL configuration (`url_anthropic` and `url_openai`) within the `endpoints` list
+*   The `supports_responses` and `openai_preference` fields
+
+We believe that while the new architecture is simpler in function, its practicality and stability far exceed what came before.

@@ -1,0 +1,189 @@
+# ==================================================================================
+# CCCC 方案A配置示例：多端点 + 智能转换
+# ==================================================================================
+#
+# 核心优势：
+# ✅ 支持多端点负载均衡和故障转移
+# ✅ 智能格式转换标记（按需转换，优先原生）
+# ✅ 按客户端类型过滤端点（Claude Code、Codex、通用）
+# ✅ 保留所有现有功能（健康检查、标签路由、动态排序等）
+#
+# ==================================================================================
+
+server:
+  host: 127.0.0.1
+  port: 8080
+  auto_sort_endpoints: true  # 启用动态端点排序
+
+# ==================================================================================
+# 端点配置 - 方案A：多端点池 + 智能转换
+# ==================================================================================
+endpoints:
+  # --------------------------------------------------
+  # Claude Code 专用端点池
+  # --------------------------------------------------
+
+  # 1. Anthropic 官方（原生支持，最高优先级）
+  - name: anthropic-official
+    url_anthropic: https://api.anthropic.com/v1/messages
+    auth_type: api_key
+    auth_value: sk-ant-YOUR_API_KEY_HERE
+    enabled: true
+    priority: 1
+
+    # 方案A核心配置
+    client_type: claude_code       # 只服务 Claude Code 客户端
+    native_format: true             # 原生支持 Anthropic Messages 格式
+    # target_format: ""             # 无需转换，留空
+
+    tags: ["premium", "official"]
+
+  # 2. 第三方 Anthropic 兼容端点（原生支持）
+  - name: third-party-anthropic
+    url_anthropic: https://third-party.com/v1/messages
+    auth_type: auth_token
+    auth_value: YOUR_TOKEN_HERE
+    enabled: true
+    priority: 2
+
+    client_type: claude_code
+    native_format: true             # 原生支持，无需转换
+
+    tags: ["backup"]
+
+  # 3. 通用 OpenAI 端点（需要格式转换）
+  - name: third-party-openai-for-claude
+    url_openai: https://third-party.com/v1/chat/completions
+    auth_type: auth_token
+    auth_value: YOUR_TOKEN_HERE
+    enabled: true
+    priority: 3
+
+    client_type: claude_code
+    native_format: false            # ⚠️ 需要格式转换
+    target_format: openai_chat      # 转换目标：OpenAI Chat Completions
+
+    tags: ["fallback"]
+    model_rewrite:                  # 模型重写配置
+      enabled: true
+      rules:
+        - source_pattern: claude-sonnet-4*
+          target_model: gpt-4-turbo
+        - source_pattern: claude-*
+          target_model: gpt-3.5-turbo
+
+  # --------------------------------------------------
+  # Codex 专用端点池
+  # --------------------------------------------------
+
+  # 4. OpenAI 官方 Responses API（原生支持）
+  - name: openai-responses-official
+    url_openai: https://api.openai.com/v1/responses
+    auth_type: auth_token
+    auth_value: sk-YOUR_OPENAI_API_KEY_HERE
+    enabled: true
+    priority: 1
+
+    client_type: codex              # 只服务 Codex 客户端
+    native_format: true             # 原生支持 Responses API
+    supports_responses: true        # 显式声明支持
+
+    tags: ["premium", "official"]
+
+  # 5. 第三方 Chat Completions 端点（需要转换）
+  - name: third-party-chat-for-codex
+    url_openai: https://third-party.com/v1/chat/completions
+    auth_type: auth_token
+    auth_value: YOUR_TOKEN_HERE
+    enabled: true
+    priority: 2
+
+    client_type: codex
+    native_format: false            # ⚠️ 需要格式转换
+    target_format: openai_chat      # 实际接收 Chat Completions 格式
+    supports_responses: false       # 不支持 Responses API
+
+    tags: ["fallback"]
+
+  # --------------------------------------------------
+  # 通用端点池（支持所有客户端）
+  # --------------------------------------------------
+
+  # 6. 双URL端点（智能路由）
+  - name: universal-provider
+    url_anthropic: https://universal.com/v1/messages      # Claude Code → 此URL
+    url_openai: https://universal.com/v1/chat/completions # Codex/OpenAI → 此URL
+    auth_type: auth_token
+    auth_value: YOUR_TOKEN_HERE
+    enabled: true
+    priority: 10
+
+    # client_type: ""               # 空 = 通用，支持所有客户端
+    native_format: true             # 两个URL都原生支持
+
+    tags: ["universal"]
+
+# ==================================================================================
+# 其他配置保持不变
+# ==================================================================================
+
+logging:
+  level: info
+  log_request_types: failed
+  log_request_body: truncated
+  log_response_body: truncated
+  log_directory: ./logs
+
+timeouts:
+  tls_handshake: 10s
+  response_header: 60s
+  idle_connection: 90s
+  health_check_timeout: 30s
+  check_interval: 30s
+  recovery_threshold: 1
+
+blacklist:
+  enabled: true
+  auto_blacklist: true
+  business_error_safe: true   # 业务错误不拉黑
+  config_error_safe: false    # 配置错误拉黑
+  server_error_safe: false    # 服务器错误拉黑
+
+tagging:
+  pipeline_timeout: 5s
+  taggers: []
+
+conversion:
+  adapter_mode: unified         # 使用新的统一适配器
+  validate_mode_switch: false
+  failback_threshold: 30
+
+# ==================================================================================
+# 使用说明
+# ==================================================================================
+#
+# 1. Claude Code 客户端请求流程：
+#    - 发送请求到 /v1/messages
+#    - 系统过滤 client_type: claude_code 的端点
+#    - 按 priority 排序选择端点
+#    - 优先选择 native_format: true 的端点（无需转换，速度最快）
+#    - 如果选中 native_format: false，自动执行格式转换
+#
+# 2. Codex 客户端请求流程：
+#    - 发送请求到 /v1/responses
+#    - 系统过滤 client_type: codex 的端点
+#    - 按 priority 排序选择端点
+#    - 优先选择 native_format: true 的端点
+#    - 如果选中 native_format: false，自动转换为 target_format
+#
+# 3. 故障转移：
+#    - 端点失败时自动尝试下一个优先级的端点
+#    - 健康检查定期检测并恢复失败的端点
+#    - 动态排序根据性能自动调整端点优先级
+#
+# 4. 性能优化：
+#    - native_format: true 的端点响应最快（无转换开销）
+#    - 系统智能选择最优端点
+#    - 格式转换只在必要时执行
+#
+# ==================================================================================
