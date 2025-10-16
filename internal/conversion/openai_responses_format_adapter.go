@@ -121,9 +121,10 @@ func (a *OpenAIResponsesFormatAdapter) BuildRequestJSON(req *InternalRequest) ([
 		out.ToolChoice = buildOpenAIToolChoice(req.ToolChoice)
 	}
 
-	out.Input = make([]OpenAIResponsesMessage, 0, len(req.Messages))
+	// 🔧 修复:使用标准 messages 字段而非 input (88code 端点要求)
+	out.Messages = make([]OpenAIResponsesMessage, 0, len(req.Messages))
 	for _, msg := range req.Messages {
-		out.Input = append(out.Input, convertInternalMessageToResponses(msg))
+		out.Messages = append(out.Messages, convertInternalMessageToResponses(msg))
 	}
 
 	result, err := json.Marshal(out)
@@ -308,6 +309,7 @@ func convertInternalMessageToResponses(msg InternalMessage) OpenAIResponsesMessa
 	}
 
 	return OpenAIResponsesMessage{
+		Type:    "message",  // 🔧 修复:添加type字段
 		Role:    msg.Role,
 		Content: contentItems,
 	}

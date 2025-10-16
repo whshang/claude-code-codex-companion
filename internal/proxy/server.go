@@ -263,6 +263,18 @@ func (s *Server) validateConfigForHotUpdate(newConfig *config.Config) error {
 // updateEndpoints updates endpoint configuration
 func (s *Server) updateEndpoints(newEndpoints []config.EndpointConfig) error {
 	s.endpointManager.UpdateEndpoints(newEndpoints)
+
+	// 如果动态排序已启用，需要更新dynamicSorter的endpoints列表
+	if s.config.Server.AutoSortEndpoints && s.dynamicSorter != nil {
+		dynamicEndpoints := make([]utils.DynamicEndpoint, 0)
+		for _, ep := range s.endpointManager.GetAllEndpoints() {
+			ep.SetDynamicSorter(s.dynamicSorter)
+			dynamicEndpoints = append(dynamicEndpoints, ep)
+		}
+		s.dynamicSorter.SetEndpoints(dynamicEndpoints)
+		s.logger.Info("🔄 动态排序器的端点列表已更新")
+	}
+
 	return nil
 }
 
@@ -378,9 +390,8 @@ func (s *Server) PersistEndpointPriorityChanges() error {
 	// 创建端点名称到优先级的映射
 	priorityMap := make(map[string]int)
 	for _, ep := range endpoints {
-		if ep.IsEnabled() {
-			priorityMap[ep.Name] = ep.GetPriority()
-		}
+		// 所有端点（无论启用或禁用）的优先级都需要持久化
+		priorityMap[ep.Name] = ep.GetPriority()
 	}
 
 	// 更新配置中的端点优先级

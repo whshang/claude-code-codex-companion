@@ -23,14 +23,17 @@ function rebuildTable(endpoints) {
     const specialTbody = document.getElementById('special-endpoint-list');
     const generalTbody = document.getElementById('general-endpoint-list');
     const specialSection = document.getElementById('special-endpoints-section');
-    
+
     // Clear existing content
     specialTbody.innerHTML = '';
     generalTbody.innerHTML = '';
-    
+
+    // Sort endpoints by priority before rendering
+    const sortedEndpoints = [...endpoints].sort((a, b) => a.priority - b.priority);
+
     // Separate tagged and untagged endpoints
-    const specialEndpoints = endpoints.filter(endpoint => endpoint.tags && endpoint.tags.length > 0);
-    const generalEndpoints = endpoints.filter(endpoint => !endpoint.tags || endpoint.tags.length === 0);
+    const specialEndpoints = sortedEndpoints.filter(endpoint => endpoint.tags && endpoint.tags.length > 0);
+    const generalEndpoints = sortedEndpoints.filter(endpoint => !endpoint.tags || endpoint.tags.length === 0);
     
     // Show/hide special endpoint section
     if (specialEndpoints.length > 0) {

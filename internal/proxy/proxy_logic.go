@@ -705,11 +705,14 @@ attemptLoop:
 		}
 		// 如果已经转换 /responses -> /chat/completions，移除 responses 特有的请求头
 		if codexNeedsConversion && inboundPath == "/responses" && effectivePath == "/chat/completions" {
+			// 注意：保留 OpenAI-Beta 头，因为某些端点可能仍然需要它来识别 Codex 请求
+			// 只移除真正特有的头信息
 			if key == "Openai-Beta" || key == "openai-beta" {
-				s.logger.Debug("Removing /responses-specific header when converting to /chat/completions", map[string]interface{}{
+				s.logger.Debug("Preserving OpenAI-Beta header for potential端点兼容性", map[string]interface{}{
 					"header": key,
+					"endpoint": ep.Name,
 				})
-				continue
+				// 不再跳过，让 OpenAI-Beta 头继续传递
 			}
 		}
 		for _, value := range values {

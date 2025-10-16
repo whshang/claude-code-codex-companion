@@ -297,5 +297,8 @@ function autoSortEndpoints() {
     });
 }
 
+// Export autoSortEndpoints for use by other modules
+window.autoSortEndpoints = autoSortEndpoints;
+
 // Export loadEndpoints for use by the wizard
 window.loadEndpointData = loadEndpoints;

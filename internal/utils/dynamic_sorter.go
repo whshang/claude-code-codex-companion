@@ -160,26 +160,38 @@ func (des *DynamicEndpointSorter) SortAndApply() {
 	defer des.mu.Unlock()
 
 	// 重新分配启用端点的优先级
-	for i, ep := range enabledEndpoints {
-		newPriority := i + 1 // 从1开始编号
-		if ep.GetPriority() != newPriority {
-			log.Printf("🔄 端点 %s 优先级从 %d 调整为 %d", ep.GetName(), ep.GetPriority(), newPriority)
-			ep.SetPriority(newPriority)
+	currentPriority := 1
 
-			// 检查是否需要将不可用端点排到最后
-			if !ep.IsAvailable() && newPriority < len(enabledEndpoints) {
-				// 将不可用端点移到最后
-				log.Printf("🚨 不可用端点 %s 被移到最后，优先级调整为 %d", ep.GetName(), len(enabledEndpoints))
-				ep.SetPriority(len(enabledEndpoints))
+	// 首先处理可用的端点
+	for _, ep := range enabledEndpoints {
+		if ep.IsAvailable() {
+			if ep.GetPriority() != currentPriority {
+				log.Printf("🔄 端点 %s 优先级从 %d 调整为 %d", ep.GetName(), ep.GetPriority(), currentPriority)
+				ep.SetPriority(currentPriority)
 			}
+			currentPriority++
 		}
 	}
 
-	// 禁用的端点保持原有优先级，但确保它们在最后
-	startPriority := len(enabledEndpoints) + 1
+	// 然后处理不可用但启用的端点
+	for _, ep := range enabledEndpoints {
+		if !ep.IsAvailable() {
+			if ep.GetPriority() != currentPriority {
+				log.Printf("⚠️ 端点 %s (不可用) 优先级从 %d 调整为 %d", ep.GetName(), ep.GetPriority(), currentPriority)
+				ep.SetPriority(currentPriority)
+			}
+			currentPriority++
+		}
+	}
+
+	// 禁用的端点排在最后，按名称排序以保持一致性
+	startPriority := currentPriority
+	sort.Slice(disabledEndpoints, func(i, j int) bool {
+		return disabledEndpoints[i].GetName() < disabledEndpoints[j].GetName()
+	})
 	for _, ep := range disabledEndpoints {
-		if ep.GetPriority() < startPriority {
-			log.Printf("🔒 禁用端点 %s 保持禁用状态，优先级调整为 %d", ep.GetName(), startPriority)
+		if ep.GetPriority() != startPriority {
+			log.Printf("🔒 禁用端点 %s 优先级从 %d 调整为 %d", ep.GetName(), ep.GetPriority(), startPriority)
 			ep.SetPriority(startPriority)
 		}
 		startPriority++

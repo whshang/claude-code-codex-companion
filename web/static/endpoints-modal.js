@@ -446,6 +446,11 @@ async function toggleEndpointEnabled(endpointName, currentEnabled) {
         if (currentEndpoint) {
             currentEndpoint.enabled = newEnabled;
         }
+
+        // 端点状态变化后，自动触发动态排序以重新调整优先级
+        if (window.autoSortEndpoints) {
+            window.autoSortEndpoints();
+        }
     } catch (error) {
         console.warn('Failed to toggle endpoint:', error);
         const msg = error && error.message ? error.message : error;

@@ -25,6 +25,7 @@ type OpenAIResponsesRequest struct {
 }
 
 type OpenAIResponsesMessage struct {
+	Type    string                       `json:"type"`              // 🔧 添加type字段(必需,值为"message")
 	Role    string                       `json:"role"`
 	Content []OpenAIResponsesContentItem `json:"content"`
 }

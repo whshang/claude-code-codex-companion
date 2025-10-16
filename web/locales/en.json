@@ -857,6 +857,7 @@
     "path_caching_help": "Cache path detection results to improve performance",
     "body_structure_detection_help": "Detect API format by analyzing request body structure",
     "port": "Port",
+    "endpoint_sort": "Sort Endpoints",
     "auto_sort_endpoints": "Auto Sort Endpoints",
     "auto_sort_endpoints_help": "Dynamically adjust endpoint priority based on availability and response speed",
     "stream_timeout": "Stream Timeout",
