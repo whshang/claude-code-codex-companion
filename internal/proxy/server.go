@@ -125,6 +125,11 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 	// 设置热更新处理器
 	adminServer.SetHotUpdateHandler(server)
 
+	// 设置动态排序器的持久化回调
+	server.dynamicSorter.SetPersistCallback(func() error {
+		return server.PersistEndpointPriorityChanges()
+	})
+
 	// 让端点管理器使用同一个健康检查器
 	endpointManager.SetHealthChecker(healthChecker)
 
@@ -362,13 +367,43 @@ func (s *Server) persistRateLimitState(endpointID string, reset *int64, status *
 	})
 }
 
-// PersistEndpointLearning 持久化端点学习结果到配置文件
-// 这个方法会被 proxy_logic.go 在运行时学习成功后调用
-func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
-	if ep == nil {
-		return
+// PersistEndpointPriorityChanges 持久化端点优先级更改到配置文件
+func (s *Server) PersistEndpointPriorityChanges() error {
+	s.configMutex.Lock()
+	defer s.configMutex.Unlock()
+
+	// 获取所有端点并按优先级排序
+	endpoints := s.endpointManager.GetAllEndpoints()
+
+	// 创建端点名称到优先级的映射
+	priorityMap := make(map[string]int)
+	for _, ep := range endpoints {
+		if ep.IsEnabled() {
+			priorityMap[ep.Name] = ep.GetPriority()
+		}
 	}
 
+	// 更新配置中的端点优先级
+	updated := false
+	for i, cfgEndpoint := range s.config.Endpoints {
+		if priority, exists := priorityMap[cfgEndpoint.Name]; exists {
+			if s.config.Endpoints[i].Priority != priority {
+				s.config.Endpoints[i].Priority = priority
+				updated = true
+				s.logger.Info(fmt.Sprintf("🔄 更新端点 '%s' 的优先级为 %d", cfgEndpoint.Name, priority))
+			}
+		}
+	}
+
+	if updated {
+		return s.saveConfigToFile()
+	}
+
+	return nil
+}
+
+// PersistEndpointLearning 持久化端点学习到的配置
+func (s *Server) PersistEndpointLearning(ep *endpoint.Endpoint) {
 	// 线程安全：获取端点当前的学习状态
 	ep.AuthHeaderMutex.RLock()
 	detectedAuthHeader := ep.DetectedAuthHeader

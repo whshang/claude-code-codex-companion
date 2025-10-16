@@ -110,6 +110,7 @@
     "reset_all_endpoints_failed": "重置所有端点失败，请检查日志获取详细信息。",
     "all_endpoints_reset_success": "所有端点已成功重置状态",
     "batch_test": "批量测试",
+    "endpoint_sort": "端点排序",
     "streaming_configuration": "流式转换配置",
     "stream_timeout": "流式超时时间",
     "max_retries": "最大重试次数",

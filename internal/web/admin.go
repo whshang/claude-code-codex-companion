@@ -456,6 +456,7 @@ func (s *AdminServer) RegisterRoutes(router *gin.Engine) {
 		api.POST("/endpoints/:id/reset-status", s.handleResetEndpointStatus)
 		api.POST("/endpoints/reset-all-status", s.handleResetAllEndpointsStatus)
 		api.POST("/endpoints/reorder", s.handleReorderEndpoints)
+		api.POST("/endpoints/sort", s.handleSortEndpoints)
 		api.POST("/endpoints/:id/test", s.handleTestEndpoint)
 		api.POST("/endpoints/test-all", s.handleTestAllEndpoints)
 		api.GET("/endpoints/test-all-stream", s.handleTestAllEndpointsStream)

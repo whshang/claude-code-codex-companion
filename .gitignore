@@ -72,8 +72,10 @@ CHANGELOG.md
 test-*.sh
 test-*.yaml
 test-*.py
+test-*.json
 test_*.sh
 test_*.py
+test.json
 config.yaml
 config-*.yaml
 

@@ -291,6 +291,71 @@ func (s *AdminServer) handleReorderEndpoints(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Endpoints reordered successfully"})
 }
 
+// handleSortEndpoints 手动触发端点自动排序
+func (s *AdminServer) handleSortEndpoints(c *gin.Context) {
+	// 检查是否有动态排序器
+	if s.dynamicSorter == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Dynamic endpoint sorter is not configured",
+		})
+		return
+	}
+
+	// 刷新动态排序器的端点数据
+	if err := s.refreshDynamicSorterEndpoints(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to refresh endpoint data: " + err.Error(),
+		})
+		return
+	}
+
+	// 触发强制更新
+	s.dynamicSorter.ForceUpdate()
+
+	// 返回成功响应
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Endpoint sorting triggered successfully",
+		"timestamp": time.Now().Unix(),
+	})
+}
+
+// refreshDynamicSorterEndpoints 刷新动态排序器的端点数据
+func (s *AdminServer) refreshDynamicSorterEndpoints() error {
+	// 导入 utils 包中的 DynamicEndpoint 接口
+	type DynamicEndpoint interface {
+		GetName() string
+		GetLastResponseTime() time.Duration
+		GetSuccessRate() float64
+		GetFailureCount() int
+		GetTotalRequests() int
+		SetPriority(int)
+		IsEnabled() bool
+		IsAvailable() bool
+		GetPriority() int
+	}
+
+	// 类型转换：将 DynamicEndpointSorter 接口转换为具体类型
+	type DynamicSorter interface {
+		SetEndpoints([]DynamicEndpoint)
+	}
+
+	// 从 endpointManager 获取最新的端点列表
+	allEndpoints := s.endpointManager.GetAllEndpoints()
+
+	// 将端点转换为 DynamicEndpoint 接口类型
+	dynamicEndpoints := make([]DynamicEndpoint, len(allEndpoints))
+	for i, ep := range allEndpoints {
+		dynamicEndpoints[i] = ep
+	}
+
+	// 通过类型断言设置端点
+	if sorter, ok := s.dynamicSorter.(DynamicSorter); ok {
+		sorter.SetEndpoints(dynamicEndpoints)
+	}
+
+	return nil
+}
+
 // hotUpdateEndpointsWithRetry 带重试机制的热更新
 func (s *AdminServer) hotUpdateEndpointsWithRetry(endpoints []config.EndpointConfig, maxRetries int) error {
 	var lastErr error

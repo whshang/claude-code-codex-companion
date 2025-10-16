@@ -809,8 +809,12 @@ func (s *AdminServer) testSingleEndpoint(ep *endpoint.Endpoint) *BatchTestResult
         result.Results = append(result.Results, anthropicResult)
 		if anthropicResult.Success {
 			s.logger.Info(fmt.Sprintf("  ✅ Anthropic format test passed (%dms)", anthropicResult.ResponseTime), nil)
+			// 记录测试成功到端点统计
+			ep.RecordRequest(true, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()))
 		} else {
 			s.logger.Info(fmt.Sprintf("  ❌ Anthropic format test failed: %s", anthropicResult.Error), nil)
+			// 记录测试失败到端点统计
+			ep.RecordRequest(false, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()))
 		}
 	}
 
@@ -820,8 +824,12 @@ func (s *AdminServer) testSingleEndpoint(ep *endpoint.Endpoint) *BatchTestResult
         result.Results = append(result.Results, openaiResult)
 		if openaiResult.Success {
 			s.logger.Info(fmt.Sprintf("  ✅ OpenAI format test passed (%dms)", openaiResult.ResponseTime), nil)
+			// 记录测试成功到端点统计
+			ep.RecordRequest(true, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()))
 		} else {
 			s.logger.Info(fmt.Sprintf("  ❌ OpenAI format test failed: %s", openaiResult.Error), nil)
+			// 记录测试失败到端点统计
+			ep.RecordRequest(false, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()))
 		}
 	}
 	result.TotalTime = time.Since(startTime).Milliseconds()

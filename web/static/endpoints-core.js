@@ -24,6 +24,9 @@ document.addEventListener('DOMContentLoaded', function() {
             showAddEndpointModal();
         } else if (action === 'show-endpoint-wizard') {
             showEndpointWizard();
+        } else if (action === 'auto-sort-endpoints') {
+            e.preventDefault();
+            autoSortEndpoints();
         } else if (action === 'set-supports') {
             e.preventDefault();
             e.stopPropagation();
@@ -253,6 +256,45 @@ function showEndpointWizard() {
         console.error('Endpoint wizard not initialized');
         showAlert('向导功能尚未就绪，请稍后再试', 'warning');
     }
+}
+
+// Auto sort endpoints based on their current status
+function autoSortEndpoints() {
+    const button = document.querySelector('[data-action="auto-sort-endpoints"]');
+    if (button) {
+        button.setAttribute('disabled', 'disabled');
+        button.classList.add('loading');
+    }
+
+    apiRequest('/admin/api/endpoints/sort', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.error) {
+            const message = data.error || `HTTP ${response.status}`;
+            throw new Error(message);
+        }
+
+        showAlert('✅ 端点已根据状态排序完成', 'success');
+        // Reload endpoints to reflect the new order
+        loadEndpoints();
+
+        return data;
+    })
+    .catch(error => {
+        console.error('Failed to auto sort endpoints:', error);
+        showAlert(`端点排序失败：${error.message}`, 'danger');
+    })
+    .finally(() => {
+        if (button) {
+            button.classList.remove('loading');
+            button.removeAttribute('disabled');
+        }
+    });
 }
 
 // Export loadEndpoints for use by the wizard

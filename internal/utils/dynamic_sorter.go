@@ -10,13 +10,15 @@ import (
 
 // DynamicEndpointSorter 动态端点排序器
 type DynamicEndpointSorter struct {
-	mu            sync.RWMutex
-	endpoints     []DynamicEndpoint
-	enabled       bool
-	updateTicker  *time.Ticker
-	updateChannel chan bool
-	ctx           context.Context
-	cancelFunc    context.CancelFunc
+	mu             sync.RWMutex
+	endpoints      []DynamicEndpoint
+	enabled        bool
+	updateTicker   *time.Ticker
+	updateChannel  chan bool
+	ctx            context.Context
+	cancelFunc     context.CancelFunc
+	configFilePath string // 配置文件路径
+	persistCallback func() error // 持久化回调函数
 }
 
 // DynamicEndpoint 动态端点接口
@@ -42,12 +44,27 @@ func NewDynamicEndpointSorter() *DynamicEndpointSorter {
 	}
 }
 
+// NewDynamicEndpointSorterWithConfig 创建新的动态排序器并指定配置文件路径
+func NewDynamicEndpointSorterWithConfig(configPath string) *DynamicEndpointSorter {
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	return &DynamicEndpointSorter{
+		endpoints:      make([]DynamicEndpoint, 0),
+		enabled:        false,
+		updateChannel:  make(chan bool, 1),
+		ctx:            ctx,
+		cancelFunc:     cancelFunc,
+		configFilePath: configPath,
+	}
+}
+
 // Enable 启用动态排序
 func (des *DynamicEndpointSorter) Enable() {
 	des.mu.Lock()
 	defer des.mu.Unlock()
 	if !des.enabled {
 		des.enabled = true
+		// 启动排序循环
+		go des.sortLoop()
 		log.Println("✅ 启用动态端点排序功能")
 	}
 }
@@ -100,7 +117,7 @@ func (des *DynamicEndpointSorter) SortAndApply() {
 
 	// 只对启用的端点进行性能排序
 	if len(enabledEndpoints) > 0 {
-		// 按性能指标排序
+		// 按性能指标排序（只关注当前性能：可用性、成功率、响应速度）
 		sort.Slice(enabledEndpoints, func(i, j int) bool {
 			epI := enabledEndpoints[i]
 			epJ := enabledEndpoints[j]
@@ -112,49 +129,53 @@ func (des *DynamicEndpointSorter) SortAndApply() {
 				return availableI // 可用的排在前面
 			}
 
-			// 如果状态相同，比较成功率（即使都是可用状态，成功率低的也应该排后面）
+			// 2. 成功率优先：成功率高的排在前面
 			successRateI := epI.GetSuccessRate()
 			successRateJ := epJ.GetSuccessRate()
 			if successRateI != successRateJ {
 				return successRateI > successRateJ
 			}
 
-			// 如果都可用且成功率相同，比较响应时间
-			if availableI && availableJ {
-				// 2. 响应时间：响应快的优先（仅对可用端点）
-				responseTimeI := epI.GetLastResponseTime()
-				responseTimeJ := epJ.GetLastResponseTime()
-				if responseTimeI != responseTimeJ {
-					return responseTimeI < responseTimeJ
-				}
+			// 3. 响应时间：速度快的优先
+			responseTimeI := epI.GetLastResponseTime()
+			responseTimeJ := epJ.GetLastResponseTime()
+			// 如果响应时间为0（无数据），排在有数据的后面
+			if responseTimeI == 0 && responseTimeJ != 0 {
+				return false
 			}
-
-			// 3. 总请求数：更稳定的优先
-			totalI := epI.GetTotalRequests()
-			totalJ := epJ.GetTotalRequests()
-			if totalI != totalJ {
-				return totalI > totalJ
+			if responseTimeI != 0 && responseTimeJ == 0 {
+				return true
+			}
+			if responseTimeI != 0 && responseTimeJ != 0 && responseTimeI != responseTimeJ {
+				return responseTimeI < responseTimeJ
 			}
 
 			// 4. 原始优先级：保持原有顺序
 			return epI.GetPriority() < epJ.GetPriority()
 		})
+	}
 
-		// 重新分配启用端点的优先级
-		des.mu.Lock()
-		defer des.mu.Unlock()
-		for i, ep := range enabledEndpoints {
-			newPriority := i + 1 // 从1开始编号
-			if ep.GetPriority() != newPriority {
-				log.Printf("🔄 端点 %s 优先级从 %d 调整为 %d", ep.GetName(), ep.GetPriority(), newPriority)
-				ep.SetPriority(newPriority)
+	// 锁定并重新分配所有端点的优先级
+	des.mu.Lock()
+	defer des.mu.Unlock()
+
+	// 重新分配启用端点的优先级
+	for i, ep := range enabledEndpoints {
+		newPriority := i + 1 // 从1开始编号
+		if ep.GetPriority() != newPriority {
+			log.Printf("🔄 端点 %s 优先级从 %d 调整为 %d", ep.GetName(), ep.GetPriority(), newPriority)
+			ep.SetPriority(newPriority)
+
+			// 检查是否需要将不可用端点排到最后
+			if !ep.IsAvailable() && newPriority < len(enabledEndpoints) {
+				// 将不可用端点移到最后
+				log.Printf("🚨 不可用端点 %s 被移到最后，优先级调整为 %d", ep.GetName(), len(enabledEndpoints))
+				ep.SetPriority(len(enabledEndpoints))
 			}
 		}
 	}
 
 	// 禁用的端点保持原有优先级，但确保它们在最后
-	des.mu.Lock()
-	defer des.mu.Unlock()
 	startPriority := len(enabledEndpoints) + 1
 	for _, ep := range disabledEndpoints {
 		if ep.GetPriority() < startPriority {
@@ -163,6 +184,22 @@ func (des *DynamicEndpointSorter) SortAndApply() {
 		}
 		startPriority++
 	}
+
+	// 如果持久化回调存在，触发配置持久化
+	if des.persistCallback != nil {
+		if err := des.persistCallback(); err != nil {
+			log.Printf("❌ 持久化端点优先级失败: %v", err)
+		} else {
+			log.Printf("💾 端点优先级已持久化到配置文件")
+		}
+	}
+}
+
+// SetPersistCallback 设置持久化回调函数
+func (des *DynamicEndpointSorter) SetPersistCallback(callback func() error) {
+	des.mu.Lock()
+	defer des.mu.Unlock()
+	des.persistCallback = callback
 }
 
 // sortLoop 排序循环
