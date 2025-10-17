@@ -448,7 +448,7 @@
         "save_to_file": "Salvar em arquivo",
         "common_endpoint_provider_params": "(Parâmetros Comuns do Provedor de Endpoint)",
         "default_model_tooltip": "Especificar o nome do modelo para este endpoint (ex. openai/gpt-4)",
-        "default_model_placeholder": "ex. claude-3-5-haiku-20241022",
+        "default_model_placeholder": "ex. claude-haiku-4-5-20251001",
         "comma_separated": "separado por vírgulas",
         "enter_api_key_or_token": "Inserir suas credenciais de API",
         "access_token_placeholder": "Token de acesso (ex. sk-ant-oat01-... ou outro formato)",

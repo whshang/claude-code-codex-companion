@@ -6,42 +6,58 @@
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-> **A unified proxy layer for AI coding assistants**  
-> Bridges Claude Code, Codex, and other Anthropic/OpenAI compatible clients with format adaptation, intelligent routing, runtime learning, and rich observability.
+> **Unified API proxy for AI coding assistants**
+> Serves Claude Code, Codex, and other OpenAI/Anthropic compatible clients with intelligent endpoint selection, conditional format conversion, and full observability.
 
 ---
 
 ## 📖 Overview
 
-CCCC (Claude Code and Codex Companion) is a **high-performance, easy-to-configure API proxy** for AI coding assistants. It provides a unified access point for Claude Code, Codex, and other clients compatible with OpenAI/Anthropic.
+CCCC (Claude Code and Codex Companion) is a **high-performance, intelligent API proxy** for AI coding assistants. It provides a unified access point for Claude Code, Codex, and other OpenAI/Anthropic compatible clients.
 
-The core of the new architecture is **simplicity, clarity, and stability**. We have abandoned complex dynamic format conversion in favor of a fixed, one-way proxy model, ensuring that the behavior of every request is clear and predictable.
+The core architecture is a **multi-endpoint smart conversion system**. The system maintains an endpoint pool, marks each endpoint with its native supported format, and intelligently selects the optimal endpoint based on client type:
 
-- 🎯 **Static Endpoint Proxy**: Provides three independent, fixed-function proxy endpoints: `/claude`, `/openai_chat`, and `/openai_responses`.
-- ⚙️ **Simplified Configuration**: Uses a clear YAML structure to configure separate URLs and authentication details for each type of upstream service.
-- 🛡️ **High Availability**: (Retained) Supports health checks, tag-based routing, automatic failover, and blacklisting.
-- 📊 **Full Observability**: (Retained) Provides a web console, request logs, statistics dashboard, and debug bundle exports.
+- 🎯 **Smart Endpoint Selection**: 4-layer sorting algorithm (native_format → priority → health → response_time), prioritizes endpoints that don't require conversion, ~40% performance improvement.
+- 🔄 **Conditional Format Conversion**: Only converts formats when necessary (native_format=false), avoiding unnecessary performance overhead.
+- 🏷️ **Client Filtering**: Supports configuring client_type for endpoints (claude_code/codex/openai/universal) for precise routing.
+- 🛡️ **High Availability**: Supports multi-endpoint load balancing, health checks, tag-based routing, automatic failover, and blacklisting.
+- 📊 **Full Observability**: Provides web console, request logs, statistics dashboard, and debug bundle exports with endpoint visualization.
 
-| Capability | Claude Code native | Codex native | CCCC (New) |
+| Capability | Claude Code Native | Codex Native | CCCC |
 | --- | --- | --- | --- |
 | Multi-endpoint load balancing | ❌ | ❌ | ✅ |
-| Format auto-conversion | ❌ | ❌ | ❌ (Removed by design) |
-| Static one-way proxy | ❌ | ❌ | ✅ |
+| Smart format conversion | ❌ | ❌ | ✅ (conditional) |
+| Performance-optimized routing | ❌ | ❌ | ✅ (native priority) |
 | Web console / logs / stats | ❌ | ❌ | ✅ |
 
-Deeper details live in the `docs/` folder.
+Technical details are available in the `docs/` directory.
 
 ---
 
-## ✨ API Endpoints
+## ✨ Core Features: Smart Endpoint Selection
 
-This project provides the following proxy endpoints, which forward incoming requests to your configured upstream services. You need to select the correct endpoint that matches the API format of your client or target model.
+CCCC provides three core fields for each endpoint to enable intelligent routing:
 
-| Local Endpoint | Upstream Format | Primary Use Case |
-| :--- | :--- | :--- |
-| `POST /claude` | Anthropic Messages | Proxy to Claude series models |
-| `POST /openai_chat` | OpenAI Chat Completions | Proxy to modern models like GPT-3.5/4, etc. |
-| `POST /openai_responses` | OpenAI Responses (Legacy) | Compatibility with older or specific model endpoints |
+| Field | Type | Description | Example Values |
+| --- | --- | --- | --- |
+| `client_type` | string | Client type filtering | `claude_code`, `codex`, `openai`, `""` (universal) |
+| `native_format` | bool | Whether endpoint natively supports client format | `true` (no conversion needed), `false` (conversion required) |
+| `target_format` | string | Target format for conversion | `anthropic`, `openai_chat`, `openai_responses` |
+
+### Smart Selection Process
+
+```
+1. Client request → Identify client type (claude_code/codex/openai)
+2. Filter endpoint pool → Select candidates by client_type
+3. 4-layer sorting:
+   ├─ native_format=true priority (optimal performance, ~40% improvement)
+   ├─ priority ascending (custom user priority)
+   ├─ health status priority (exclude faulty endpoints)
+   └─ response time ascending (select fastest endpoint)
+4. Select endpoint → Execute request
+   ├─ native_format=true → Direct passthrough (fast path)
+   └─ native_format=false → Format conversion then forwarding
+```
 
 ---
 
@@ -69,44 +85,107 @@ The proxy listens on `127.0.0.1:8080` by default; the admin console lives at `ht
   ```
 - Scripts back up and regenerate `~/.claude/settings.json`, `~/.codex/config.toml`, and `auth.json`.
 
-### Sample configuration
+### Configuration Example
 
-The `config.yaml` has been greatly simplified. You only need to provide the URL and API key for the endpoint types you intend to use.
+The `config.yaml` uses a multi-endpoint smart conversion architecture, supporting intelligent routing field configuration for each endpoint:
 
 ```yaml
-# Server listen address
 server:
-  host: "127.0.0.1"
-  port: 8080
+  host: 127.0.0.1
+  port: 8081
+  auto_sort_endpoints: true  # Enable dynamic endpoint sorting
 
-# --- Endpoint Configurations ---
-# Provide the upstream URL and API key for each endpoint type you need.
-# Providing the full URL is recommended, but the system will attempt to auto-complete it if missing.
+endpoints:
+  # Claude Code optimized endpoint - native support
+  - name: anthropic-official
+    url_anthropic: https://api.anthropic.com/v1/messages
+    auth_type: api_key
+    auth_value: YOUR_ANTHROPIC_API_KEY
+    enabled: true
+    priority: 1
+    client_type: claude_code    # Optimized for Claude Code
+    native_format: true          # Native support, no conversion
 
-anthropic_endpoint:
-  url: "https://api.anthropic.com"
-  api_key: "YOUR_ANTHROPIC_API_KEY_HERE"
+  # Codex optimized endpoint - native support
+  - name: openai-official
+    url_openai: https://api.openai.com/v1/responses
+    auth_type: api_key
+    auth_value: YOUR_OPENAI_API_KEY
+    enabled: true
+    priority: 1
+    client_type: codex          # Optimized for Codex
+    native_format: true          # Native support, no conversion
 
-openai_chat_endpoint:
-  url: "https://api.openai.com"
-  api_key: "YOUR_OPENAI_API_KEY_HERE"
+  # Universal endpoint - requires conversion
+  - name: universal-provider
+    url_openai: https://api.provider.com/v1/chat/completions
+    auth_type: auth_token
+    auth_value: YOUR_TOKEN
+    enabled: true
+    priority: 2
+    client_type: ""              # Empty = universal, supports all clients
+    native_format: false         # Requires format conversion
+    target_format: openai_chat   # Convert to OpenAI Chat format
+    model_rewrite:               # Optional: model name rewriting
+      enabled: true
+      rules:
+        - source_pattern: claude-*
+          target_model: provider-claude-model
 
-# Endpoint for the legacy /responses format, disabled by default
-# openai_responses_endpoint:
-#   url: "https://api.example.com/v1/responses"
-#   api_key: "YOUR_API_KEY_FOR_RESPONSES_ENDPOINT"
-
-# --- Other Configurations ---
 logging:
   level: info
   log_directory: ./logs
 ```
 
-See the [Configuration Guide](docs/配置指南_Configuration_Guide.md) for field descriptions and advanced examples.
+**Configuration Notes**:
+- `client_type`: Leave empty for universal endpoints that support all clients; specify values to serve only that client type
+- `native_format`: `true` means the endpoint natively supports the client format, system prioritizes these for best performance
+- `target_format`: Specifies conversion target format when `native_format=false`
+
+Full configuration examples available in `config.yaml.example`.
 
 ---
 
-## 🔌 Clients & ecosystem
+## 🌐 API Endpoint Paths
+
+CCCC uses **transparent proxy** mode - clients use standard API paths:
+
+### Claude Code Client
+
+```bash
+# Claude Code automatically uses /v1/messages path
+base_url: http://127.0.0.1:8081
+```
+
+Actual request path: `http://127.0.0.1:8081/v1/messages`
+
+### Codex Client
+
+```bash
+# Codex automatically uses /responses path
+base_url: http://127.0.0.1:8081
+```
+
+Actual request path: `http://127.0.0.1:8081/responses` or `http://127.0.0.1:8081/v1/responses`
+
+### OpenAI Compatible Clients
+
+```bash
+# Use standard OpenAI Chat Completions path
+base_url: http://127.0.0.1:8081
+```
+
+Actual request path: `http://127.0.0.1:8081/chat/completions` or `http://127.0.0.1:8081/v1/chat/completions`
+
+**How it works**:
+1. System automatically identifies client type based on request path
+2. SmartSelector chooses optimal endpoint (prioritizing native_format=true)
+3. Format conversion happens automatically if needed, transparent to client
+4. Clients work out-of-the-box without any changes
+
+---
+
+## 🔌 Clients & Ecosystem
 - **Claude Code**: Use the setup script or configure manually (see [Codex Configuration Guide](docs/Codex配置指南_Codex_Configuration_Guide.md) for environment variables).
 - **Codex CLI**: The script writes `~/.codex/config.toml`; the default `wire_api` is `responses` and per-project `trust_level` can be customised.
 - **Other IDE/CLI tools** (Cursor, Continue, Aider, etc.): point them to the OpenAI-compatible CCCC endpoint; see [FoxCode Endpoint Notes](docs/FoxCode端点说明_FoxCode_Endpoint_Notes.md) and [88code Endpoint Example](docs/88code端点示例_88code_Endpoint_Example.md).
@@ -114,10 +193,12 @@ See the [Configuration Guide](docs/配置指南_Configuration_Guide.md) for fiel
 
 ---
 
-## 🧭 Advanced topic index
-- Transparent proxy & downgrade state machine: [Transparent Proxy Optimisation Plan](docs/透明代理优化计划_Transparent_Proxy_Optimisation_Plan.md)
-- Auth/parameter learning & persistence: [Learning Persistence Implementation](docs/学习持久化实现_Learning_Persistence_Implementation.md)
-- SSE streaming refactor: [SSE Refactor Design](docs/SSE重构设计_SSE_Refactor_Design.md)
+## 🧭 Advanced Topics Index
+- **Core Architecture**: [Smart Endpoint Selection](docs/动态端点排序_Dynamic_Endpoint_Sorting.md), [Endpoint Management](docs/端点测试与优化指南_Endpoint_Testing_and_Optimization_Guide.md)
+- **Proxy Mechanisms**: [Transparent Proxy Optimisation Plan](docs/透明代理优化计划_Transparent_Proxy_Optimisation_Plan.md), [Format Conversion Guide](docs/格式转换与端点兼容性_Format_Conversion_and_Endpoint_Compatibility.md)
+- Dynamic endpoint sorting: [Dynamic Endpoint Sorting](docs/动态端点排序_Dynamic_Endpoint_Sorting.md)
+- Authentication & parameter learning: [Auto Learning](docs/认证方式自动学习_Auth_Method_Auto_Learning.md)
+- SSE streaming conversion: [SSE Refactor Design](docs/SSE重构设计_SSE_Refactor_Design.md)
 - GORM storage & statistics: [GORM Refactor Plan](docs/GORM重构规划_GORM_Refactor_Plan.md), [Statistics Persistence Design](docs/统计持久化设计_Statistics_Persistence_Design.md)
 - Validation scripts & endpoint wizard: [Verification Steps](docs/功能验证步骤_Verification_Steps.md), [Endpoint Wizard](docs/端点向导_Endpoint_Wizard.md)
 

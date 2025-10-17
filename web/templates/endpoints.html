@@ -106,6 +106,13 @@
     {{template "endpoint-modal.html" .}}
     {{template "endpoint-wizard-modal.html" .}}
 
+    <script>
+        // 从后端传递的配置
+        window.APP_CONFIG = {
+            autoSortEndpoints: {{.AutoSortEndpoints}}
+        };
+    </script>
+
     <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="/static/vendor/sortablejs/Sortable.min.js"></script>
     <script src="/static/i18n.js"></script>

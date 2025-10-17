@@ -145,12 +145,24 @@ func NewEndpoint(cfg config.EndpointConfig) *Endpoint {
 		}
 	}
 
-	// 方案A：推断NativeFormat和TargetFormat
+	// 方案A：自动推断 ClientType, NativeFormat 和 TargetFormat
 	nativeFormat := cfg.NativeFormat
 	targetFormat := cfg.TargetFormat
 	clientType := cfg.ClientType
 
-	// 如果用户未明确配置，根据URL自动推断
+	// 1. 自动推断 client_type (基于URL配置)
+	if clientType == "" {
+		if cfg.URLAnthropic != "" && cfg.URLOpenAI == "" {
+			// 只有Anthropic URL → 专为Claude Code客户端
+			clientType = "claude_code"
+		} else if cfg.URLOpenAI != "" && cfg.URLAnthropic == "" {
+			// 只有OpenAI URL → 专为Codex客户端
+			clientType = "codex"
+		}
+		// 两个URL都有 → 保持空字符串，表示universal（真正的通用端点）
+	}
+
+	// 2. 自动推断 native_format 和 target_format
 	if !nativeFormat && targetFormat == "" {
 		// 有Anthropic URL且无OpenAI URL -> 原生支持Anthropic
 		if cfg.URLAnthropic != "" && cfg.URLOpenAI == "" {
@@ -463,17 +475,22 @@ func (e *Endpoint) IsAvailable() bool {
 	return enabled && status == StatusActive
 }
 
-func (e *Endpoint) RecordRequest(success bool, requestID string) {
+// RecordRequest 记录请求结果
+// firstByteTime: 首字节返回时间（TTFB），用于性能排序
+// responseTime: 完整响应时间（包含下载），用于统计参考
+func (e *Endpoint) RecordRequest(success bool, requestID string, firstByteTime time.Duration, responseTime time.Duration) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 
 	now := time.Now()
 
-	// 添加到环形缓冲区（包含请求ID）
+	// 添加到环形缓冲区（包含请求ID、首字节时间和完整响应时间）
 	record := utils.RequestRecord{
-		Timestamp: now,
-		Success:   success,
-		RequestID: requestID,
+		Timestamp:     now,
+		Success:       success,
+		RequestID:     requestID,
+		FirstByteTime: firstByteTime,
+		ResponseTime:  responseTime,
 	}
 	e.RequestHistory.Add(record)
 
@@ -1029,10 +1046,14 @@ func (e *Endpoint) GetName() string {
 }
 
 func (e *Endpoint) GetLastResponseTime() time.Duration {
-	// 从环形缓冲区获取最近的成功请求响应时间
-	// 目前环形缓冲区只存储成功/失败状态，不存储响应时间，返回默认值
-	// TODO: 未来可以扩展为存储实际响应时间
-	return 0
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	if e.RequestHistory == nil {
+		return 0
+	}
+
+	return e.RequestHistory.GetLastResponseTime()
 }
 
 func (e *Endpoint) GetSuccessRate() float64 {

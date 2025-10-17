@@ -30,7 +30,7 @@ document.getElementById('endpointForm').reset();
         enabled: true,
         rules: [
             { source_pattern: 'claude-*sonnet*', target_model: 'claude-sonnet-4-5-20250929' },
-            { source_pattern: 'claude-*haiku*', target_model: 'claude-3-5-haiku-20241022' },
+            { source_pattern: 'claude-*haiku*', target_model: 'claude-haiku-4-5-20251001' },
             { source_pattern: 'gpt-5-codex', target_model: 'gpt-5-codex' },
             { source_pattern: 'gpt-5*', target_model: 'gpt-5' }
         ]
@@ -447,8 +447,8 @@ async function toggleEndpointEnabled(endpointName, currentEnabled) {
             currentEndpoint.enabled = newEnabled;
         }
 
-        // 端点状态变化后，自动触发动态排序以重新调整优先级
-        if (window.autoSortEndpoints) {
+        // 端点状态变化后，只在启用自动排序时才触发动态排序
+        if (window.APP_CONFIG && window.APP_CONFIG.autoSortEndpoints && window.autoSortEndpoints) {
             window.autoSortEndpoints();
         }
     } catch (error) {

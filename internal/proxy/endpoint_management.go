@@ -81,12 +81,12 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 		currentGlobalAttempt := globalAttemptNumber + endpointAttempt - 1
 		s.logger.Debug(fmt.Sprintf("Trying endpoint %s (endpoint attempt %d/%d, global attempt %d)", ep.Name, endpointAttempt, MaxEndpointRetries, currentGlobalAttempt))
 
-		success, shouldRetryAnywhere := s.proxyToEndpoint(c, ep, path, requestBody, requestID, startTime, taggedRequest, currentGlobalAttempt)
+		success, shouldRetryAnywhere, responseTime, firstByteTime := s.proxyToEndpoint(c, ep, path, requestBody, requestID, startTime, taggedRequest, currentGlobalAttempt)
 		if success {
 			// 检查是否应该跳过健康统计记录
 			skipHealthRecord, _ := c.Get("skip_health_record")
 			if skipHealthRecord != true {
-				s.endpointManager.RecordRequest(ep.ID, true, requestID)
+				s.endpointManager.RecordRequest(ep.ID, true, requestID, firstByteTime, responseTime)
 			}
 
 			// 尝试提取基准信息用于健康检查
@@ -123,7 +123,7 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 
 		shouldSkip := (skipHealthRecord == true) || isCountTokensRequest || shouldSkipByConfig
 		if !shouldSkip {
-			s.endpointManager.RecordRequest(ep.ID, false, requestID)
+			s.endpointManager.RecordRequest(ep.ID, false, requestID, 0, responseTime)
 		}
 
 		// 如果明确指示不应重试任何地方，直接返回
@@ -471,7 +471,7 @@ func (s *Server) fallbackToOtherEndpoints(c *gin.Context, path string, requestBo
 	isCountTokensRequest := strings.Contains(path, "/count_tokens")
 	shouldSkip := (skipHealthRecord == true) || isCountTokensRequest
 	if !shouldSkip {
-		s.endpointManager.RecordRequest(failedEndpoint.ID, false, requestID)
+		s.endpointManager.RecordRequest(failedEndpoint.ID, false, requestID, 0, 0)
 	}
 
 	// 获取请求格式，用于过滤兼容的端点

@@ -193,9 +193,17 @@ body {
     cursor: grabbing;
 }
 .endpoint-row {
-    transition: background-color 0.2s ease;
+    transition: background-color 0.2s ease, opacity 0.2s ease;
     cursor: move;
     user-select: none;
+}
+/* 自动排序模式：移除拖拽光标 */
+.endpoint-row.auto-sort-mode {
+    cursor: default;
+}
+/* 禁用的端点：半透明显示 */
+.endpoint-row.endpoint-disabled {
+    opacity: 0.5;
 }
 .endpoint-row:hover {
     background-color: #f8f9fa;

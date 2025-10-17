@@ -44,6 +44,12 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initializeSortable() {
+    // 如果启用了自动排序，则不初始化手动拖拽
+    if (window.APP_CONFIG && window.APP_CONFIG.autoSortEndpoints) {
+        console.log('自动排序模式：拖拽排序已禁用');
+        return;
+    }
+
     // Destroy existing sortable instances
     if (specialSortableInstance) {
         specialSortableInstance.destroy();

@@ -45,7 +45,17 @@ function rebuildTable(endpoints) {
     // Function to create endpoint row
     function createEndpointRow(endpoint, index) {
         const row = document.createElement('tr');
-        row.className = 'endpoint-row';
+        const autoSort = window.APP_CONFIG && window.APP_CONFIG.autoSortEndpoints;
+
+        // 设置行类名：基础类 + 自动排序模式类 + 禁用状态类
+        let rowClasses = ['endpoint-row'];
+        if (autoSort) {
+            rowClasses.push('auto-sort-mode');
+        }
+        if (!endpoint.enabled) {
+            rowClasses.push('endpoint-disabled');
+        }
+        row.className = rowClasses.join(' ');
         row.setAttribute('data-endpoint-name', escapeHtml(endpoint.name));
         
         // Build status badge - 三种状态：禁用（灰色）、正常（绿色）、不可用（红色）
@@ -98,7 +108,7 @@ function rebuildTable(endpoints) {
         } else {
             authTypeBadge = `<span class="badge bg-secondary" data-bs-toggle="tooltip" title="${T('authentication_method_auth_token_tooltip')}">${T('auth_type_auth')}</span>`;
         }
-        
+
         // Build proxy status display
         let proxyDisplay = '';
         if (endpoint.proxy && endpoint.proxy.type && endpoint.proxy.address) {
@@ -121,19 +131,23 @@ function rebuildTable(endpoints) {
         const chips = [];
         // Auth status - 使用span表示状态信息
         chips.push(authTypeBadge);
-        // OpenAI preference - 使用颜色区分三种模式
-        const pref = (endpoint.openai_preference || 'auto');
-        const prefShort = pref === 'chat_completions' ? 'Chat' : (pref === 'responses' ? 'Resp' : 'Auto');
-        let prefTip = T('openai_preference_auto_tooltip');
-        let prefColor = 'secondary'; // auto 模式用灰色
-        if (prefShort === 'Chat') {
-            prefTip = T('openai_preference_chat_tooltip');
-            prefColor = 'warning'; // chat 模式用黄色
-        } else if (prefShort === 'Resp') {
-            prefTip = T('openai_preference_resp_tooltip');
-            prefColor = 'success'; // responses 模式用绿色
+
+        // OpenAI preference - 只有配置了url_openai时才显示
+        if (endpoint.url_openai) {
+            const pref = (endpoint.openai_preference || 'auto');
+            const prefShort = pref === 'chat_completions' ? 'Chat' : (pref === 'responses' ? 'Resp' : 'Auto');
+            let prefTip = T('openai_preference_auto_tooltip');
+            let prefColor = 'secondary'; // auto 模式用灰色
+            if (prefShort === 'Chat') {
+                prefTip = T('openai_preference_chat_tooltip');
+                prefColor = 'warning'; // chat 模式用黄色
+            } else if (prefShort === 'Resp') {
+                prefTip = T('openai_preference_resp_tooltip');
+                prefColor = 'success'; // responses 模式用绿色
+            }
+            chips.push(`<span class="badge bg-${prefColor}" data-bs-toggle="tooltip" title="${prefTip}">${prefShort}</span>`);
         }
-        chips.push(`<span class="badge bg-${prefColor}" data-bs-toggle="tooltip" title="${prefTip}">${prefShort}</span>`);
+
         // Model rewrite - 在tooltip里展示重写的结果
         const mrEnabled = endpoint.model_rewrite && endpoint.model_rewrite.enabled === true;
         let mrTooltip = T('model_rewrite_disabled');
@@ -187,17 +201,19 @@ function rebuildTable(endpoints) {
             }
         }
 
-        // 2. 显示OpenAI偏好（重要配置信息）
-        let prefLabel = 'Auto';
-        let prefTip2 = 'OpenAI 偏好：auto（自动探测并学习）';
-        if (prefValue === 'responses') {
-            prefLabel = 'Responses';
-            prefTip2 = 'OpenAI 偏好：responses（优先请求 /v1/responses）';
-        } else if (prefValue === 'chat_completions') {
-            prefLabel = 'Chat';
-            prefTip2 = 'OpenAI 偏好：chat_completions（直接请求 /v1/chat/completions）';
+        // 2. 显示OpenAI偏好（重要配置信息）- 只有配置了url_openai时才显示
+        if (endpoint.url_openai) {
+            let prefLabel = 'Auto';
+            let prefTip2 = 'OpenAI 偏好：auto（自动探测并学习）';
+            if (prefValue === 'responses') {
+                prefLabel = 'Responses';
+                prefTip2 = 'OpenAI 偏好：responses（优先请求 /v1/responses）';
+            } else if (prefValue === 'chat_completions') {
+                prefLabel = 'Chat';
+                prefTip2 = 'OpenAI 偏好：chat_completions（直接请求 /v1/chat/completions）';
+            }
+            statusBadges.push(`<span class="badge bg-info" data-bs-toggle="tooltip" title="${prefTip2}">偏好: ${prefLabel}</span>`);
         }
-        statusBadges.push(`<span class="badge bg-info" data-bs-toggle="tooltip" title="${prefTip2}">偏好: ${prefLabel}</span>`);
 
         // 3. 支持模式切换按钮组（可交互元素使用button）
         const renderSupportsButton = (mode, tooltip, icon) => {
@@ -208,7 +224,7 @@ function rebuildTable(endpoints) {
 
         const configCellHTML = `
             <div class="config-section">
-                <div class="mb-2">${configDisplay}</div>
+                ${configDisplay}
             </div>
         `;
 
@@ -219,10 +235,14 @@ function rebuildTable(endpoints) {
             </div>
         `;
 
+        // 根据自动排序模式决定拖拽图标样式（复用函数开始处定义的autoSort变量）
+        const dragHandleHTML = autoSort
+            ? '<i class="fas fa-grip-lines text-muted" style="opacity: 0.3; cursor: help;" data-bs-toggle="tooltip" title="自动排序模式：拖拽已禁用"></i>'
+            : '<i class="fas fa-arrows-alt text-muted"></i>';
 
         row.innerHTML = `
             <td class="drag-handle text-center">
-                <i class="fas fa-arrows-alt text-muted"></i>
+                ${dragHandleHTML}
             </td>
             <td>
                 <span class="badge bg-info priority-badge">${endpoint.priority}</span>

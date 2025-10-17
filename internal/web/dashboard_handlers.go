@@ -135,8 +135,9 @@ func (s *AdminServer) handleEndpointsPage(c *gin.Context) {
 	}
 
 	data := s.mergeTemplateData(c, "endpoints", map[string]interface{}{
-		"Title":     "Endpoints Configuration",
-		"Endpoints": endpointStats,
+		"Title":             "Endpoints Configuration",
+		"Endpoints":         endpointStats,
+		"AutoSortEndpoints": s.config.Server.AutoSortEndpoints, // 传递自动排序配置
 	})
 	s.renderHTML(c, "endpoints.html", data)
 }

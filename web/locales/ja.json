@@ -448,7 +448,7 @@
         "save_to_file": "ファイルに保存",
         "common_endpoint_provider_params": "（共通エンドポイントプロバイダーパラメータ）",
         "default_model_tooltip": "このエンドポイントのモデル名を指定（例：openai/gpt-4）",
-        "default_model_placeholder": "例: claude-3-5-haiku-20241022",
+        "default_model_placeholder": "例: claude-haiku-4-5-20251001",
         "comma_separated": "カンマ区切り",
         "enter_api_key_or_token": "API認証情報を入力",
         "access_token_placeholder": "アクセストークン（例: sk-ant-oat01-... または他の形式）",

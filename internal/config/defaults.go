@@ -164,7 +164,7 @@ var Default = DefaultValues{
 		MaxTokens:   512,
 		Temperature: 0,
 		StreamMode:  true,
-		Model:       "claude-3-5-haiku-20241022",
+		Model:       "claude-haiku-4-5-20251001",
 		UserID:      "user_test_account__session_test",
 		Headers: map[string]string{
 			"Accept":                                      "application/json",

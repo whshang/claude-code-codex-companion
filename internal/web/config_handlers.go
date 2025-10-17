@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 
 	"claude-code-codex-companion/internal/config"
@@ -27,9 +28,52 @@ func (s *AdminServer) validateConfigUpdate(newConfig *config.Config) error {
 	return nil
 }
 
-// handleUpdateEndpointModelRewrite is a stub for a deprecated feature.
+// handleUpdateEndpointModelRewrite updates the model rewrite configuration for a specific endpoint
 func (s *AdminServer) handleUpdateEndpointModelRewrite(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Per-endpoint model rewrite configuration is disabled."})
+	endpointID := c.Param("id")
+	if endpointID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "endpoint ID is required"})
+		return
+	}
+
+	// 解析请求体
+	var modelRewriteConfig config.ModelRewriteConfig
+	if err := c.ShouldBindJSON(&modelRewriteConfig); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid request body: %v", err)})
+		return
+	}
+
+	// 更新配置文件
+	err := s.updateEndpointInConfig(endpointID, func(cfg *config.EndpointConfig) error {
+		cfg.ModelRewrite = &modelRewriteConfig
+		return nil
+	})
+
+	if err != nil {
+		s.logger.Error(fmt.Sprintf("Failed to update endpoint '%s' model rewrite configuration", endpointID), err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 热更新配置
+	if s.hotUpdateHandler != nil {
+		newConfig, err := config.LoadConfig(s.configFilePath)
+		if err != nil {
+			s.logger.Error("Failed to reload config after model rewrite update", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "configuration updated but hot reload failed"})
+			return
+		}
+
+		if err := s.hotUpdateHandler.HotUpdateConfig(newConfig); err != nil {
+			s.logger.Error("Failed to hot update configuration", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "configuration updated but hot reload failed"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("Endpoint '%s' model rewrite configuration updated successfully", endpointID),
+	})
 }
 
 // handleTestModelRewrite is a stub for a deprecated feature.

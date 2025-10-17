@@ -718,6 +718,16 @@ func (s *AdminServer) testOpenAIPath(ep *endpoint.Endpoint, path string, timeout
 	responseTime := time.Since(startTime).Milliseconds()
 	result.ResponseTime = responseTime
 
+	// 初始化性能指标
+	result.PerformanceMetrics = &PerformanceMetrics{
+		TotalSize: 0,
+	}
+
+	// 计算首字节时间（近似值）
+	if resp != nil {
+		result.PerformanceMetrics.FirstByteTime = time.Since(startTime).Milliseconds()
+	}
+
 	if err != nil {
 		result.Error = fmt.Sprintf("request failed: %v", err)
 		return result
@@ -732,6 +742,10 @@ func (s *AdminServer) testOpenAIPath(ep *endpoint.Endpoint, path string, timeout
 		result.Error = fmt.Sprintf("failed to read response: %v", err)
 		return result
 	}
+
+	// 更新性能指标
+	result.PerformanceMetrics.ContentDownloadTime = time.Since(startTime).Milliseconds()
+	result.PerformanceMetrics.TotalSize = int64(len(body))
 
 	// 检查状态码
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -810,11 +824,11 @@ func (s *AdminServer) testSingleEndpoint(ep *endpoint.Endpoint) *BatchTestResult
 		if anthropicResult.Success {
 			s.logger.Info(fmt.Sprintf("  ✅ Anthropic format test passed (%dms)", anthropicResult.ResponseTime), nil)
 			// 记录测试成功到端点统计
-			ep.RecordRequest(true, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()))
+			ep.RecordRequest(true, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()), time.Duration(anthropicResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(anthropicResult.ResponseTime)*time.Millisecond)
 		} else {
 			s.logger.Info(fmt.Sprintf("  ❌ Anthropic format test failed: %s", anthropicResult.Error), nil)
 			// 记录测试失败到端点统计
-			ep.RecordRequest(false, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()))
+			ep.RecordRequest(false, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()), time.Duration(anthropicResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(anthropicResult.ResponseTime)*time.Millisecond)
 		}
 	}
 
@@ -825,11 +839,11 @@ func (s *AdminServer) testSingleEndpoint(ep *endpoint.Endpoint) *BatchTestResult
 		if openaiResult.Success {
 			s.logger.Info(fmt.Sprintf("  ✅ OpenAI format test passed (%dms)", openaiResult.ResponseTime), nil)
 			// 记录测试成功到端点统计
-			ep.RecordRequest(true, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()))
+			ep.RecordRequest(true, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()), time.Duration(openaiResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(openaiResult.ResponseTime)*time.Millisecond)
 		} else {
 			s.logger.Info(fmt.Sprintf("  ❌ OpenAI format test failed: %s", openaiResult.Error), nil)
 			// 记录测试失败到端点统计
-			ep.RecordRequest(false, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()))
+			ep.RecordRequest(false, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()), time.Duration(openaiResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(openaiResult.ResponseTime)*time.Millisecond)
 		}
 	}
 	result.TotalTime = time.Since(startTime).Milliseconds()

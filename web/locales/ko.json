@@ -448,7 +448,7 @@
         "save_to_file": "파일에 저장",
         "common_endpoint_provider_params": "(공통 엔드포인트 제공업체 매개변수)",
         "default_model_tooltip": "이 엔드포인트의 모델 이름 지정 (예: openai/gpt-4)",
-        "default_model_placeholder": "예: claude-3-5-haiku-20241022",
+        "default_model_placeholder": "예: claude-haiku-4-5-20251001",
         "comma_separated": "쉼표로 구분",
         "enter_api_key_or_token": "API 인증 정보 입력",
         "access_token_placeholder": "액세스 토큰 (예: sk-ant-oat01-... 또는 기타 형식)",

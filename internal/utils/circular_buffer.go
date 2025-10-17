@@ -17,10 +17,12 @@ type CircularBuffer struct {
 
 // RequestRecord represents a single request record
 type RequestRecord struct {
-	Timestamp time.Time
-	Success   bool
-	
-	// 新增：请求ID（用于追踪失败原因）
+	Timestamp       time.Time
+	Success         bool
+	FirstByteTime   time.Duration // 首字节返回时间（TTFB - Time To First Byte）
+	ResponseTime    time.Duration // 完整响应时间（包含下载时间）
+
+	// 请求ID（用于追踪失败原因）
 	RequestID string
 }
 
@@ -112,4 +114,29 @@ func (cb *CircularBuffer) GetRecentFailureRequestIDs(now time.Time) []string {
 	}
 
 	return failureRequestIDs
+}
+
+// GetLastResponseTime 获取最近一次成功请求的首字节时间（TTFB）
+// 用于动态排序，避免因消息体大小影响性能判断
+// 返回最近成功请求的首字节时间，如果没有成功请求则返回0
+func (cb *CircularBuffer) GetLastResponseTime() time.Duration {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+
+	// 从最新的记录开始查找
+	for i := 0; i < cb.count; i++ {
+		idx := (cb.head - 1 - i + cb.size) % cb.size
+		record := cb.records[idx]
+
+		// 优先使用首字节时间（更准确的性能指标）
+		if record.Success && record.FirstByteTime > 0 {
+			return record.FirstByteTime
+		}
+		// 向后兼容：如果没有首字节时间，使用完整响应时间
+		if record.Success && record.ResponseTime > 0 {
+			return record.ResponseTime
+		}
+	}
+
+	return 0 // 没有找到成功请求
 }

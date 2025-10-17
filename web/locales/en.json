@@ -469,7 +469,7 @@
     "save_to_file": "Save to file",
     "common_endpoint_provider_params": "(Common Endpoint Provider Parameters)",
     "default_model_tooltip": "Specify the model name for this endpoint (e.g., openai/gpt-4)",
-    "default_model_placeholder": "e.g. claude-3-5-haiku-20241022",
+    "default_model_placeholder": "e.g. claude-haiku-4-5-20251001",
     "comma_separated": "comma separated",
     "enter_api_key_or_token": "Enter your API credentials",
     "access_token_placeholder": "Access token (e.g. sk-ant-oat01-... or other format)",
@@ -863,6 +863,19 @@
     "stream_timeout": "Stream Timeout",
     "stream_timeout_help": "Maximum timeout for streaming responses to prevent long hangs",
     "enable_stream_caching": "Enable Stream Caching",
-    "stream_caching_help": "Cache streaming responses to improve performance"
+    "stream_caching_help": "Cache streaming responses to improve performance",
+    "client_type_claude_code": "Claude Code",
+    "client_type_codex": "Codex",
+    "client_type_openai": "OpenAI",
+    "client_type_universal": "Universal",
+    "client_type_claude_code_tooltip": "Endpoint optimized for Claude Code client",
+    "client_type_codex_tooltip": "Endpoint optimized for Codex client",
+    "client_type_openai_tooltip": "Endpoint optimized for OpenAI client",
+    "client_type_universal_tooltip": "Universal endpoint supporting all client types",
+    "native": "Native",
+    "native_format_true_tooltip": "Endpoint natively supports client format, no conversion needed (best performance)",
+    "native_format_false_tooltip": "Endpoint requires format conversion, target format",
+    "format_auto_tooltip": "Auto-detect format and convert as needed (flexible mode)",
+    "proxy_auth": "Authenticated"
   }
 }

@@ -117,28 +117,22 @@ func (des *DynamicEndpointSorter) SortAndApply() {
 
 	// 只对启用的端点进行性能排序
 	if len(enabledEndpoints) > 0 {
-		// 按性能指标排序（只关注当前性能：可用性、成功率、响应速度）
+		// 简化排序逻辑：只看 可用性 > 响应速度
 		sort.Slice(enabledEndpoints, func(i, j int) bool {
 			epI := enabledEndpoints[i]
 			epJ := enabledEndpoints[j]
 
-			// 1. 状态优先级：可用 > 不可用
+			// 1. 可用性优先：可用 > 不可用
 			availableI := epI.IsAvailable()
 			availableJ := epJ.IsAvailable()
 			if availableI != availableJ {
 				return availableI // 可用的排在前面
 			}
 
-			// 2. 成功率优先：成功率高的排在前面
-			successRateI := epI.GetSuccessRate()
-			successRateJ := epJ.GetSuccessRate()
-			if successRateI != successRateJ {
-				return successRateI > successRateJ
-			}
-
-			// 3. 响应时间：速度快的优先
+			// 2. 响应速度：速度快的优先
 			responseTimeI := epI.GetLastResponseTime()
 			responseTimeJ := epJ.GetLastResponseTime()
+
 			// 如果响应时间为0（无数据），排在有数据的后面
 			if responseTimeI == 0 && responseTimeJ != 0 {
 				return false
@@ -150,7 +144,7 @@ func (des *DynamicEndpointSorter) SortAndApply() {
 				return responseTimeI < responseTimeJ
 			}
 
-			// 4. 原始优先级：保持原有顺序
+			// 3. 原始优先级：保持原有顺序
 			return epI.GetPriority() < epJ.GetPriority()
 		})
 	}

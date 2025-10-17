@@ -448,7 +448,7 @@
         "save_to_file": "Сохранить в файл",
         "common_endpoint_provider_params": "(Общие параметры поставщика эндпоинтов)",
         "default_model_tooltip": "Указать имя модели для этого эндпоинта (напр. openai/gpt-4)",
-        "default_model_placeholder": "напр. claude-3-5-haiku-20241022",
+        "default_model_placeholder": "напр. claude-haiku-4-5-20251001",
         "comma_separated": "через запятую",
         "enter_api_key_or_token": "Введите ваши API-учетные данные",
         "access_token_placeholder": "Токен доступа (напр. sk-ant-oat01-... или другой формат)",

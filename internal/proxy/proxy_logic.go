@@ -104,7 +104,7 @@ func (rc *requestProcessingCache) GetModelRewrite(endpointName string) (*modelRe
 	return entry, ok
 }
 
-func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path string, requestBody []byte, requestID string, startTime time.Time, taggedRequest *tagging.TaggedRequest, attemptNumber int) (bool, bool) {
+func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path string, requestBody []byte, requestID string, startTime time.Time, taggedRequest *tagging.TaggedRequest, attemptNumber int) (bool, bool, time.Duration, time.Duration) {
 	// 检查是否为 count_tokens 请求到 OpenAI 端点
 	isCountTokensRequest := strings.Contains(path, "/count_tokens")
 	isOpenAIEndpoint := ep.EndpointType == "openai"
@@ -118,7 +118,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		c.Set("count_tokens_openai_skip", true)
 		c.Set("last_error", fmt.Errorf("count_tokens not supported on OpenAI endpoint"))
 		c.Set("last_status_code", http.StatusNotFound)
-		return false, true // 立即尝试下一个端点
+		return false, true, 0, 0 // 立即尝试下一个端点
 	}
 
 	if isCountTokensRequest && ep.ShouldSkipCountTokens() {
@@ -128,10 +128,11 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		c.Set("count_tokens_openai_skip", true)
 		c.Set("last_error", fmt.Errorf("count_tokens not supported on endpoint"))
 		c.Set("last_status_code", http.StatusNotFound)
-		return false, true
+		return false, true, 0, 0
 	}
 	// 为这个端点记录独立的开始时间
 	endpointStartTime := time.Now()
+	var firstByteTime time.Duration // 首字节返回时间（TTFB）
 	// 记录入站原始路径，与实际请求路径区分
 	inboundPath := path
 	effectivePath := path
@@ -170,7 +171,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	// 		c.Set("skip_logging", true) // 静默跳过，不记录日志
 	// 		c.Set("last_error", fmt.Errorf("endpoint %s is OpenAI-only", ep.Name))
 	// 		c.Set("last_status_code", http.StatusBadGateway)
-	// 		return false, true
+	// 		return false, true, duration, 0
 	// 	}
 	//
 	// 	// Anthropic-only 端点只能处理 Anthropic 格式请求
@@ -183,7 +184,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	// 		c.Set("skip_logging", true) // 静默跳过，不记录日志
 	// 		c.Set("last_error", fmt.Errorf("endpoint %s is Anthropic-only", ep.Name))
 	// 		c.Set("last_status_code", http.StatusBadGateway)
-	// 		return false, true
+	// 		return false, true, duration, 0
 	// 	}
 	// }
 
@@ -197,7 +198,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		c.Set("skip_health_record", true)
 		c.Set("last_error", fmt.Errorf("endpoint %s has no URL configured", ep.Name))
 		c.Set("last_status_code", http.StatusBadGateway)
-		return false, true // 尝试下一个端点
+		elapsed := time.Since(endpointStartTime)
+		return false, true, elapsed, 0 // 尝试下一个端点
 	}
 
 	conversionStages := []string{}
@@ -216,7 +218,8 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		c.Set("skip_health_record", true)
 		c.Set("last_error", fmt.Errorf("endpoint %s returned empty URL", ep.Name))
 		c.Set("last_status_code", http.StatusBadGateway)
-		return false, true
+		elapsed := time.Since(endpointStartTime)
+		return false, true, elapsed, 0
 	}
 
 	// Extract tags from taggedRequest
@@ -239,7 +242,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(createRequestError))
 		c.Set("last_status_code", 0)
-		return false, false
+		return false, false, duration, 0
 	}
 
 	// 获取客户端类型
@@ -275,7 +278,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			// 设置错误信息到context中
 			c.Set("last_error", rewriteErr)
 			c.Set("last_status_code", 0)
-			return false, false
+			return false, false, duration, 0
 		}
 
 		if originalModel != "" && rewrittenModel != "" {
@@ -288,7 +291,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				// 设置错误信息到context中
 				c.Set("last_error", rewriteErr)
 				c.Set("last_status_code", 0)
-				return false, false
+				return false, false, duration, 0
 			}
 		} else {
 			finalRequestBody = requestBody
@@ -385,7 +388,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
             c.JSON(http.StatusBadRequest, gin.H{"error": "Request format conversion failed", "details": err.Error()})
             c.Set("last_error", err)
             c.Set("last_status_code", http.StatusBadRequest)
-            return false, false
+            return false, false, duration, 0
         }
         conversionContext = ctx
 
@@ -677,7 +680,8 @@ attemptLoop:
 		})
 		c.Set("last_error", fmt.Errorf("proxy retry limit reached"))
 		c.Set("last_status_code", 0)
-		return false, true
+		elapsed := time.Since(endpointStartTime)
+		return false, true, elapsed, 0
 	}
 
 	effectivePath = currentPath
@@ -696,7 +700,7 @@ attemptLoop:
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(createRequestError))
 		c.Set("last_status_code", 0)
-		return false, false
+		return false, false, duration, 0
 	}
 
 	for key, values := range c.Request.Header {
@@ -757,7 +761,8 @@ attemptLoop:
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication failed"})
 			c.Set("last_error", err)
 			c.Set("last_status_code", http.StatusUnauthorized)
-			return false, false
+			elapsed := time.Since(endpointStartTime)
+			return false, false, elapsed, 0
 		}
 		req.Header.Set("Authorization", authHeader)
 		// 标记：首次尝试使用 Authorization
@@ -770,7 +775,8 @@ attemptLoop:
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication failed"})
 			c.Set("last_error", err)
 			c.Set("last_status_code", http.StatusUnauthorized)
-			return false, false
+			elapsed := time.Since(endpointStartTime)
+			return false, false, elapsed, 0
 		}
 		req.Header.Set("Authorization", authHeader)
 	}
@@ -845,7 +851,7 @@ attemptLoop:
 		// 设置错误信息到context中
 		c.Set("last_error", err)
 		c.Set("last_status_code", 0)
-		return false, true
+		return false, true, duration, 0
 	}
 
 	resp, err := client.Do(req)
@@ -884,9 +890,11 @@ attemptLoop:
 		// 设置错误信息到context中，供重试逻辑使用
 		c.Set("last_error", err)
 		c.Set("last_status_code", 0) // 网络错误，没有状态码
-		return false, true
+		return false, true, duration, 0
 	}
 	defer resp.Body.Close()
+	// 捕获首字节时间（TTFB - Time To First Byte）
+	firstByteTime = time.Since(endpointStartTime)
 
 	// 🔐 智能认证头检测与切换
 	// 如果是认证失败(401/403)且auth_type为空或auto，标记切换认证方式后重试
@@ -924,7 +932,7 @@ attemptLoop:
 			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 			c.Set("last_error", fmt.Errorf("authentication failed, switching to x-api-key"))
 			c.Set("last_status_code", resp.StatusCode)
-			return false, true // 失败，但请重试同一端点
+			return false, true, duration, 0 // 失败，但请重试同一端点
 		}
 	}
 
@@ -959,7 +967,7 @@ attemptLoop:
 				// 设置错误信息到context中
 				c.Set("last_error", fmt.Errorf("OAuth token refresh failed: %v", refreshErr))
 				c.Set("last_status_code", resp.StatusCode)
-				return false, true
+				return false, true, duration, 0
 			} else {
 				s.logger.Info(fmt.Sprintf("OAuth token refreshed successfully for endpoint %s, retrying request", ep.Name))
 
@@ -1026,7 +1034,7 @@ attemptLoop:
 					s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, decompressedBody, duration, nil, s.isRequestExpectingStream(req), tags, "", originalModel, rewrittenModel, attemptNumber)
 					c.Set("last_error", fmt.Errorf("format conversion failed: %v", convertErr))
 					c.Set("last_status_code", resp.StatusCode)
-					return false, true
+					return false, true, duration, 0
 				}
 				cachedConvertedCodexBody = convertedBody
 				addConversionStage(&conversionStages, "request:responses->chat_completions")
@@ -1069,7 +1077,7 @@ attemptLoop:
 						c.Set("skip_health_record", true)
 						c.Set("last_error", fmt.Errorf("%s: status %d", errorType, resp.StatusCode))
 						c.Set("last_status_code", resp.StatusCode)
-						return false, true
+						return false, true, duration, 0
 					}
 				}
 
@@ -1084,7 +1092,7 @@ attemptLoop:
 				// 设置错误信息到context中
 				c.Set("last_error", fmt.Errorf("%s: status %d", errorType, resp.StatusCode))
 				c.Set("last_status_code", resp.StatusCode)
-				return false, true // 尝试下一个endpoint
+				return false, true, duration, 0 // 尝试下一个endpoint
 			}
 		}
 
@@ -1132,7 +1140,7 @@ attemptLoop:
 		// 设置状态码到context中，供重试逻辑使用
 		c.Set("last_error", nil)
 		c.Set("last_status_code", resp.StatusCode)
-		return false, true
+		return false, true, duration, 0
 	}
 
 	originalContentType := resp.Header.Get("Content-Type")
@@ -1160,6 +1168,7 @@ attemptLoop:
 			attemptNumber,
 			clientRequestFormat,
 			&conversionStages,
+			firstByteTime,
 		)
 	}
 
@@ -1176,7 +1185,7 @@ attemptLoop:
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(readError))
 		c.Set("last_status_code", resp.StatusCode)
-		return false, false
+		return false, false, duration, 0
 	}
 	responseBody := responseBodyBuffer.Bytes()
 
@@ -1193,7 +1202,7 @@ attemptLoop:
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(decompressError))
 		c.Set("last_status_code", resp.StatusCode)
-		return false, false
+		return false, false, duration, 0
 	}
 
 	contentTypeOverrideFromConversion := ""
@@ -1276,7 +1285,7 @@ attemptLoop:
 			// 设置错误信息到context中
 			c.Set("last_error", fmt.Errorf(errorLog))
 			c.Set("last_status_code", resp.StatusCode)
-			return false, true // 尝试下一个endpoint
+			return false, true, duration, 0 // 尝试下一个endpoint
 		}
 
 		// 如果是usage统计验证失败，尝试下一个endpoint
@@ -1289,7 +1298,7 @@ attemptLoop:
 			// 设置错误信息到context中
 			c.Set("last_error", fmt.Errorf(errorLog))
 			c.Set("last_status_code", resp.StatusCode)
-			return false, true // 验证失败，尝试下一个endpoint
+			return false, true, duration, 0 // 验证失败，尝试下一个endpoint
 		}
 
 		// 如果是SSE流不完整的验证失败，检查配置决定是否触发端点黑名单
@@ -1311,7 +1320,7 @@ attemptLoop:
 			// 设置错误信息到context中
 			c.Set("last_error", fmt.Errorf(errorLog))
 			c.Set("last_status_code", resp.StatusCode)
-			return false, true // 验证失败，尝试下一个endpoint
+			return false, true, duration, 0 // 验证失败，尝试下一个endpoint
 		}
 
 		// 验证失败，尝试下一个端点
@@ -1323,7 +1332,7 @@ attemptLoop:
 		// 设置错误信息到context中
 		c.Set("last_error", fmt.Errorf(validationError))
 		c.Set("last_status_code", resp.StatusCode)
-		return false, true // 验证失败，尝试下一个endpoint
+		return false, true, duration, 0 // 验证失败，尝试下一个endpoint
 	}
 
 	c.Status(resp.StatusCode)
@@ -1514,7 +1523,7 @@ attemptLoop:
 						updateSupportsResponsesContext(c, ep)
 						
 						// 立即返回，避免后续写入覆盖SSE流
-						return true, false
+						return true, false, duration, firstByteTime
 					} else {
 						s.logger.Error("Failed to convert Response JSON to SSE", nil)
 					}
@@ -1618,8 +1627,8 @@ attemptLoop:
 		c.Set("last_status_code", resp.StatusCode)
 		setConversionContext(c, conversionStages)
 		updateSupportsResponsesContext(c, ep)
-		
-		return true, false  // 成功返回
+
+		return true, false, duration, firstByteTime  // 成功返回
 	}
 
 	// 发送最终响应体给客户端
@@ -1811,7 +1820,7 @@ attemptLoop:
 		}
 	}
 
-	return true, false
+	return true, false, duration, firstByteTime
 }
 
 // applyParameterOverrides 应用请求参数覆盖规则
@@ -2056,7 +2065,8 @@ func (s *Server) handleStreamingResponse(
 	attemptNumber int,
 	clientRequestFormat string,
 	conversionStages *[]string,
-) (bool, bool) {
+	firstByteTime time.Duration,
+) (bool, bool, time.Duration, time.Duration) {
 	contentEncoding := resp.Header.Get("Content-Encoding")
 	var reader io.Reader = resp.Body
 	var gzipReader *gzip.Reader
@@ -2071,7 +2081,7 @@ func (s *Server) handleStreamingResponse(
 			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, nil, duration, errMsg, true, tags, "", originalModel, rewrittenModel, attemptNumber)
 			c.Set("last_error", errMsg)
 			c.Set("last_status_code", resp.StatusCode)
-			return false, false
+			return false, false, duration, 0
 		}
 		gzipReader = gz
 		reader = gz
@@ -2164,7 +2174,7 @@ func (s *Server) handleStreamingResponse(
 		s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, req, resp, originalCapture.Bytes(), duration, errMsg, true, tags, "", originalModel, rewrittenModel, attemptNumber)
 		c.Set("last_error", errMsg)
 		c.Set("last_status_code", resp.StatusCode)
-		return false, false
+		return false, false, duration, 0
 	}
 
 	if flusher, ok := c.Writer.(http.Flusher); ok {
@@ -2197,9 +2207,9 @@ func (s *Server) handleStreamingResponse(
 			c.Set("last_error", err)
 			c.Set("last_status_code", resp.StatusCode)
 			if shouldSkip {
-				return false, true
+				return false, true, duration, 0
 			}
-			return false, true
+			return false, true, duration, 0
 		}
 	}
 
@@ -2362,7 +2372,7 @@ func (s *Server) handleStreamingResponse(
 	c.Set("last_error", nil)
 	c.Set("last_status_code", resp.StatusCode)
 
-	return true, false
+	return true, false, duration, firstByteTime
 }
 
 func (s *Server) applyParameterOverrides(requestBody []byte, parameterOverrides map[string]string) ([]byte, error) {
