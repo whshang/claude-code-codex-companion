@@ -3,6 +3,7 @@ package proxy
 import (
     "fmt"
     "sync"
+    "time"
 
 	"claude-code-codex-companion/internal/config"
 	"claude-code-codex-companion/internal/conversion"
@@ -39,6 +40,9 @@ type Server struct {
 
 	// 动态端点排序器
 	dynamicSorter *utils.DynamicEndpointSorter
+
+	// 配置持久化管理器
+	configPersister *config.ConfigPersister
 }
 
 func NewServer(cfg *config.Config, configFilePath string, version string) (*Server, error) {
@@ -114,6 +118,48 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 
 	// 初始化动态端点排序器
 	server.dynamicSorter = utils.NewDynamicEndpointSorter()
+
+	// 创建配置持久化管理器
+	flushInterval := 30 * time.Second // 默认30秒
+	maxDirtyTime := 5 * time.Minute   // 默认5分钟
+
+	// 从配置中读取自定义值
+	if cfg.Server.ConfigFlushInterval != "" {
+		if duration, err := time.ParseDuration(cfg.Server.ConfigFlushInterval); err == nil {
+			flushInterval = duration
+		} else {
+			log.Error("Invalid config_flush_interval, using default 30s", err)
+		}
+	}
+	if cfg.Server.ConfigMaxDirtyTime != "" {
+		if duration, err := time.ParseDuration(cfg.Server.ConfigMaxDirtyTime); err == nil {
+			maxDirtyTime = duration
+		} else {
+			log.Error("Invalid config_max_dirty_time, using default 5m", err)
+		}
+	}
+
+	persister := config.NewConfigPersister(cfg, configFilePath, &config.PersisterConfig{
+		FlushInterval: flushInterval,
+		MaxDirtyTime:  maxDirtyTime,
+		BeforeWrite: func(c *config.Config) error {
+			// 写入前验证
+			if len(c.Endpoints) == 0 {
+				return fmt.Errorf("configuration must have at least one endpoint")
+			}
+			return nil
+		},
+		AfterWrite: func(c *config.Config) error {
+			// 写入后通知
+			log.Info("✅ Configuration successfully persisted")
+			return nil
+		},
+	})
+
+	server.configPersister = persister
+
+	// 启动持久化管理器
+	persister.Start()
 
 	server.conversionManager = manager
 	adminServer.SetConversionManager(manager)
@@ -319,7 +365,38 @@ func (s *Server) updateBlacklistConfig(newBlacklist config.BlacklistConfig) {
 // saveConfigToFile 将当前配置保存到文件（线程安全）
 func (s *Server) saveConfigToFile() error {
 	// 注意：这个方法假设调用者已经持有 configMutex
+	// 如果 ConfigPersister 存在，使用它（立即写入）
+	if s.configPersister != nil {
+		return s.configPersister.FlushNow()
+	}
+	// 否则直接保存（兼容旧代码）
 	return config.SaveConfig(s.config, s.configFilePath)
+}
+
+// GetConfigPersister 获取配置持久化管理器
+func (s *Server) GetConfigPersister() *config.ConfigPersister {
+	return s.configPersister
+}
+
+// Shutdown 优雅关闭服务器，确保所有待处理的配置被保存
+func (s *Server) Shutdown() error {
+	s.logger.Info("Shutting down server...")
+
+	// 停止配置持久化管理器（会自动写入未保存的变更）
+	if s.configPersister != nil {
+		if err := s.configPersister.Stop(); err != nil {
+			s.logger.Error("Failed to stop config persister", err)
+			return err
+		}
+	}
+
+	// 禁用动态排序器
+	if s.dynamicSorter != nil {
+		s.dynamicSorter.Disable()
+	}
+
+	s.logger.Info("Server shutdown complete")
+	return nil
 }
 
 // updateEndpointConfig 安全地更新指定端点的配置并持久化
@@ -380,6 +457,7 @@ func (s *Server) persistRateLimitState(endpointID string, reset *int64, status *
 }
 
 // PersistEndpointPriorityChanges 持久化端点优先级更改到配置文件
+// 注意：此方法由 DynamicSorter 调用，应标记为脏数据而非立即写入
 func (s *Server) PersistEndpointPriorityChanges() error {
 	s.configMutex.Lock()
 	defer s.configMutex.Unlock()
@@ -406,8 +484,9 @@ func (s *Server) PersistEndpointPriorityChanges() error {
 		}
 	}
 
-	if updated {
-		return s.saveConfigToFile()
+	// 如果有更新，标记为脏数据（由动态排序触发，不立即写入）
+	if updated && s.configPersister != nil {
+		s.configPersister.MarkDirty()
 	}
 
 	return nil

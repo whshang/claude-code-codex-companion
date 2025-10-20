@@ -616,24 +616,24 @@ func (s *AdminServer) testOpenAIFormatWithRetry(ep *endpoint.Endpoint, timeout t
 	if ep.OpenAIPreference == "responses" || ep.OpenAIPreference == "chat_completions" {
 		preferredPath := s.selectOpenAIPath(ep)
 		return s.testOpenAIPath(ep, preferredPath, timeout)
-	}
-	
-	// 自动模式：优先尝试 /responses 格式（Codex新格式）
-	responsesResult := s.testOpenAIPath(ep, "/responses", timeout)
+}
+
+// 自动模式：优先尝试 /responses 格式（Codex新格式）
+responsesResult := s.testOpenAIPath(ep, "/responses", timeout)
 	if responsesResult.Success {
 		// 学习并存储成功的格式偏好
 		s.updateOpenAIPreference(ep, "/responses")
 		return responsesResult
-	}
-	
+}
+
 	// 如果 /responses 失败，尝试 /chat/completions 格式
 	chatCompletionsResult := s.testOpenAIPath(ep, "/chat/completions", timeout)
 	if chatCompletionsResult.Success {
-		// 学习并存储成功的格式偏好
-		s.updateOpenAIPreference(ep, "/chat/completions")
-		return chatCompletionsResult
+	// 学习并存储成功的格式偏好
+	s.updateOpenAIPreference(ep, "/chat/completions")
+	return chatCompletionsResult
 	}
-	
+
 	// 两种格式都失败，返回第一个结果（通常是 /responses）
 	return responsesResult
 }

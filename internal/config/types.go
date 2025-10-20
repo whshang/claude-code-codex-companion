@@ -2,17 +2,17 @@ package config
 
 // EndpointConfig 端点配置（完整版，支持所有功能）
 type EndpointConfig struct {
-	Name               string              `yaml:"name"`
-	URLAnthropic       string              `yaml:"url_anthropic,omitempty"` // Anthropic格式URL
-	URLOpenAI          string              `yaml:"url_openai,omitempty"`    // OpenAI格式URL
-	AuthType           string              `yaml:"auth_type"`
-	AuthValue          string              `yaml:"auth_value"`
-	Enabled            bool                `yaml:"enabled"`
-	Priority           int                 `yaml:"priority"`
-	Tags               []string            `yaml:"tags"`                                                                   // 支持的tag列表
-	ModelRewrite       *ModelRewriteConfig `yaml:"model_rewrite,omitempty"`                                                // 模型重写配置
-	Proxy              *ProxyConfig        `yaml:"proxy,omitempty"`                                                        // 代理配置
-	OAuthConfig        *OAuthConfig        `yaml:"oauth_config,omitempty"`                                                 // OAuth配置
+	Name               string              `yaml:"name" json:"name"`
+	URLAnthropic       string              `yaml:"url_anthropic,omitempty" json:"url_anthropic,omitempty"` // Anthropic格式URL
+	URLOpenAI          string              `yaml:"url_openai,omitempty" json:"url_openai,omitempty"`       // OpenAI格式URL
+	AuthType           string              `yaml:"auth_type" json:"auth_type"`
+	AuthValue          string              `yaml:"auth_value" json:"auth_value"`
+	Enabled            bool                `yaml:"enabled" json:"enabled"`
+	Priority           int                 `yaml:"priority" json:"priority"`
+	Tags               []string            `yaml:"tags" json:"tags"`                                                           // 支持的tag列表
+	ModelRewrite       *ModelRewriteConfig `yaml:"model_rewrite,omitempty" json:"model_rewrite,omitempty"`                     // 模型重写配置
+	Proxy              *ProxyConfig        `yaml:"proxy,omitempty" json:"proxy,omitempty"`                                     // 代理配置
+	OAuthConfig        *OAuthConfig        `yaml:"oauth_config,omitempty" json:"oauth_config,omitempty"`                       // OAuth配置
 	HeaderOverrides    map[string]string   `yaml:"header_overrides,omitempty" json:"header_overrides,omitempty"`           // HTTP Header覆盖配置
 	ParameterOverrides map[string]string   `yaml:"parameter_overrides,omitempty" json:"parameter_overrides,omitempty"`     // Request Parameters覆盖配置
 	MaxTokensFieldName string              `yaml:"max_tokens_field_name,omitempty" json:"max_tokens_field_name,omitempty"` // max_tokens 参数名转换选项
@@ -58,6 +58,10 @@ type ServerConfig struct {
 	Host              string `yaml:"host"`
 	Port              int    `yaml:"port"`
 	AutoSortEndpoints bool   `yaml:"auto_sort_endpoints" json:"auto_sort_endpoints"` // 是否自动调整端点排序
+
+	// ✅ 新增：配置持久化设置
+	ConfigFlushInterval string `yaml:"config_flush_interval,omitempty" json:"config_flush_interval,omitempty"` // 配置写入间隔（默认30s）
+	ConfigMaxDirtyTime  string `yaml:"config_max_dirty_time,omitempty" json:"config_max_dirty_time,omitempty"` // 最大脏数据保留时间（默认5m）
 }
 
 // 新增：SSE行为配置结构

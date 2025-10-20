@@ -11,6 +11,12 @@ server:
   # Whether to automatically sort endpoints based on performance (currently disabled)
   auto_sort_endpoints: false
 
+  # ✅ Configuration persistence settings (new in v2.0)
+  # These settings control how frequently configuration changes are written to disk
+  # Helps reduce file I/O when auto_sort_endpoints is enabled
+  # config_flush_interval: "30s"   # How often to write pending changes (default: 30s)
+  # config_max_dirty_time: "5m"    # Maximum time before forcing a write (default: 5m)
+
 # --- Endpoint URLs ---
 # Provide the full base URL and API key for each upstream service.
 # The system will automatically append the correct path (e.g., /v1/chat/completions) if it's missing.

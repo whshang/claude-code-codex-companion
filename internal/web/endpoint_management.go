@@ -67,16 +67,133 @@ func (s *AdminServer) handleToggleEndpoint(c *gin.Context) {
 	})
 }
 
+// handleCopyEndpoint creates a copy of an existing endpoint with a new name.
 func (s *AdminServer) handleCopyEndpoint(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": disabledError})
+	endpointID := c.Param("id")
+	if endpointID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "endpoint ID is required"})
+		return
+	}
+
+	// 解析请求体
+	var copyReq struct {
+		NewName string `json:"new_name"`
+	}
+
+	if err := c.ShouldBindJSON(&copyReq); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid request body: %v", err)})
+		return
+	}
+
+	if copyReq.NewName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "new_name is required"})
+		return
+	}
+
+	// 查找源端点
+	var sourceEndpoint *config.EndpointConfig
+	for i := range s.config.Endpoints {
+		if s.config.Endpoints[i].Name == endpointID {
+			sourceEndpoint = &s.config.Endpoints[i]
+			break
+		}
+	}
+
+	if sourceEndpoint == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("endpoint '%s' not found", endpointID)})
+		return
+	}
+
+	// 检查新名称是否已存在
+	for i := range s.config.Endpoints {
+		if s.config.Endpoints[i].Name == copyReq.NewName {
+			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("endpoint '%s' already exists", copyReq.NewName)})
+			return
+		}
+	}
+
+	// 创建副本
+	newEndpoint := *sourceEndpoint
+	newEndpoint.Name = copyReq.NewName
+	// 将新端点的优先级设置为最后
+	newEndpoint.Priority = len(s.config.Endpoints) + 1
+
+	// 添加到配置
+	s.config.Endpoints = append(s.config.Endpoints, newEndpoint)
+
+	// 保存到配置文件（用户操作：立即写入）
+	if err := s.saveConfigImmediately(); err != nil {
+		s.logger.Error(fmt.Sprintf("Failed to save config after copying endpoint '%s'", endpointID), err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save configuration: %v", err)})
+		return
+	}
+
+	// 热更新配置
+	if s.hotUpdateHandler != nil {
+		newConfig, err := config.LoadConfig(s.configFilePath)
+		if err != nil {
+			s.logger.Error("Failed to reload config after copy", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "configuration updated but hot reload failed"})
+			return
+		}
+
+		if err := s.hotUpdateHandler.HotUpdateConfig(newConfig); err != nil {
+			s.logger.Error("Failed to hot update configuration", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "configuration updated but hot reload failed"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("端点 '%s' 已复制为 '%s'", endpointID, copyReq.NewName),
+	})
 }
 
+// handleResetEndpointStatus resets the status of a specific endpoint using the existing manager method.
 func (s *AdminServer) handleResetEndpointStatus(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": disabledError})
+	endpointID := c.Param("id")
+	if endpointID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "endpoint ID is required"})
+		return
+	}
+
+	// 使用已有的端点管理器方法重置状态
+	if err := s.endpointManager.ResetEndpointStatus(endpointID); err != nil {
+		s.logger.Error(fmt.Sprintf("Failed to reset endpoint status '%s'", endpointID), err)
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("端点 '%s' 状态已重置", endpointID),
+	})
 }
 
+// handleResetAllEndpointsStatus resets the status of all endpoints.
 func (s *AdminServer) handleResetAllEndpointsStatus(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": disabledError})
+	allEndpoints := s.endpointManager.GetAllEndpoints()
+	resetCount := 0
+	var errors []string
+
+	for _, ep := range allEndpoints {
+		if err := s.endpointManager.ResetEndpointStatus(ep.Name); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", ep.Name, err))
+		} else {
+			resetCount++
+		}
+	}
+
+	if len(errors) > 0 {
+		c.JSON(http.StatusPartialContent, gin.H{
+			"message": fmt.Sprintf("重置了 %d 个端点，%d 个失败", resetCount, len(errors)),
+			"errors":  errors,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("成功重置了 %d 个端点的状态", resetCount),
+	})
 }
 
 func (s *AdminServer) handleReorderEndpoints(c *gin.Context) {
@@ -108,8 +225,8 @@ func (s *AdminServer) handleReorderEndpoints(c *gin.Context) {
 		}
 	}
 
-	// 保存到配置文件
-	if err := config.SaveConfig(s.config, s.configFilePath); err != nil {
+	// 保存到配置文件（用户操作：立即写入）
+	if err := s.saveConfigImmediately(); err != nil {
 		s.logger.Error("Failed to save config after reorder", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save configuration: %v", err)})
 		return
@@ -198,8 +315,8 @@ func (s *AdminServer) handleSortEndpoints(c *gin.Context) {
 		}
 	}
 
-	// 保存到配置文件
-	if err := config.SaveConfig(s.config, s.configFilePath); err != nil {
+	// 保存到配置文件（用户操作：立即写入）
+	if err := s.saveConfigImmediately(); err != nil {
 		s.logger.Error("Failed to save config after sort", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save configuration: %v", err)})
 		return

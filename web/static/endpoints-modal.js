@@ -342,11 +342,17 @@ function saveEndpoint() {
             const modelRewriteConfig = collectModelRewriteData();
             const endpointName = document.getElementById('endpoint-name').value;
 
-            // 始终保存模型重写配置，即使是禁用状态或空规则
+            // 注意：由于后端现在接受完整的端点配置（包括模型重写），
+            // 模型重写配置已经在主保存请求中一起保存了。
+            // 这里的额外保存是为了向后兼容，但现在应该总是成功的。
+
+            // 如果改名了，editingEndpointName 会是旧名字，需要用新名字保存模型重写
             const saveModelRewrite = saveModelRewriteConfig(endpointName, modelRewriteConfig);
-            
+
             saveModelRewrite
                 .then(() => {
+                    // 更新 editingEndpointName 以便后续操作使用正确的名称
+                    editingEndpointName = endpointName;
                     endpointModal.hide();
                     showAlert(data.message, 'success');
                     loadEndpoints(); // Reload data instead of refreshing page

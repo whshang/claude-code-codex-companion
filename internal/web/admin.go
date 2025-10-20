@@ -21,6 +21,7 @@ import (
 // HotUpdateHandler defines the interface for hot config updates
 type HotUpdateHandler interface {
 	HotUpdateConfig(newConfig *config.Config) error
+	GetConfigPersister() *config.ConfigPersister
 }
 
 // PersistenceHandler defines the interface for persisting learned endpoint configuration
@@ -77,6 +78,19 @@ func (s *AdminServer) SetDynamicSorter(dynamicSorter interface {
 	ForceUpdate()
 }) {
 	s.dynamicSorter = dynamicSorter
+}
+
+// saveConfigImmediately 立即保存配置（用于用户手动操作）
+func (s *AdminServer) saveConfigImmediately() error {
+	// 优先使用 ConfigPersister 的 FlushNow
+	if s.hotUpdateHandler != nil {
+		persister := s.hotUpdateHandler.GetConfigPersister()
+		if persister != nil {
+			return persister.FlushNow()
+		}
+	}
+	// 降级到直接保存
+	return config.SaveConfig(s.config, s.configFilePath)
 }
 
 // PersistAuthType 持久化端点的认证类型（通过 PersistenceHandler）
