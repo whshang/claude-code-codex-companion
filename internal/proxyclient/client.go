@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
 
+	commonutils "claude-code-codex-companion/internal/common/utils"
 	"claude-code-codex-companion/internal/config"
 
 	"golang.org/x/net/proxy"
@@ -24,9 +24,9 @@ type ProxyDialer interface {
 // CreateHTTPClient 创建支持代理的 HTTP 客户端
 func CreateHTTPClient(proxyConfig *config.ProxyConfig, timeoutConfig config.ProxyTimeoutConfig) (*http.Client, error) {
 	transport := &http.Transport{
-		TLSHandshakeTimeout:   parseDuration(timeoutConfig.TLSHandshake, config.GetTimeoutDuration(config.Default.Timeouts.TLSHandshake, 10*time.Second)),
-		ResponseHeaderTimeout: parseDuration(timeoutConfig.ResponseHeader, config.GetTimeoutDuration(config.Default.Timeouts.ResponseHeader, 60*time.Second)),
-		IdleConnTimeout:       parseDuration(timeoutConfig.IdleConnection, config.GetTimeoutDuration(config.Default.Timeouts.IdleConnection, 90*time.Second)),
+		TLSHandshakeTimeout:   commonutils.ParseDuration(timeoutConfig.TLSHandshake, config.GetTimeoutDuration(config.Default.Timeouts.TLSHandshake, 10*time.Second)),
+		ResponseHeaderTimeout: commonutils.ParseDuration(timeoutConfig.ResponseHeader, config.GetTimeoutDuration(config.Default.Timeouts.ResponseHeader, 60*time.Second)),
+		IdleConnTimeout:       commonutils.ParseDuration(timeoutConfig.IdleConnection, config.GetTimeoutDuration(config.Default.Timeouts.IdleConnection, 90*time.Second)),
 		DisableKeepAlives:     false,
 		MaxIdleConns:          config.Default.HTTPClient.MaxIdleConns,
 		MaxIdleConnsPerHost:   config.Default.HTTPClient.MaxIdlePerHost,
@@ -41,7 +41,7 @@ func CreateHTTPClient(proxyConfig *config.ProxyConfig, timeoutConfig config.Prox
 		if err != nil {
 			return nil, fmt.Errorf("failed to create proxy dialer: %v", err)
 		}
-		
+
 		transport.DialContext = dialer.DialContext
 	}
 
@@ -51,7 +51,7 @@ func CreateHTTPClient(proxyConfig *config.ProxyConfig, timeoutConfig config.Prox
 
 	// 设置总体超时（如果配置了）
 	if timeoutConfig.OverallRequest != "" {
-		if duration := parseDuration(timeoutConfig.OverallRequest, 0); duration > 0 {
+		if duration := commonutils.ParseDuration(timeoutConfig.OverallRequest, 0); duration > 0 {
 			client.Timeout = duration
 		}
 	}
@@ -139,7 +139,7 @@ func (h *httpProxyDialer) DialContext(ctx context.Context, network, address stri
 
 	// 添加认证头（如果需要）
 	if h.proxyURL.User != nil {
-		connectReq.Header.Set("Proxy-Authorization", "Basic "+basicAuth(h.proxyURL.User.String()))
+		connectReq.Header.Set("Proxy-Authorization", "Basic "+commonutils.BasicAuth(h.proxyURL.User.String()))
 	}
 
 	// 发送请求
@@ -193,20 +193,4 @@ func (s *socks5ProxyDialer) DialContext(ctx context.Context, network, address st
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-}
-
-// parseDuration 解析时间字符串，如果解析失败则返回默认值
-func parseDuration(durationStr string, defaultDuration time.Duration) time.Duration {
-	if durationStr == "" {
-		return defaultDuration
-	}
-	if duration, err := time.ParseDuration(durationStr); err == nil {
-		return duration
-	}
-	return defaultDuration
-}
-
-// basicAuth 创建基本认证字符串
-func basicAuth(userInfo string) string {
-	return base64.StdEncoding.EncodeToString([]byte(userInfo))
 }

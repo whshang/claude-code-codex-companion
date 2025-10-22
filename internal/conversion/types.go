@@ -2,49 +2,41 @@ package conversion
 
 import "net/http"
 
-// RequestAdapter defines the interface for the new static request conversion logic.
+// RequestAdapter defines the interface for converting inbound HTTP requests
+// between provider formats. This is used by the proxy layer when it needs to
+// translate a request before forwarding it to an upstream.
 type RequestAdapter interface {
 	ConvertRequest(req *http.Request) (*http.Request, error)
 }
 
-
-// EndpointInfo 包含转换器需要的端点信息
+// EndpointInfo captures endpoint specific hints that influence request
+// translation behaviour (for example the preferred max tokens field).
 type EndpointInfo struct {
 	Type               string
 	MaxTokensFieldName string
 }
 
-// Converter 定义转换器接口
+// Converter describes the high level request/response conversion helpers used
+// by the compatibility layer.
 type Converter interface {
-	// 转换请求
 	ConvertRequest(anthropicReq []byte, endpointInfo *EndpointInfo) ([]byte, *ConversionContext, error)
-	
-	// 转换响应
 	ConvertResponse(openaiResp []byte, ctx *ConversionContext, isStreaming bool) ([]byte, error)
-	
-	// 检查是否需要转换
 	ShouldConvert(endpointType string) bool
 }
 
-// ConversionContext 转换上下文
-type ConversionContext struct {
-	EndpointType    string                 // "anthropic" | "openai"
-	ToolCallIDMap   map[string]string      // 工具调用ID映射 (Anthropic ID -> OpenAI ID)
-	IsStreaming     bool                   // 是否为流式请求
-	RequestHeaders  map[string]string      // 原始请求头
-	StopSequences   []string               // 请求中的停止序列，用于响应时检测
-	// 注意：不包含模型映射，因为转换发生在模型重写之后
-}
-
-
-// ConversionError 转换错误
+// ConversionError represents a structured error generated while translating
+// between formats. It wraps the underlying cause (when available) so callers
+// can inspect or unwrap it.
 type ConversionError struct {
-	Type    string // "parse_error", "unsupported_feature", "tool_conversion_error"
+	Type    string
 	Message string
 	Err     error
 }
 
 func (e *ConversionError) Error() string {
+	if e == nil {
+		return ""
+	}
 	if e.Err != nil {
 		return e.Message + ": " + e.Err.Error()
 	}
@@ -52,10 +44,14 @@ func (e *ConversionError) Error() string {
 }
 
 func (e *ConversionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
 	return e.Err
 }
 
-// NewConversionError 创建转换错误
+// NewConversionError creates a new ConversionError instance with optional
+// underlying error cause.
 func NewConversionError(errorType, message string, err error) *ConversionError {
 	return &ConversionError{
 		Type:    errorType,

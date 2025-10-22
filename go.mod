@@ -6,6 +6,7 @@ toolchain go1.23.12
 
 require (
 	github.com/gin-gonic/gin v1.9.1
+	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/sirupsen/logrus v1.9.3
 	go.starlark.net v0.0.0-20250804182900-3c9dc17c5f2e
 	golang.org/x/net v0.43.0
@@ -32,7 +33,6 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.4 // indirect
 	github.com/leodido/go-urn v1.2.4 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-sqlite3 v1.14.17 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
@@ -48,7 +48,7 @@ require (
 	google.golang.org/protobuf v1.33.0 // indirect
 	modernc.org/libc v1.66.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-modernc.org/memory v1.11.0 // indirect
+	modernc.org/memory v1.11.0 // indirect
 )
 
 replace github.com/cosmtrek/air => github.com/air-verse/air v1.63.0

@@ -64,33 +64,45 @@
                                 </div>
                             </div>
 
-                            <!-- 第二行：双URL配置 和 Tags -->
+                            <!-- 第二行：三URL配置 和 Tags -->
                             <div class="row mb-3">
-                                <div class="col-4">
-                                    <label for="endpoint-url-anthropic" class="form-label">
-                                        <i class="fas fa-link form-label-icon"></i><span data-t="anthropic_url">Anthropic URL</span> <span class="text-danger" id="anthropic-required">*</span>
-                                        <i class="fas fa-question-circle text-muted ms-1"
-                                           data-t-title="anthropic_url_tooltip"
-                                           title="处理Anthropic格式请求(Claude Code)时使用"
-                                           data-bs-toggle="tooltip"></i>
-                                    </label>
-                                    <input type="url" class="form-control" id="endpoint-url-anthropic"
-                                           placeholder="https://api.anthropic.com">
-                                    <small class="form-text text-muted" data-t="anthropic_url_hint">用于Claude Code客户端</small>
+                            <div class="col-3">
+                            <label for="endpoint-url-anthropic" class="form-label">
+                            <i class="fas fa-link form-label-icon"></i><span data-t="anthropic_url">Anthropic URL</span> <span class="text-danger" id="anthropic-required">*</span>
+                            <i class="fas fa-question-circle text-muted ms-1"
+                            data-t-title="anthropic_url_tooltip"
+                            title="处理Anthropic格式请求(Claude Code)时使用"
+                            data-bs-toggle="tooltip"></i>
+                            </label>
+                            <input type="url" class="form-control" id="endpoint-url-anthropic"
+                            placeholder="https://api.anthropic.com">
+                            <small class="form-text text-muted" data-t="anthropic_url_hint">用于Claude Code客户端</small>
+                            </div>
+                            <div class="col-3">
+                            <label for="endpoint-url-openai" class="form-label">
+                            <i class="fas fa-link form-label-icon"></i><span data-t="openai_url">OpenAI URL</span> <span class="text-danger" id="openai-required">*</span>
+                            <i class="fas fa-question-circle text-muted ms-1"
+                            data-t-title="openai_url_tooltip"
+                            title="处理OpenAI格式请求(Codex)时使用"
+                            data-bs-toggle="tooltip"></i>
+                            </label>
+                            <input type="url" class="form-control" id="endpoint-url-openai"
+                            placeholder="https://api.openai.com">
+                            <small class="form-text text-muted" data-t="openai_url_hint">用于Codex客户端</small>
+                            </div>
+                            <div class="col-3">
+                            <label for="endpoint-url-gemini" class="form-label">
+                            <i class="fas fa-link form-label-icon"></i><span data-t="gemini_url">Gemini URL</span> <span class="text-danger" id="gemini-required">*</span>
+                                <i class="fas fa-question-circle text-muted ms-1"
+                                   data-t-title="gemini_url_tooltip"
+                            title="处理Gemini格式请求时使用"
+                                   data-bs-toggle="tooltip"></i>
+                                </label>
+                                    <input type="url" class="form-control" id="endpoint-url-gemini"
+                                           placeholder="https://generativelanguage.googleapis.com">
+                                    <small class="form-text text-muted" data-t="gemini_url_hint">用于Gemini客户端</small>
                                 </div>
-                                <div class="col-4">
-                                    <label for="endpoint-url-openai" class="form-label">
-                                        <i class="fas fa-link form-label-icon"></i><span data-t="openai_url">OpenAI URL</span> <span class="text-danger" id="openai-required">*</span>
-                                        <i class="fas fa-question-circle text-muted ms-1"
-                                           data-t-title="openai_url_tooltip"
-                                           title="处理OpenAI格式请求(Codex)时使用"
-                                           data-bs-toggle="tooltip"></i>
-                                    </label>
-                                    <input type="url" class="form-control" id="endpoint-url-openai"
-                                           placeholder="https://api.openai.com">
-                                    <small class="form-text text-muted" data-t="openai_url_hint">用于Codex客户端</small>
-                                </div>
-                                <div class="col-4">
+                                <div class="col-3">
                                     <label for="endpoint-tags" class="form-label">
                                         <i class="fas fa-tags form-label-icon"></i><span data-t="tags">标签</span>
                                     </label>
@@ -102,21 +114,21 @@
 
                             <!-- URL验证提示 -->
                             <div class="row mb-3">
-                                <div class="col-12">
-                                    <div class="alert alert-info p-2">
-                                        <small class="text-muted">
-                                            <i class="fas fa-info-circle"></i>
-                                            <strong data-t="url_config_note">配置说明：</strong>
-                                            <span data-t="at_least_one_url">至少填写一个URL（Anthropic或OpenAI）</span>
-                                            <br>
-                                            <span data-t="dual_url_benefit">• 填写两个URL可自动根据客户端类型选择最优路由</span>
-                                            <br>
-                                            <span data-t="single_url_fallback">• 只填一个URL时，所有请求都会自动转换为对应格式</span>
-                                            <br>
-                                            <span data-t="auto_type_detection">• 端点类型和路径前缀均自动推断，无需手动配置</span>
-                                        </small>
-                                    </div>
-                                </div>
+                            <div class="col-12">
+                            <div class="alert alert-info p-2">
+                            <small class="text-muted">
+                            <i class="fas fa-info-circle"></i>
+                            <strong data-t="url_config_note">配置说明：</strong>
+                            <span data-t="at_least_one_url">至少填写一个URL（Anthropic、OpenAI或Gemini）</span>
+                            <br>
+                            <span data-t="multi_url_benefit">• 填写多个URL可自动根据客户端类型选择最优路由</span>
+                            <br>
+                            <span data-t="single_url_fallback">• 只填一个URL时，所有请求都会自动转换为对应格式</span>
+                            <br>
+                            <span data-t="auto_type_detection">• 端点类型和路径前缀均自动推断，无需手动配置</span>
+                            </small>
+                            </div>
+                            </div>
                             </div>
 
                             <!-- 第三行：认证方式和认证值 -->

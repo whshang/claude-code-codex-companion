@@ -1,4 +1,4 @@
-.PHONY: build clean test run dev stop windows-amd64 linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 all
+.PHONY: build clean test run dev stop windows-amd64 linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 all docker-build docker-run docker-compose-up docker-compose-down
 
 # Use bash for better shell compatibility
 SHELL := /bin/bash
@@ -128,22 +128,42 @@ fmt:
 lint:
 	golangci-lint run
 
+# Docker build
+docker-build:
+	docker build -t cccc .
+
+# Docker run
+docker-run: docker-build
+	docker run -p 8080:8080 -v $(PWD)/config.yaml:/root/config.yaml cccc
+
+# Docker compose up
+docker-compose-up:
+	docker-compose up -d
+
+# Docker compose down
+docker-compose-down:
+	docker-compose down
+
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  build          - Build binary for current platform"
-	@echo "  windows-amd64  - Cross-compile for Windows x64 (Claude Code Codex Companion)"
-	@echo "  linux-amd64    - Cross-compile for Linux x64 (Claude Code Codex Companion)"
-	@echo "  linux-arm64    - Cross-compile for Linux ARM64 (Claude Code Codex Companion)"
-	@echo "  darwin-amd64   - Cross-compile for macOS Intel (Claude Code Codex Companion)"
-	@echo "  darwin-arm64   - Cross-compile for macOS Apple Silicon (Claude Code Codex Companion)"
-	@echo "  all            - Cross-compile for all platforms"
-	@echo "  clean          - Remove build artifacts"
-	@echo "  test           - Run tests"
-	@echo "  run            - Build and run with default config"
-	@echo "  dev            - Run in development mode with hot reload"
-	@echo "  init           - Initialize and tidy go modules"
-	@echo "  deps           - Download dependencies"
-	@echo "  fmt            - Format code"
-	@echo "  lint           - Lint code"
-	@echo "  help           - Show this help"
+	@echo "  build              - Build binary for current platform"
+	@echo "  windows-amd64      - Cross-compile for Windows x64"
+	@echo "  linux-amd64        - Cross-compile for Linux x64"
+	@echo "  linux-arm64        - Cross-compile for Linux ARM64"
+	@echo "  darwin-amd64       - Cross-compile for macOS Intel"
+	@echo "  darwin-arm64       - Cross-compile for macOS Apple Silicon"
+	@echo "  all                - Cross-compile for all platforms"
+	@echo "  clean              - Remove build artifacts"
+	@echo "  test               - Run tests"
+	@echo "  run                - Build and run with default config"
+	@echo "  dev                - Run in development mode with hot reload"
+	@echo "  docker-build       - Build Docker image"
+	@echo "  docker-run         - Run in Docker container"
+	@echo "  docker-compose-up  - Start with docker-compose"
+	@echo "  docker-compose-down- Stop docker-compose services"
+	@echo "  init               - Initialize and tidy go modules"
+	@echo "  deps               - Download dependencies"
+	@echo "  fmt                - Format code"
+	@echo "  lint               - Lint code"
+	@echo "  help               - Show this help"

@@ -445,23 +445,29 @@ func (s *Server) isEndpointCompatibleWithFormat(ep *endpoint.Endpoint, requestFo
 		return false
 	}
 
-	// 新的格式兼容性规则（基于实际配置的URL）：
-	// 1. OpenAI 请求 → 需要端点配置了 url_openai
-	// 2. Anthropic 请求 → 需要端点配置了 url_anthropic
-	// 3. 如果端点同时配置了两个URL，则支持两种格式
-
-	if requestFormat == "openai" {
-		// OpenAI 请求需要端点有 url_openai
-		return ep.URLOpenAI != ""
+	// 端点至少需要一个可用的上游URL
+	hasAnyURL := ep.URLAnthropic != "" || ep.URLOpenAI != "" || ep.URLGemini != ""
+	if !hasAnyURL {
+		return false
 	}
 
-	if requestFormat == "anthropic" {
-		// Anthropic 请求需要端点有 url_anthropic
-		return ep.URLAnthropic != ""
+	switch requestFormat {
+	case "", "unknown":
+		// 未检测到格式时，保持向后兼容，允许所有具备URL的端点
+		return true
+	case "openai":
+		// OpenAI 请求可直接命中 OpenAI URL，或通过格式转换使用 Anthropic/Gemini URL
+		return ep.URLOpenAI != "" || ep.URLAnthropic != "" || ep.URLGemini != ""
+	case "anthropic":
+		// Anthropic 请求可直接命中 Anthropic URL，或通过格式转换使用 OpenAI/Gemini URL
+		return ep.URLAnthropic != "" || ep.URLOpenAI != "" || ep.URLGemini != ""
+	case "gemini":
+		// Gemini 请求可直接命中 Gemini URL，或通过格式转换使用 OpenAI/Anthropic URL
+		return ep.URLGemini != "" || ep.URLOpenAI != "" || ep.URLAnthropic != ""
+	default:
+		// 未知的新格式，允许具备任意上游URL的端点尝试处理
+		return true
 	}
-
-	// 未知格式，保持向后兼容
-	return true
 }
 
 // fallbackToOtherEndpoints 当endpoint失败时，根据是否有tag决定fallback策略

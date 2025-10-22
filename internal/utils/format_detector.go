@@ -19,8 +19,9 @@ const (
 type ClientType string
 
 const (
-	ClientClaudeCode ClientType = "claude-code"
-	ClientCodex      ClientType = "codex"
+ClientClaudeCode ClientType = "claude-code"
+ClientCodex      ClientType = "codex"
+ClientGemini     ClientType = "gemini"
 	ClientUnknown    ClientType = "unknown"
 )
 

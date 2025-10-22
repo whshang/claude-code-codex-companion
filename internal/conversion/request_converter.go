@@ -11,13 +11,15 @@ import (
 
 // RequestConverter 请求转换器 - 基于参考实现
 type RequestConverter struct {
-	logger *logger.Logger
+	logger      *logger.Logger
+	modelMapper *ModelMapper
 }
 
 // NewRequestConverter 创建请求转换器
 func NewRequestConverter(logger *logger.Logger) *RequestConverter {
 	return &RequestConverter{
-		logger: logger,
+		logger:      logger,
+		modelMapper: NewModelMapper(logger),
 	}
 }
 
@@ -29,17 +31,30 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 		return nil, nil, NewConversionError("parse_error", "Failed to parse Anthropic request", err)
 	}
 
+	mapper := newDefaultThinkingMapper(c.logger)
+
 	// 创建转换上下文
 	ctx := &ConversionContext{
-		ToolCallIDMap:  make(map[string]string),
-		IsStreaming:    anthReq.Stream != nil && *anthReq.Stream,
-		RequestHeaders: make(map[string]string),
-		StopSequences:  anthReq.StopSequences,
+		SourceFormat: "anthropic",
+		TargetFormat: "openai",
+		Headers:      make(map[string]string),
+		Metadata: map[string]interface{}{
+			"tool_call_id_map": make(map[string]string),
+			"is_streaming":     anthReq.Stream != nil && *anthReq.Stream,
+			"stop_sequences":   anthReq.StopSequences,
+		},
 	}
 
 	// 构建 OpenAI 请求
 	out := OpenAIRequest{
 		Model: anthReq.Model,
+	}
+	if c.modelMapper != nil {
+		mapped := c.modelMapper.MapModel(out.Model, GetMappingForConversion("anthropic", "openai"))
+		if mapped != "" {
+			out.Model = mapped
+			ctx.Metadata["mapped_model"] = mapped
+		}
 	}
 
 	// 温控映射
@@ -315,29 +330,13 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 		out.ParallelToolCalls = boolPtr(false)
 	}
 
-	// 处理 thinking 模式转换为 OpenAI 推理模式
-	if anthReq.Thinking != nil && anthReq.Thinking.Type == "enabled" {
-		// 根据 budget_tokens 映射推理强度
-		if anthReq.Thinking.BudgetTokens > 0 {
-			out.MaxReasoningTokens = &anthReq.Thinking.BudgetTokens
-
-			// 根据 budget_tokens 的大小设置推理强度
-			if anthReq.Thinking.BudgetTokens <= 5000 {
-				out.ReasoningEffort = stringPtr("low")
-			} else if anthReq.Thinking.BudgetTokens <= 15000 {
-				out.ReasoningEffort = stringPtr("medium")
-			} else {
-				out.ReasoningEffort = stringPtr("high")
-			}
-		} else {
-			// 如果没有指定 budget_tokens，使用默认的 medium 强度
-			out.ReasoningEffort = stringPtr("medium")
-		}
-
+	if thinking := InternalThinkingFromAnthropic(anthReq.Thinking); thinking != nil {
+		applyThinkingForOpenAIRequest(thinking, &out, mapper)
 		if c.logger != nil {
 			c.logger.Debug("Converted thinking mode to OpenAI reasoning mode", map[string]interface{}{
-				"budget_tokens":    anthReq.Thinking.BudgetTokens,
-				"reasoning_effort": *out.ReasoningEffort,
+				"provider":      thinking.Provider,
+				"budget_tokens": thinking.BudgetTokens,
+				"reasoning":     out.ReasoningEffort,
 			})
 		}
 	}

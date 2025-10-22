@@ -2,32 +2,33 @@ package config
 
 // EndpointConfig 端点配置（完整版，支持所有功能）
 type EndpointConfig struct {
-	Name               string              `yaml:"name" json:"name"`
-	URLAnthropic       string              `yaml:"url_anthropic,omitempty" json:"url_anthropic,omitempty"` // Anthropic格式URL
-	URLOpenAI          string              `yaml:"url_openai,omitempty" json:"url_openai,omitempty"`       // OpenAI格式URL
-	AuthType           string              `yaml:"auth_type" json:"auth_type"`
-	AuthValue          string              `yaml:"auth_value" json:"auth_value"`
-	Enabled            bool                `yaml:"enabled" json:"enabled"`
-	Priority           int                 `yaml:"priority" json:"priority"`
-	Tags               []string            `yaml:"tags" json:"tags"`                                                           // 支持的tag列表
-	ModelRewrite       *ModelRewriteConfig `yaml:"model_rewrite,omitempty" json:"model_rewrite,omitempty"`                     // 模型重写配置
-	Proxy              *ProxyConfig        `yaml:"proxy,omitempty" json:"proxy,omitempty"`                                     // 代理配置
-	OAuthConfig        *OAuthConfig        `yaml:"oauth_config,omitempty" json:"oauth_config,omitempty"`                       // OAuth配置
-	HeaderOverrides    map[string]string   `yaml:"header_overrides,omitempty" json:"header_overrides,omitempty"`           // HTTP Header覆盖配置
-	ParameterOverrides map[string]string   `yaml:"parameter_overrides,omitempty" json:"parameter_overrides,omitempty"`     // Request Parameters覆盖配置
-	MaxTokensFieldName string              `yaml:"max_tokens_field_name,omitempty" json:"max_tokens_field_name,omitempty"` // max_tokens 参数名转换选项
-	RateLimitReset     *int64              `yaml:"rate_limit_reset,omitempty" json:"rate_limit_reset,omitempty"`           // Anthropic-Ratelimit-Unified-Reset
-	RateLimitStatus    *string             `yaml:"rate_limit_status,omitempty" json:"rate_limit_status,omitempty"`         // Anthropic-Ratelimit-Unified-Status
-	EnhancedProtection bool                `yaml:"enhanced_protection,omitempty" json:"enhanced_protection,omitempty"`     // 官方帐号增强保护：allowed_warning时即禁用端点
-	SSEConfig          *SSEConfig          `yaml:"sse_config,omitempty" json:"sse_config,omitempty"`                       // SSE行为配置
-	OpenAIPreference   string              `yaml:"openai_preference,omitempty" json:"openai_preference,omitempty"`         // OpenAI格式偏好："responses"|"chat_completions"|"auto"
-	CountTokensEnabled *bool               `yaml:"count_tokens_enabled,omitempty" json:"count_tokens_enabled,omitempty"`   // 是否允许使用 /count_tokens 接口
+Name               string              `yaml:"name" json:"name"`
+URLAnthropic       string              `yaml:"url_anthropic,omitempty" json:"url_anthropic,omitempty"` // Anthropic格式URL
+URLOpenAI          string              `yaml:"url_openai,omitempty" json:"url_openai,omitempty"`       // OpenAI格式URL
+URLGemini          string              `yaml:"url_gemini,omitempty" json:"url_gemini,omitempty"`       // Gemini格式URL
+AuthType           string              `yaml:"auth_type" json:"auth_type"`
+AuthValue          string              `yaml:"auth_value" json:"auth_value"`
+Enabled            bool                `yaml:"enabled" json:"enabled"`
+Priority           int                 `yaml:"priority" json:"priority"`
+Tags               []string            `yaml:"tags" json:"tags"`                                                           // 支持的tag列表
+ModelRewrite       *ModelRewriteConfig `yaml:"model_rewrite,omitempty" json:"model_rewrite,omitempty"`                     // 模型重写配置
+Proxy              *ProxyConfig        `yaml:"proxy,omitempty" json:"proxy,omitempty"`                                     // 代理配置
+OAuthConfig        *OAuthConfig        `yaml:"oauth_config,omitempty" json:"oauth_config,omitempty"`                       // OAuth配置
+HeaderOverrides    map[string]string   `yaml:"header_overrides,omitempty" json:"header_overrides,omitempty"`           // HTTP Header覆盖配置
+ParameterOverrides map[string]string   `yaml:"parameter_overrides,omitempty" json:"parameter_overrides,omitempty"`     // Request Parameters覆盖配置
+MaxTokensFieldName string              `yaml:"max_tokens_field_name,omitempty" json:"max_tokens_field_name,omitempty"` // max_tokens 参数名转换选项
+RateLimitReset     *int64              `yaml:"rate_limit_reset,omitempty" json:"rate_limit_reset,omitempty"`           // Anthropic-Ratelimit-Unified-Reset
+RateLimitStatus    *string             `yaml:"rate_limit_status,omitempty" json:"rate_limit_status,omitempty"`         // Anthropic-Ratelimit-Unified-Status
+EnhancedProtection bool                `yaml:"enhanced_protection,omitempty" json:"enhanced_protection,omitempty"`     // 官方帐号增强保护：allowed_warning时即禁用端点
+SSEConfig          *SSEConfig          `yaml:"sse_config,omitempty" json:"sse_config,omitempty"`                       // SSE行为配置
+OpenAIPreference   string              `yaml:"openai_preference,omitempty" json:"openai_preference,omitempty"`         // OpenAI格式偏好："responses"|"chat_completions"|"auto"
+CountTokensEnabled *bool               `yaml:"count_tokens_enabled,omitempty" json:"count_tokens_enabled,omitempty"`   // 是否允许使用 /count_tokens 接口
 	SupportsResponses  *bool               `yaml:"supports_responses,omitempty" json:"supports_responses,omitempty"`       // 显式声明是否原生支持 /responses 接口
 
-	// 新增：智能转换标记（方案A核心字段）
-	NativeFormat     bool   `yaml:"native_format,omitempty" json:"native_format,omitempty"`         // 是否原生支持客户端格式（true=无需转换）
-	TargetFormat     string `yaml:"target_format,omitempty" json:"target_format,omitempty"`         // 转换目标格式："anthropic"|"openai_chat"|"openai_responses"
-	ClientType       string `yaml:"client_type,omitempty" json:"client_type,omitempty"`             // 客户端类型过滤："claude_code"|"codex"|"openai"|""（空表示通用）
+// 新增：智能转换标记（方案A核心字段）
+NativeFormat     bool   `yaml:"native_format,omitempty" json:"native_format,omitempty"`         // 是否原生支持客户端格式（true=无需转换）
+TargetFormat     string `yaml:"target_format,omitempty" json:"target_format,omitempty"`         // 转换目标格式："anthropic"|"openai_chat"|"openai_responses"|"gemini"
+	ClientType       string `yaml:"client_type,omitempty" json:"client_type,omitempty"`             // 客户端类型过滤："claude_code"|"codex"|"openai"|"gemini"|""（空表示通用）
 }
 
 type Config struct {

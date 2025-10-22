@@ -117,7 +117,7 @@ func (v *ResponseValidator) ValidateStandardResponse(body []byte, endpointType s
 		}
 
 		// 如果有object字段，验证其值（可选）
-		if objectType, ok := response["object"].(string); ok {
+		if objectType, ok := response["object"].(string); ok && strings.TrimSpace(objectType) != "" {
 			if objectType != "chat.completion" && objectType != "chat.completion.chunk" {
 				return NewFormatError(fmt.Sprintf("invalid object type for OpenAI: expected 'chat.completion' or 'chat.completion.chunk', got '%v'", objectType), nil)
 			}
@@ -171,9 +171,9 @@ func (v *ResponseValidator) ValidateSSEChunk(chunk []byte, endpointType string) 
 			// OpenAI格式通常不使用event字段，或者使用不同的事件类型，这里不做严格验证
 		}
 
-        // 兼容 "data:" 和 "data: " 两种写法
-        if bytes.HasPrefix(line, []byte("data:")) {
-            dataContent := bytes.TrimSpace(line[len("data:"):])
+		// 兼容 "data:" 和 "data: " 两种写法
+		if bytes.HasPrefix(line, []byte("data:")) {
+			dataContent := bytes.TrimSpace(line[len("data:"):])
 			if len(dataContent) == 0 || string(dataContent) == "[DONE]" {
 				continue
 			}
@@ -193,23 +193,43 @@ func (v *ResponseValidator) ValidateSSEChunk(chunk []byte, endpointType string) 
 				if err := v.ValidateMessageStartUsage(data); err != nil {
 					return err
 				}
-            } else if endpointType == "openai" {
-                // OpenAI格式：允许两种流式形态
-                // 1) Chat Completions chunk: 可能包含 choices / delta / finish_reason
-                // 2) Responses API 事件: {"type":"response.*", ...} 或 顶层包含 response 对象
-                if _, hasModel := data["model"]; !hasModel {
-                    // 容忍无顶层model的情况，但需命中至少一种已知结构
-                    isResponsesEvent := false
-                    if t, ok := data["type"].(string); ok && strings.HasPrefix(t, "response.") {
-                        isResponsesEvent = true
-                    }
-                    _, hasResponseObj := data["response"].(map[string]interface{})
-                    _, hasChoices := data["choices"].([]interface{})
-                    if !(isResponsesEvent || hasResponseObj || hasChoices) {
-                        return fmt.Errorf("missing 'model' field in OpenAI SSE data")
-                    }
-                }
-                // OpenAI格式不要求type和object字段
+			} else if endpointType == "openai" {
+				// OpenAI格式：允许两种流式形态
+				// 1) Chat Completions chunk: 可能包含 choices / delta / finish_reason
+				// 2) Responses API 事件: {"type":"response.*", ...} 或 顶层包含 response 对象
+				if _, hasModel := data["model"]; !hasModel {
+					// 容忍无顶层model的情况，但需命中至少一种已知结构
+					t, hasType := data["type"].(string)
+					isResponsesEvent := hasType && strings.HasPrefix(t, "response.")
+					_, hasResponseObj := data["response"].(map[string]interface{})
+					choicesRaw, hasChoices := data["choices"]
+					_, hasDelta := data["delta"]
+					_, hasUsage := data["usage"]
+					_, hasObject := data["object"]
+					_, hasID := data["id"]
+					if !(isResponsesEvent || hasResponseObj || hasChoices || hasDelta || hasUsage || hasObject || hasID || hasType) {
+						return fmt.Errorf("missing 'model' field in OpenAI SSE data")
+					}
+
+					if hasChoices {
+						switch choices := choicesRaw.(type) {
+						case []interface{}:
+							if len(choices) > 0 {
+								if first, ok := choices[0].(map[string]interface{}); ok {
+									nestedModel, hasNestedModel := first["model"]
+									if hasNestedModel {
+										if _, ok := nestedModel.(string); !ok && nestedModel != nil {
+											return fmt.Errorf("invalid 'model' field in OpenAI SSE data: expected string")
+										}
+									}
+								}
+							}
+						default:
+							return fmt.Errorf("invalid 'choices' field in OpenAI SSE data")
+						}
+					}
+				}
+				// OpenAI格式不要求type和object字段
 			}
 		}
 	}
@@ -359,7 +379,8 @@ func (v *ResponseValidator) ValidateMessageStartUsage(eventData map[string]inter
 
 	usage, ok := message["usage"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("invalid message_start: missing usage field")
+		// 某些兼容实现不会在 message_start 中返回 usage，放宽要求
+		return nil
 	}
 
 	// 检查是否存在 input_tokens 和 output_tokens 字段

@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+const (
+	defaultScannerBuffer      = 64 * 1024
+	defaultScannerMaxCapacity = 2 * 1024 * 1024
+)
+
 // ⚠️ DEPRECATED: This file contains legacy conversion functions that are no longer recommended.
 //
 // 🔧 Migration Guide:

@@ -186,27 +186,28 @@ Actual request path: `http://127.0.0.1:8081/chat/completions` or `http://127.0.0
 ---
 
 ## 🔌 Clients & Ecosystem
-- **Claude Code**: Use the setup script or configure manually (see [Codex Configuration Guide](docs/Codex配置指南_Codex_Configuration_Guide.md) for environment variables).
+- **Claude Code**: Use the setup script or configure manually (see [Codex Configuration Guide](docs/Codex配置指南.md) for environment variables).
 - **Codex CLI**: The script writes `~/.codex/config.toml`; the default `wire_api` is `responses` and per-project `trust_level` can be customised.
-- **Other IDE/CLI tools** (Cursor, Continue, Aider, etc.): point them to the OpenAI-compatible CCCC endpoint; see [FoxCode Endpoint Notes](docs/FoxCode端点说明_FoxCode_Endpoint_Notes.md) and [88code Endpoint Example](docs/88code端点示例_88code_Endpoint_Example.md).
+- **Other IDE/CLI tools** (Cursor, Continue, Aider, etc.): point them to the OpenAI-compatible CCCC endpoint; see [FoxCode Endpoint Notes](docs/FoxCode端点说明.md) and [88code Endpoint Example](docs/88code端点示例.md).
 - **Probes**: `go run ./cmd/test_endpoints -config config.yaml -json` validates availability, auth, and tool calling support.
 
 ---
 
 ## 🧭 Advanced Topics Index
-- **Core Architecture**: [Smart Endpoint Selection](docs/动态端点排序_Dynamic_Endpoint_Sorting.md), [Endpoint Management](docs/端点测试与优化指南_Endpoint_Testing_and_Optimization_Guide.md)
-- **Proxy Mechanisms**: [Transparent Proxy Optimisation Plan](docs/透明代理优化计划_Transparent_Proxy_Optimisation_Plan.md), [Format Conversion Guide](docs/格式转换与端点兼容性_Format_Conversion_and_Endpoint_Compatibility.md)
-- Dynamic endpoint sorting: [Dynamic Endpoint Sorting](docs/动态端点排序_Dynamic_Endpoint_Sorting.md)
-- Authentication & parameter learning: [Auto Learning](docs/认证方式自动学习_Auth_Method_Auto_Learning.md)
-- SSE streaming conversion: [SSE Refactor Design](docs/SSE重构设计_SSE_Refactor_Design.md)
-- GORM storage & statistics: [GORM Refactor Plan](docs/GORM重构规划_GORM_Refactor_Plan.md), [Statistics Persistence Design](docs/统计持久化设计_Statistics_Persistence_Design.md)
-- Validation scripts & endpoint wizard: [Verification Steps](docs/功能验证步骤_Verification_Steps.md), [Endpoint Wizard](docs/端点向导_Endpoint_Wizard.md)
+- **Core Architecture**: [Smart Endpoint Selection](docs/动态端点排序.md), [Endpoint Management](docs/端点测试与优化指南.md)
+- **Proxy Mechanisms**: [SSE Refactor Design](docs/SSE重构设计.md), [Codex Tool Call Streaming Fix](docs/Codex流式工具调用修复_2025-10-10.md)
+- Dynamic endpoint sorting: [Dynamic Endpoint Sorting](docs/动态端点排序.md)
+- Authentication & parameter learning: [Auto Learning](docs/认证方式自动学习.md)
+- SSE streaming conversion: [SSE Refactor Design](docs/SSE重构设计.md)
+- Persistence & statistics: [Learning Persistence Implementation](docs/学习持久化实现.md), [Statistics Persistence Design](docs/统计持久化设计.md)
+- Smart endpoint configuration: [Smart Endpoint Configuration Guide](docs/智能端点配置指南.md)
+- Validation scripts & endpoint wizard: [Verification Steps](docs/功能验证步骤.md), [Endpoint Wizard](docs/端点向导.md)
 
 ---
 
 ## 🤝 Contributing
-- Architectural notes live in `docs/`. Start with [System Design Overview](docs/系统设计概览_System_Design_Overview.md) and [Implementation Plan Summary](docs/实施计划摘要_Implementation_Plan_Summary.md).
-- Run `go test ./...` before opening a PR and follow the [Pre-commit Checklist](docs/提交前检查清单_Pre_commit_Checklist.md).
+- Architectural notes live in `docs/`. Start with [System Design Overview](docs/系统设计概览.md) and [Smart Endpoint Configuration Guide](docs/智能端点配置指南.md).
+- Run `go test ./...` before opening a PR and make sure scripts and examples stay in sync with your changes.
 - PRs, issues, and discussion posts tracking new endpoint examples, scripts, or translations are warmly welcomed.
 
 ---

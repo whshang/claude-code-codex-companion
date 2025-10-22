@@ -40,10 +40,26 @@ func NewAdapterFactory(logger *logger.Logger) *AdapterFactory {
 
 // OpenAIChatAdapter 构造 OpenAI Chat 适配器
 func (f *AdapterFactory) OpenAIChatAdapter() FormatAdapter {
-	return &OpenAIChatFormatAdapter{logger: f.logger}
+	return &OpenAIChatFormatAdapter{
+		logger: f.logger,
+	}
 }
 
 // OpenAIResponsesAdapter 构造 OpenAI Responses 适配器
 func (f *AdapterFactory) OpenAIResponsesAdapter() FormatAdapter {
-	return &OpenAIResponsesFormatAdapter{logger: f.logger}
+	return &OpenAIResponsesFormatAdapter{
+		logger: f.logger,
+	}
+}
+
+// AnthropicAdapter 构造 Anthropic 适配器
+func (f *AdapterFactory) AnthropicAdapter() FormatAdapter {
+	return &AnthropicFormatAdapter{
+		logger: f.logger,
+	}
+}
+
+// GeminiAdapter 构造 Gemini 适配器
+func (f *AdapterFactory) GeminiAdapter() FormatAdapter {
+	return NewGeminiFormatAdapter()
 }

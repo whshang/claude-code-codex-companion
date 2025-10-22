@@ -1,27 +1,29 @@
 package main
 
 import (
-	"flag"
-	"fmt"
-	"html/template"
-	"io/fs"
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+"flag"
+"fmt"
+"html/template"
+"io/fs"
+"log"
+"os"
+"os/signal"
+"syscall"
+"time"
 
-	"claude-code-codex-companion/internal/common/httpclient"
-	"claude-code-codex-companion/internal/config"
-	"claude-code-codex-companion/internal/proxy"
+"claude-code-codex-companion/internal/common/httpclient"
+"claude-code-codex-companion/internal/config"
+"claude-code-codex-companion/internal/database"
+"claude-code-codex-companion/internal/proxy"
 	"claude-code-codex-companion/internal/webres"
 )
 
 var (
-	configFile = flag.String("config", "config.yaml", "Configuration file path")
-	port       = flag.Int("port", 0, "Override proxy server port")
-	version    = flag.Bool("version", false, "Show version information")
-	
+	configFile         = flag.String("config", "config.yaml", "Configuration file path")
+	port               = flag.Int("port", 0, "Override proxy server port")
+	version            = flag.Bool("version", false, "Show version information")
+	migrateFromPython = flag.String("migrate-from-python", "", "Migrate from Python Api-Conversion database (provide path to old SQLite database)")
+
 	// This will be set by build process
 	Version = "dev"
 )
@@ -75,6 +77,19 @@ func main() {
 
 	if *version {
 		fmt.Printf("Claude Code Codex Companion %s\n", Version)
+		os.Exit(0)
+	}
+
+	// Handle database migration from Python Api-Conversion
+	if *migrateFromPython != "" {
+		fmt.Printf("Starting database migration from Python Api-Conversion...\n")
+		newDBPath := "cccc.db" // Default database file
+		if err := database.MigrateFromPython(*migrateFromPython, newDBPath, ""); err != nil {
+			log.Fatalf("Database migration failed: %v", err)
+		}
+		fmt.Printf("Database migration completed successfully!\n")
+		fmt.Printf("New database created at: %s\n", newDBPath)
+		fmt.Printf("You can now start the server normally.\n")
 		os.Exit(0)
 	}
 

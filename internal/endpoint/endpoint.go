@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"claude-code-codex-companion/internal/common/httpclient"
+	commonutils "claude-code-codex-companion/internal/common/utils"
 	"claude-code-codex-companion/internal/config"
 	"claude-code-codex-companion/internal/interfaces"
 	"claude-code-codex-companion/internal/oauth"
@@ -44,7 +45,8 @@ type Endpoint struct {
 	ID                 string                     `json:"id"`
 	Name               string                     `json:"name"`
 	URLAnthropic       string                     `json:"url_anthropic,omitempty"` // Anthropic格式URL
-	URLOpenAI          string                     `json:"url_openai"`    // OpenAI格式URL
+	URLOpenAI          string                     `json:"url_openai"`              // OpenAI格式URL
+	URLGemini          string                     `json:"url_gemini,omitempty"`    // Gemini格式URL
 	EndpointType       string                     `json:"endpoint_type"`           // 自动推断的端点类型（内部使用）
 	AuthType           string                     `json:"auth_type"`
 	AuthValue          string                     `json:"auth_value"`
@@ -62,7 +64,7 @@ type Endpoint struct {
 	EnhancedProtection bool                       `json:"enhanced_protection,omitempty"`   // 官方帐号增强保护：allowed_warning时即禁用端点
 	SSEConfig          *config.SSEConfig          `json:"sse_config,omitempty"`            // SSE行为配置
 	OpenAIPreference   string                     `json:"openai_preference,omitempty"`     // OpenAI格式偏好："responses"|"chat_completions"|"auto"
-	SupportsResponses  *bool                      `json:"supports_responses,omitempty"`   // 显式声明 /responses 支持情况
+	SupportsResponses  *bool                      `json:"supports_responses,omitempty"`    // 显式声明 /responses 支持情况
 	// 是否允许使用 /count_tokens 接口
 	CountTokensEnabled bool `json:"count_tokens_enabled"`
 	// 记录 count_tokens 支持情况（nil 表示未知）
@@ -110,8 +112,8 @@ type Endpoint struct {
 
 	// 方案A新增字段：智能转换标记
 	NativeFormat bool   `json:"native_format"` // 是否原生支持客户端格式（true=无需转换）
-	TargetFormat string `json:"target_format"` // 转换目标格式："anthropic"|"openai_chat"|"openai_responses"
-	ClientType   string `json:"client_type"`   // 客户端类型过滤："claude_code"|"codex"|"openai"|""（空表示通用）
+	TargetFormat string `json:"target_format"` // 转换目标格式："anthropic"|"openai_chat"|"openai_responses"|"gemini"
+	ClientType   string `json:"client_type"`   // 客户端类型过滤："claude_code"|"codex"|"openai"|"gemini"|""（空表示通用）
 
 	// 统计信息
 	Stats *statistics.EndpointStatistics `json:"-"`
@@ -182,53 +184,69 @@ func NewEndpoint(cfg config.EndpointConfig) *Endpoint {
 	}
 
 	return &Endpoint{
-		ID:                  generateID(cfg.Name),
-		Name:                cfg.Name,
-		URLAnthropic:        cfg.URLAnthropic, // Anthropic格式URL
-		URLOpenAI:           cfg.URLOpenAI,    // OpenAI格式URL
-		EndpointType:        endpointType,
-		AuthType:            cfg.AuthType,
-		AuthValue:           cfg.AuthValue,
-		Enabled:             config.GetBoolWithDefault(cfg.Enabled, true, config.Default.Endpoint.Enabled),
-		Priority:            config.GetIntWithDefault(cfg.Priority, config.Default.Endpoint.Priority),
-		Tags:                cfg.Tags,
-		ModelRewrite:        cfg.ModelRewrite,
-		Proxy:               cfg.Proxy,
-		OAuthConfig:         cfg.OAuthConfig,
-		NativeFormat:        nativeFormat,
-		TargetFormat:        targetFormat,
-		ClientType:          clientType,
-		HeaderOverrides:     cfg.HeaderOverrides,
-		ParameterOverrides:  cfg.ParameterOverrides,
-		MaxTokensFieldName:  cfg.MaxTokensFieldName,
-		RateLimitReset:      cfg.RateLimitReset,
-		RateLimitStatus:     cfg.RateLimitStatus,
-		EnhancedProtection:  cfg.EnhancedProtection,
-		SSEConfig:           cfg.SSEConfig,
-		OpenAIPreference:    openAIPreference,
+		ID:                 generateID(cfg.Name),
+		Name:               cfg.Name,
+		URLAnthropic:       cfg.URLAnthropic, // Anthropic格式URL
+		URLOpenAI:          cfg.URLOpenAI,    // OpenAI格式URL
+		URLGemini:          cfg.URLGemini,    // Gemini格式URL
+		EndpointType:       endpointType,
+		AuthType:           cfg.AuthType,
+		AuthValue:          cfg.AuthValue,
+		Enabled:            config.GetBoolWithDefault(cfg.Enabled, true, config.Default.Endpoint.Enabled),
+		Priority:           config.GetIntWithDefault(cfg.Priority, config.Default.Endpoint.Priority),
+		Tags:               cfg.Tags,
+		ModelRewrite:       cfg.ModelRewrite,
+		Proxy:              cfg.Proxy,
+		OAuthConfig:        cfg.OAuthConfig,
+		NativeFormat:       nativeFormat,
+		TargetFormat:       targetFormat,
+		ClientType:         clientType,
+		HeaderOverrides:    cfg.HeaderOverrides,
+		ParameterOverrides: cfg.ParameterOverrides,
+		MaxTokensFieldName: cfg.MaxTokensFieldName,
+		RateLimitReset:     cfg.RateLimitReset,
+		RateLimitStatus:    cfg.RateLimitStatus,
+		EnhancedProtection: cfg.EnhancedProtection,
+		SSEConfig:          cfg.SSEConfig,
+		OpenAIPreference:   openAIPreference,
 		SupportsResponses:  cfg.SupportsResponses,
-		CountTokensEnabled:  countTokensEnabled,
-		NativeCodexFormat:   nativeCodexFormat,
-		Status:              StatusActive,
-		LastCheck:           time.Now(),
-		RequestHistory:      utils.NewCircularBuffer(100, 140*time.Second),
+		CountTokensEnabled: countTokensEnabled,
+		NativeCodexFormat:  nativeCodexFormat,
+		Status:             StatusActive,
+		LastCheck:          time.Now(),
+		RequestHistory:     utils.NewCircularBuffer(100, 140*time.Second),
 	}
 }
 
 // inferEndpointType 自动推断端点类型
 func inferEndpointType(cfg config.EndpointConfig) string {
 	// 根据配置的URL推断端点类型
-	if cfg.URLAnthropic != "" && cfg.URLOpenAI == "" {
+	if cfg.URLGemini != "" && cfg.URLAnthropic == "" && cfg.URLOpenAI == "" {
+		// 只有Gemini URL
+		return "gemini"
+	}
+	if cfg.URLAnthropic != "" && cfg.URLOpenAI == "" && cfg.URLGemini == "" {
 		// 只有Anthropic URL
 		return "anthropic"
 	}
-	if cfg.URLOpenAI != "" && cfg.URLAnthropic == "" {
+	if cfg.URLOpenAI != "" && cfg.URLAnthropic == "" && cfg.URLGemini == "" {
 		// 只有OpenAI URL
 		return "openai"
 	}
-	if cfg.URLAnthropic != "" && cfg.URLOpenAI != "" {
-		// 两个URL都有，优先使用openai（支持Codex客户端智能路由）
-		// OpenAI类型端点可以同时服务Claude Code（通过url_anthropic）和Codex（通过url_openai）
+	if cfg.URLAnthropic != "" && cfg.URLOpenAI != "" && cfg.URLGemini == "" {
+		// Anthropic和OpenAI URL都有，优先使用openai（支持Codex客户端智能路由）
+		return "openai"
+	}
+	if cfg.URLAnthropic != "" && cfg.URLGemini != "" && cfg.URLOpenAI == "" {
+		// Anthropic和Gemini URL都有，优先使用anthropic
+		return "anthropic"
+	}
+	if cfg.URLOpenAI != "" && cfg.URLGemini != "" && cfg.URLAnthropic == "" {
+		// OpenAI和Gemini URL都有，优先使用openai
+		return "openai"
+	}
+	if cfg.URLAnthropic != "" && cfg.URLOpenAI != "" && cfg.URLGemini != "" {
+		// 三个URL都有，优先使用openai（最通用的格式）
 		return "openai"
 	}
 
@@ -345,7 +363,7 @@ func (e *Endpoint) ToTaggedEndpoint() interfaces.TaggedEndpoint {
 }
 
 // GetEffectiveURL 根据请求格式返回对应的URL
-// requestFormat: "anthropic" | "openai"
+// requestFormat: "anthropic" | "openai" | "gemini"
 func (e *Endpoint) GetEffectiveURL(requestFormat string) string {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
@@ -357,12 +375,18 @@ func (e *Endpoint) GetEffectiveURL(requestFormat string) string {
 	if requestFormat == "openai" && e.URLOpenAI != "" {
 		return e.URLOpenAI
 	}
+	if requestFormat == "gemini" && e.URLGemini != "" {
+		return e.URLGemini
+	}
 
-	// 默认策略：优先使用Anthropic URL，其次OpenAI URL
+	// 默认策略：优先使用Anthropic URL，其次OpenAI URL，最后Gemini URL
 	if e.URLAnthropic != "" {
 		return e.URLAnthropic
 	}
-	return e.URLOpenAI
+	if e.URLOpenAI != "" {
+		return e.URLOpenAI
+	}
+	return e.URLGemini
 }
 
 func (e *Endpoint) GetFullURL(path string) string {
@@ -370,7 +394,7 @@ func (e *Endpoint) GetFullURL(path string) string {
 }
 
 // HasURLForFormat 检查端点是否配置了指定格式的URL
-// requestFormat: "anthropic" | "openai"
+// requestFormat: "anthropic" | "openai" | "gemini"
 func (e *Endpoint) HasURLForFormat(requestFormat string) bool {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
@@ -380,9 +404,11 @@ func (e *Endpoint) HasURLForFormat(requestFormat string) bool {
 		return e.URLAnthropic != ""
 	case "openai":
 		return e.URLOpenAI != ""
+	case "gemini":
+		return e.URLGemini != ""
 	default:
 		// 未知格式或未指定，检查是否至少有一个URL
-		return e.URLAnthropic != "" || e.URLOpenAI != ""
+		return e.URLAnthropic != "" || e.URLOpenAI != "" || e.URLGemini != ""
 	}
 }
 
@@ -390,79 +416,100 @@ func (e *Endpoint) HasURLForFormat(requestFormat string) bool {
 // 支持格式转换：当端点没有对应格式的URL时，使用另一个家族的URL并依赖格式转换逻辑
 //
 // 规则：
-// 1. 优先使用对应格式的URL（OpenAI请求 → url_openai，Anthropic请求 → url_anthropic）
-// 2. 如果没有对应URL，回退到另一个家族的URL（依赖系统格式转换）
-// 3. 只有当两个URL都为空时才返回空字符串
+// 1. 仅在端点为指定格式配置了URL时返回构造后的结果
+// 2. 未配置对应格式的URL时直接返回空字符串，由调用方决定是否执行格式转换
+// 3. 当未指定格式时保持历史优先级（Anthropic → OpenAI → Gemini）
 func (e *Endpoint) GetFullURLWithFormat(path string, requestFormat string) string {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
 
-	// 获取对应格式的URL - 支持格式转换
-	baseURL := ""
-
-	if requestFormat == "anthropic" {
-		// Anthropic 请求优先使用 Anthropic URL，否则使用 OpenAI URL（通过格式转换）
-		if e.URLAnthropic != "" {
-			baseURL = e.URLAnthropic
-		} else if e.URLOpenAI != "" {
-			baseURL = e.URLOpenAI // 使用 OpenAI URL，系统会自动转换格式
-		} else {
-			// 两个 URL 都为空，无法处理
-			return ""
-		}
-	} else if requestFormat == "openai" {
-		// OpenAI 请求优先使用 OpenAI URL，否则使用 Anthropic URL（通过格式转换）
-		if e.URLOpenAI != "" {
-			baseURL = e.URLOpenAI
-		} else if e.URLAnthropic != "" {
-			baseURL = e.URLAnthropic // 使用 Anthropic URL，系统会自动转换格式
-		} else {
-			// 两个 URL 都为空，无法处理
-			return ""
-		}
-	} else {
+	// 获取对应格式的URL
+	var baseURL string
+	switch strings.ToLower(requestFormat) {
+	case "anthropic":
+		baseURL = e.URLAnthropic
+	case "openai":
+		baseURL = e.URLOpenAI
+	case "gemini":
+		baseURL = e.URLGemini
+	default:
 		// 未指定格式或格式未知 - 使用传统的优先级策略（向后兼容）
 		if e.URLAnthropic != "" {
 			baseURL = e.URLAnthropic
 		} else if e.URLOpenAI != "" {
 			baseURL = e.URLOpenAI
 		} else {
-			return ""
+			baseURL = e.URLGemini
 		}
 	}
 
-	// 智能添加/v1前缀（如果用户没有配置）
-	// Anthropic端点通常需要/v1，OpenAI端点通常已经包含/v1
-	if !strings.HasSuffix(baseURL, "/") && !strings.Contains(path, "/v1/") {
-		// 检查是否需要添加/v1
-		needsV1 := false
+	if baseURL == "" {
+		return ""
+	}
 
-		// Anthropic格式请求到Anthropic端点，且baseURL不包含/v1
-		if requestFormat == "anthropic" && strings.Contains(baseURL, "api.anthropic.com") {
-			needsV1 = true
-		}
-		// 其他Anthropic兼容端点，根据path判断
-		if requestFormat == "anthropic" && (strings.Contains(path, "/messages") || strings.Contains(path, "/complete")) {
-			needsV1 = !strings.Contains(baseURL, "/v1")
-		}
-		// OpenAI格式请求，如果baseURL没有/v1且path是标准OpenAI路径
-		if requestFormat == "openai" && (strings.Contains(path, "/chat/completions") || strings.Contains(path, "/completions")) {
-			needsV1 = !strings.Contains(baseURL, "/v1")
-		}
-
-		if needsV1 {
-			baseURL = baseURL + "/v1"
+	// 如果请求格式未指定，根据选中的URL推断
+	format := strings.ToLower(requestFormat)
+	if format == "" {
+		switch baseURL {
+		case e.URLAnthropic:
+			format = "anthropic"
+		case e.URLOpenAI:
+			format = "openai"
+		case e.URLGemini:
+			format = "gemini"
 		}
 	}
 
-	// 确保URL和path正确拼接
-	if strings.HasSuffix(baseURL, "/") && strings.HasPrefix(path, "/") {
-		return baseURL + path[1:] // 避免双斜杠
-	} else if !strings.HasSuffix(baseURL, "/") && !strings.HasPrefix(path, "/") {
-		return baseURL + "/" + path // 确保有斜杠分隔
-	} else {
-		return baseURL + path
+	trimmedBase := strings.TrimRight(baseURL, "/")
+
+	hasPathSegment := func(base, segment string) bool {
+		return strings.HasSuffix(base, segment) || strings.Contains(base, segment+"/")
 	}
+
+	// 智能添加版本前缀（当路径中没有显式的 /v1/ 时）
+	if !strings.Contains(path, "/v1/") {
+		switch format {
+		case "anthropic":
+			needsV1 := false
+			if strings.Contains(trimmedBase, "api.anthropic.com") && !hasPathSegment(trimmedBase, "/v1") {
+				needsV1 = true
+			}
+			if (strings.Contains(path, "/messages") || strings.Contains(path, "/complete")) && !hasPathSegment(trimmedBase, "/v1") {
+				needsV1 = true
+			}
+			if needsV1 {
+				trimmedBase = trimmedBase + "/v1"
+			}
+		case "openai":
+			if (strings.Contains(path, "/chat/completions") ||
+				strings.Contains(path, "/completions") ||
+				strings.Contains(path, "/responses")) && !hasPathSegment(trimmedBase, "/v1") {
+				trimmedBase = trimmedBase + "/v1"
+			}
+		case "gemini":
+			if strings.Contains(path, "/models/") && !hasPathSegment(trimmedBase, "/v1beta") {
+				trimmedBase = trimmedBase + "/v1beta"
+			}
+		}
+	}
+
+	// Gemini在添加v1beta后直接返回
+	if format == "gemini" && strings.Contains(trimmedBase, "/v1beta") && strings.Contains(path, "/models/") {
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		return trimmedBase + path
+	}
+
+	if path == "" || path == "/" {
+		return trimmedBase
+	}
+
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	return trimmedBase + path
 }
 
 // 优化 IsAvailable 方法，减少锁的持有时间
@@ -583,17 +630,6 @@ func generateID(name string) string {
 	return statistics.GenerateEndpointID(name)
 }
 
-// parseDuration 解析时间字符串，失败时返回默认值
-func parseDuration(durationStr string, defaultDuration time.Duration) time.Duration {
-	if durationStr == "" {
-		return defaultDuration
-	}
-	if duration, err := time.ParseDuration(durationStr); err == nil {
-		return duration
-	}
-	return defaultDuration
-}
-
 // CreateProxyClient 为这个端点创建支持代理的HTTP客户端
 func (e *Endpoint) CreateProxyClient(timeoutConfig config.ProxyTimeoutConfig) (*http.Client, error) {
 	e.mutex.RLock()
@@ -604,10 +640,10 @@ func (e *Endpoint) CreateProxyClient(timeoutConfig config.ProxyTimeoutConfig) (*
 	clientConfig := httpclient.ClientConfig{
 		Type: httpclient.ClientTypeEndpoint,
 		Timeouts: httpclient.TimeoutConfig{
-			TLSHandshake:   parseDuration(timeoutConfig.TLSHandshake, 10*time.Second),
-			ResponseHeader: parseDuration(timeoutConfig.ResponseHeader, 60*time.Second),
-			IdleConnection: parseDuration(timeoutConfig.IdleConnection, 90*time.Second),
-			OverallRequest: parseDuration(timeoutConfig.OverallRequest, 0),
+			TLSHandshake:   commonutils.ParseDuration(timeoutConfig.TLSHandshake, 10*time.Second),
+			ResponseHeader: commonutils.ParseDuration(timeoutConfig.ResponseHeader, 60*time.Second),
+			IdleConnection: commonutils.ParseDuration(timeoutConfig.IdleConnection, 90*time.Second),
+			OverallRequest: commonutils.ParseDuration(timeoutConfig.OverallRequest, 0),
 		},
 		ProxyConfig: proxyConfig,
 	}
@@ -625,10 +661,10 @@ func (e *Endpoint) CreateHealthClient(timeoutConfig config.HealthCheckTimeoutCon
 	clientConfig := httpclient.ClientConfig{
 		Type: httpclient.ClientTypeHealth,
 		Timeouts: httpclient.TimeoutConfig{
-			TLSHandshake:   parseDuration(timeoutConfig.TLSHandshake, 5*time.Second),
-			ResponseHeader: parseDuration(timeoutConfig.ResponseHeader, 30*time.Second),
-			IdleConnection: parseDuration(timeoutConfig.IdleConnection, 60*time.Second),
-			OverallRequest: parseDuration(timeoutConfig.OverallRequest, 30*time.Second),
+			TLSHandshake:   commonutils.ParseDuration(timeoutConfig.TLSHandshake, 5*time.Second),
+			ResponseHeader: commonutils.ParseDuration(timeoutConfig.ResponseHeader, 30*time.Second),
+			IdleConnection: commonutils.ParseDuration(timeoutConfig.IdleConnection, 60*time.Second),
+			OverallRequest: commonutils.ParseDuration(timeoutConfig.OverallRequest, 30*time.Second),
 		},
 		ProxyConfig: proxyConfig,
 	}
@@ -659,10 +695,10 @@ func (e *Endpoint) RefreshOAuthTokenWithCallback(timeoutConfig config.ProxyTimeo
 	clientConfig := httpclient.ClientConfig{
 		Type: httpclient.ClientTypeProxy,
 		Timeouts: httpclient.TimeoutConfig{
-			TLSHandshake:   parseDuration(timeoutConfig.TLSHandshake, 10*time.Second),
-			ResponseHeader: parseDuration(timeoutConfig.ResponseHeader, 60*time.Second),
-			IdleConnection: parseDuration(timeoutConfig.IdleConnection, 90*time.Second),
-			OverallRequest: parseDuration(timeoutConfig.OverallRequest, 30*time.Second),
+			TLSHandshake:   commonutils.ParseDuration(timeoutConfig.TLSHandshake, 10*time.Second),
+			ResponseHeader: commonutils.ParseDuration(timeoutConfig.ResponseHeader, 60*time.Second),
+			IdleConnection: commonutils.ParseDuration(timeoutConfig.IdleConnection, 90*time.Second),
+			OverallRequest: commonutils.ParseDuration(timeoutConfig.OverallRequest, 30*time.Second),
 		},
 		ProxyConfig: e.Proxy,
 	}
@@ -972,7 +1008,7 @@ func (e *Endpoint) GetLearnedUnsupportedParams() []string {
 // GetURL 获取主URL用于日志记录等场景 (优先Anthropic URL)
 // GetURL 返回端点的基础URL（用于日志记录和显示）
 // 优先返回 URLAnthropic,因为它通常是主URL
-// 如果只有 URLOpenAI,则返回它
+// 其次返回 URLOpenAI，最后返回 URLGemini
 func (e *Endpoint) GetURL() string {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
@@ -981,7 +1017,10 @@ func (e *Endpoint) GetURL() string {
 	if e.URLAnthropic != "" {
 		return e.URLAnthropic
 	}
-	return e.URLOpenAI
+	if e.URLOpenAI != "" {
+		return e.URLOpenAI
+	}
+	return e.URLGemini
 }
 
 // GetURLForFormat 根据请求格式返回对应的URL
@@ -996,12 +1035,18 @@ func (e *Endpoint) GetURLForFormat(requestFormat string) string {
 	if requestFormat == "anthropic" && e.URLAnthropic != "" {
 		return e.URLAnthropic
 	}
+	if requestFormat == "gemini" && e.URLGemini != "" {
+		return e.URLGemini
+	}
 
 	// 回退到默认逻辑
 	if e.URLAnthropic != "" {
 		return e.URLAnthropic
 	}
-	return e.URLOpenAI
+	if e.URLOpenAI != "" {
+		return e.URLOpenAI
+	}
+	return e.URLGemini
 }
 
 // SetDynamicSorter 设置动态排序器引用

@@ -89,8 +89,9 @@ function showEditEndpointModal(endpointName) {
         document.getElementById('endpoint-url-anthropic').value = endpoint.url;
         document.getElementById('endpoint-url-openai').value = '';
     } else {
-        document.getElementById('endpoint-url-anthropic').value = endpoint.url_anthropic || '';
-        document.getElementById('endpoint-url-openai').value = endpoint.url_openai || '';
+    document.getElementById('endpoint-url-anthropic').value = endpoint.url_anthropic || '';
+    document.getElementById('endpoint-url-openai').value = endpoint.url_openai || '';
+        document.getElementById('endpoint-url-gemini').value = endpoint.url_gemini || '';
     }
     document.getElementById('endpoint-enabled').checked = endpoint.enabled;
     
@@ -235,10 +236,11 @@ function saveEndpoint() {
     // 自定义URL验证：至少填写一个URL
     const urlAnthropic = document.getElementById('endpoint-url-anthropic').value.trim();
     const urlOpenAI = document.getElementById('endpoint-url-openai').value.trim();
+    const urlGemini = document.getElementById('endpoint-url-gemini').value.trim();
 
-    if (!urlAnthropic && !urlOpenAI) {
-        showAlert(T('at_least_one_url_required', '至少需要填写一个URL（Anthropic URL或OpenAI URL）'), 'danger');
-        return;
+    if (!urlAnthropic && !urlOpenAI && !urlGemini) {
+    showAlert(T('at_least_one_url_required', '至少需要填写一个URL（Anthropic URL、OpenAI URL 或 Gemini URL）'), 'danger');
+    return;
     }
 
     if (!form.checkValidity()) {
@@ -285,11 +287,12 @@ function saveEndpoint() {
 
     const responsesModeSelect = document.getElementById('responses-mode');
     const data = {
-        name: document.getElementById('endpoint-name').value,
-        url_anthropic: urlAnthropic === '' ? '' : urlAnthropic || undefined, // Anthropic URL - 明确发送空字符串来清空
-        url_openai: urlOpenAI === '' ? '' : urlOpenAI || undefined,       // OpenAI URL - 明确发送空字符串来清空
-        // endpoint_type 和 path_prefix 自动推断，不再需要提交
-        auth_type: authType,
+    name: document.getElementById('endpoint-name').value,
+    url_anthropic: urlAnthropic === '' ? '' : urlAnthropic || undefined, // Anthropic URL - 明确发送空字符串来清空
+    url_openai: urlOpenAI === '' ? '' : urlOpenAI || undefined,         // OpenAI URL - 明确发送空字符串来清空
+    url_gemini: urlGemini === '' ? '' : urlGemini || undefined,         // Gemini URL - 明确发送空字符串来清空
+    // endpoint_type 和 path_prefix 自动推断，不再需要提交
+    auth_type: authType,
         auth_value: authValue,
         enabled: document.getElementById('endpoint-enabled').checked,
         tags: tags,
@@ -394,13 +397,52 @@ function deleteEndpoint(endpointName) {
     });
 }
 
+function generateCopyEndpointName(endpointName) {
+    const existingNames = new Set((Array.isArray(currentEndpoints) ? currentEndpoints : []).map(ep => ep.name));
+    const baseName = `${endpointName}-copy`;
+    if (!existingNames.has(baseName)) {
+        return baseName;
+    }
+
+    let counter = 2;
+    let candidate = `${baseName}-${counter}`;
+    while (existingNames.has(candidate)) {
+        counter += 1;
+        candidate = `${baseName}-${counter}`;
+    }
+    return candidate;
+}
+
 function copyEndpoint(endpointName) {
     if (!confirm(T('confirm_copy_endpoint', '确定要复制端点 "{0}" 吗？').replace('{0}', endpointName))) {
         return;
     }
 
+    const promptLabel = T('enter_new_endpoint_name', '请输入复制后的端点名称');
+    const defaultName = generateCopyEndpointName(endpointName);
+    const nameInput = prompt(promptLabel, defaultName);
+    if (nameInput === null) {
+        return;
+    }
+
+    const newName = nameInput.trim();
+    if (!newName) {
+        showAlert(T('endpoint_name_required', '端点名称不能为空'), 'warning');
+        return;
+    }
+
+    const existingNames = new Set((Array.isArray(currentEndpoints) ? currentEndpoints : []).map(ep => ep.name));
+    if (existingNames.has(newName)) {
+        showAlert(T('endpoint_name_exists', '端点名称已存在，请使用其他名称'), 'warning');
+        return;
+    }
+
     apiRequest(`/admin/api/endpoints/${encodeURIComponent(endpointName)}/copy`, {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ new_name: newName })
     })
     .then(response => response.json())
     .then(data => {

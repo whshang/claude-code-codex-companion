@@ -153,6 +153,45 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 			result.Error = fmt.Sprintf("failed to marshal request: %v", err)
 			return result
 		}
+	} else if format == "gemini" {
+	// 使用Gemini格式测试
+	if ep.URLGemini == "" {
+	  result.Error = "endpoint does not have Gemini URL configured"
+			return result
+		}
+		testURL = ep.GetFullURLWithFormat("/v1beta/models/gemini-2.0-flash-exp:generateContent", "gemini")
+		result.URL = testURL
+
+		// 根据端点配置选择测试模型
+		testModel := s.selectTestModel(ep, "gemini")
+		if testModel == "test-model" {
+			testModel = "gemini-2.0-flash-exp"
+		}
+		originalModel = testModel
+
+		// Gemini格式请求体
+		reqBody := map[string]interface{}{
+			"contents": []map[string]interface{}{
+				{
+					"role":  "user",
+					"parts": []map[string]interface{}{
+						{"text": "Hi"},
+					},
+				},
+			},
+			"generationConfig": map[string]interface{}{
+				"maxOutputTokens": 10,
+			},
+		}
+		if stream {
+			reqBody["generationConfig"].(map[string]interface{})["stream"] = true
+		}
+
+		requestBody, err = json.Marshal(reqBody)
+		if err != nil {
+			result.Error = fmt.Sprintf("failed to marshal request: %v", err)
+			return result
+		}
 	} else {
 		result.Error = "invalid format: " + format
 		return result
@@ -184,14 +223,17 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 		req.Header.Set("x-stainless-runtime", "go")
 		req.Header.Set("x-stainless-runtime-version", "1.21.0")
 	} else if format == "openai" {
-		// 伪装成 OpenAI SDK 客户端（基于真实抓包数据）
-		// 参考：OpenAI/Python 1.10.0 的实际请求头
-		req.Header.Set("User-Agent", "OpenAI/Go 1.0.0")
-		req.Header.Set("x-stainless-lang", "go")
-		req.Header.Set("x-stainless-package-version", "1.0.0")
-		req.Header.Set("x-stainless-runtime", "go")
-		req.Header.Set("x-stainless-runtime-version", "1.21.0")
-		req.Header.Set("Openai-Beta", "responses=v1")
+	// 伪装成 OpenAI SDK 客户端（基于真实抓包数据）
+	// 参考：OpenAI/Python 1.10.0 的实际请求头
+	req.Header.Set("User-Agent", "OpenAI/Go 1.0.0")
+	req.Header.Set("x-stainless-lang", "go")
+	req.Header.Set("x-stainless-package-version", "1.0.0")
+	req.Header.Set("x-stainless-runtime", "go")
+	req.Header.Set("x-stainless-runtime-version", "1.21.0")
+	req.Header.Set("Openai-Beta", "responses=v1")
+	} else if format == "gemini" {
+		// Gemini API请求头
+		req.Header.Set("User-Agent", "GoogleAI/Go 1.0.0")
 	}
 
 	// 添加认证头
@@ -207,21 +249,28 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 			authType = "auto"
 		}
 
-		if authType == "api_key" || authType == "x-api-key" {
-			// 使用 x-api-key 头（仅限原生 Anthropic API）
-			if strings.HasPrefix(authValue, "Bearer ") {
-				req.Header.Set("x-api-key", strings.TrimPrefix(authValue, "Bearer "))
-			} else {
-				req.Header.Set("x-api-key", authValue)
-			}
-			// 某些端点需要同时设置 Authorization
-			if format == "openai" || !strings.Contains(ep.GetURLForFormat(format), "api.anthropic.com") {
-				if !strings.HasPrefix(authValue, "Bearer ") {
-					req.Header.Set("Authorization", "Bearer "+authValue)
-				} else {
-					req.Header.Set("Authorization", authValue)
-				}
-			}
+		if format == "gemini" {
+		// Gemini API使用 x-goog-api-key 头
+		if strings.HasPrefix(authValue, "Bearer ") {
+		req.Header.Set("x-goog-api-key", strings.TrimPrefix(authValue, "Bearer "))
+		} else {
+		req.Header.Set("x-goog-api-key", authValue)
+		}
+		} else if authType == "api_key" || authType == "x-api-key" {
+		// 使用 x-api-key 头（仅限原生 Anthropic API）
+		if strings.HasPrefix(authValue, "Bearer ") {
+		req.Header.Set("x-api-key", strings.TrimPrefix(authValue, "Bearer "))
+		} else {
+		req.Header.Set("x-api-key", authValue)
+		}
+		// 某些端点需要同时设置 Authorization
+		 if format == "openai" || !strings.Contains(ep.GetURLForFormat(format), "api.anthropic.com") {
+		 if !strings.HasPrefix(authValue, "Bearer ") {
+		  req.Header.Set("Authorization", "Bearer "+authValue)
+		} else {
+		  req.Header.Set("Authorization", authValue)
+		}
+		}
 		} else {
 			// auth_token, bearer, auto 或其他类型：使用 Authorization 头
 			if !strings.HasPrefix(authValue, "Bearer ") && !strings.HasPrefix(authValue, "Basic ") {
@@ -818,32 +867,47 @@ func (s *AdminServer) testSingleEndpoint(ep *endpoint.Endpoint) *BatchTestResult
 	s.logger.Info(fmt.Sprintf("🧪 Testing endpoint: %s", ep.Name), nil)
 
 	// 测试Anthropic格式（如果配置了）
-    if ep.URLAnthropic != "" {
-        anthropicResult := s.testEndpointFormat(ep, "anthropic", timeout)
-        result.Results = append(result.Results, anthropicResult)
-		if anthropicResult.Success {
-			s.logger.Info(fmt.Sprintf("  ✅ Anthropic format test passed (%dms)", anthropicResult.ResponseTime), nil)
-			// 记录测试成功到端点统计
-			ep.RecordRequest(true, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()), time.Duration(anthropicResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(anthropicResult.ResponseTime)*time.Millisecond)
-		} else {
-			s.logger.Info(fmt.Sprintf("  ❌ Anthropic format test failed: %s", anthropicResult.Error), nil)
-			// 记录测试失败到端点统计
-			ep.RecordRequest(false, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()), time.Duration(anthropicResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(anthropicResult.ResponseTime)*time.Millisecond)
-		}
+	if ep.URLAnthropic != "" {
+	anthropicResult := s.testEndpointFormat(ep, "anthropic", timeout)
+	result.Results = append(result.Results, anthropicResult)
+	if anthropicResult.Success {
+	s.logger.Info(fmt.Sprintf("  ✅ Anthropic format test passed (%dms)", anthropicResult.ResponseTime), nil)
+	// 记录测试成功到端点统计
+	ep.RecordRequest(true, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()), time.Duration(anthropicResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(anthropicResult.ResponseTime)*time.Millisecond)
+	} else {
+	s.logger.Info(fmt.Sprintf("  ❌ Anthropic format test failed: %s", anthropicResult.Error), nil)
+	// 记录测试失败到端点统计
+	ep.RecordRequest(false, fmt.Sprintf("test-anthropic-%d", time.Now().UnixNano()), time.Duration(anthropicResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(anthropicResult.ResponseTime)*time.Millisecond)
+	}
 	}
 
 	// 测试OpenAI格式（如果配置了）
-    if ep.URLOpenAI != "" {
-        openaiResult := s.testOpenAIFormatWithRetry(ep, timeout)
-        result.Results = append(result.Results, openaiResult)
-		if openaiResult.Success {
-			s.logger.Info(fmt.Sprintf("  ✅ OpenAI format test passed (%dms)", openaiResult.ResponseTime), nil)
+	if ep.URLOpenAI != "" {
+	openaiResult := s.testOpenAIFormatWithRetry(ep, timeout)
+	result.Results = append(result.Results, openaiResult)
+	if openaiResult.Success {
+	s.logger.Info(fmt.Sprintf("  ✅ OpenAI format test passed (%dms)", openaiResult.ResponseTime), nil)
+	// 记录测试成功到端点统计
+	ep.RecordRequest(true, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()), time.Duration(openaiResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(openaiResult.ResponseTime)*time.Millisecond)
+	} else {
+	s.logger.Info(fmt.Sprintf("  ❌ OpenAI format test failed: %s", openaiResult.Error), nil)
+	// 记录测试失败到端点统计
+	ep.RecordRequest(false, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()), time.Duration(openaiResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(openaiResult.ResponseTime)*time.Millisecond)
+	}
+	}
+
+	// 测试Gemini格式（如果配置了）
+    if ep.URLGemini != "" {
+        geminiResult := s.testEndpointFormat(ep, "gemini", timeout)
+        result.Results = append(result.Results, geminiResult)
+		if geminiResult.Success {
+			s.logger.Info(fmt.Sprintf("  ✅ Gemini format test passed (%dms)", geminiResult.ResponseTime), nil)
 			// 记录测试成功到端点统计
-			ep.RecordRequest(true, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()), time.Duration(openaiResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(openaiResult.ResponseTime)*time.Millisecond)
+			ep.RecordRequest(true, fmt.Sprintf("test-gemini-%d", time.Now().UnixNano()), time.Duration(geminiResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(geminiResult.ResponseTime)*time.Millisecond)
 		} else {
-			s.logger.Info(fmt.Sprintf("  ❌ OpenAI format test failed: %s", openaiResult.Error), nil)
+			s.logger.Info(fmt.Sprintf("  ❌ Gemini format test failed: %s", geminiResult.Error), nil)
 			// 记录测试失败到端点统计
-			ep.RecordRequest(false, fmt.Sprintf("test-openai-%d", time.Now().UnixNano()), time.Duration(openaiResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(openaiResult.ResponseTime)*time.Millisecond)
+			ep.RecordRequest(false, fmt.Sprintf("test-gemini-%d", time.Now().UnixNano()), time.Duration(geminiResult.PerformanceMetrics.FirstByteTime)*time.Millisecond, time.Duration(geminiResult.ResponseTime)*time.Millisecond)
 		}
 	}
 	result.TotalTime = time.Since(startTime).Milliseconds()
@@ -910,13 +974,15 @@ func hasSuccessfulTest(result *BatchTestResult, format string) bool {
 // selectTestModel 根据端点配置和格式选择合适的测试模型
 // 返回应用模型重写规则后的实际模型
 func (s *AdminServer) selectTestModel(ep *endpoint.Endpoint, format string) string {
-	// 根据格式返回默认测试模型
-	var defaultModel string
-	if format == "anthropic" {
-		defaultModel = "claude-sonnet-4-5-20250929"
-	} else if format == "openai" {
-		defaultModel = "gpt-5"
-	} else {
+// 根据格式返回默认测试模型
+var defaultModel string
+if format == "anthropic" {
+defaultModel = "claude-sonnet-4-5-20250929"
+} else if format == "openai" {
+defaultModel = "gpt-5"
+} else if format == "gemini" {
+defaultModel = "gemini-2.0-flash-exp"
+} else {
 		return "test-model"
 	}
 
@@ -1112,11 +1178,13 @@ func (s *AdminServer) BatchTestStreaming() []*BatchTestResult {
 
 // getEndpointByName 根据名称获取端点
 func (s *AdminServer) getEndpointByName(name string) *endpoint.Endpoint {
-	allEndpoints := s.endpointManager.GetAllEndpoints()
-	for _, ep := range allEndpoints {
-		if ep.Name == name {
-			return ep
-		}
-	}
-	return nil
+allEndpoints := s.endpointManager.GetAllEndpoints()
+for _, ep := range allEndpoints {
+if ep.Name == name {
+return ep
 }
+}
+return nil
+}
+
+

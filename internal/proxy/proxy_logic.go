@@ -1,23 +1,23 @@
 package proxy
 
 import (
-    "bytes"
-    "compress/gzip"
-    "crypto/md5"
-    "encoding/hex"
-    "encoding/json"
-    "fmt"
-    "io"
-    "net/http"
-    "regexp"
-    "strconv"
-    "strings"
-    "time"
+	"bytes"
+	"compress/gzip"
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
 
 	"claude-code-codex-companion/internal/conversion"
 	"claude-code-codex-companion/internal/endpoint"
-    "claude-code-codex-companion/internal/tagging"
-    "claude-code-codex-companion/internal/utils"
+	"claude-code-codex-companion/internal/tagging"
+	"claude-code-codex-companion/internal/utils"
 	"claude-code-codex-companion/internal/validator"
 
 	"github.com/gin-gonic/gin"
@@ -40,9 +40,9 @@ type modelRewriteCache struct {
 }
 
 type requestProcessingCache struct {
-    originalBody  []byte
-    conversions   map[string]cachedConversion
-    modelRewrites map[string]*modelRewriteCache
+	originalBody  []byte
+	conversions   map[string]cachedConversion
+	modelRewrites map[string]*modelRewriteCache
 }
 
 // sseFilterWriter intercepts Responses SSE events to detect and map text-based tool calls
@@ -207,8 +207,131 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		updateSupportsResponsesContext(c, ep)
 	}
 
+	// Extract tags from taggedRequest
+	var tags []string
+	if taggedRequest != nil {
+		tags = taggedRequest.Tags
+	}
+
+	processingCache := getRequestProcessingCache(c, requestBody)
+
+	// 解析端点支持的上游格式，并决定是否需要格式转换
+	var conversionContext *conversion.ConversionContext
+	needsConversion := false
+	actualEndpointFormat := ""
+
+	if formatDetection != nil && formatDetection.Format != utils.FormatUnknown {
+		switch formatDetection.Format {
+		case utils.FormatAnthropic:
+			if ep.URLAnthropic != "" {
+				actualEndpointFormat = "anthropic"
+				endpointRequestFormat = "anthropic"
+			} else if ep.URLOpenAI != "" {
+				actualEndpointFormat = "openai"
+				endpointRequestFormat = "openai"
+				needsConversion = true
+			} else if ep.URLGemini != "" {
+				actualEndpointFormat = "gemini"
+				endpointRequestFormat = "gemini"
+				needsConversion = true
+			}
+		case utils.FormatOpenAI:
+			if ep.URLOpenAI != "" {
+				actualEndpointFormat = "openai"
+				endpointRequestFormat = "openai"
+			} else if ep.URLAnthropic != "" {
+				actualEndpointFormat = "anthropic"
+				endpointRequestFormat = "anthropic"
+				needsConversion = true
+			} else if ep.URLGemini != "" {
+				actualEndpointFormat = "gemini"
+				endpointRequestFormat = "gemini"
+				needsConversion = true
+			}
+		case utils.RequestFormat("gemini"):
+			if ep.URLGemini != "" {
+				actualEndpointFormat = "gemini"
+				endpointRequestFormat = "gemini"
+			} else if ep.URLOpenAI != "" {
+				actualEndpointFormat = "openai"
+				endpointRequestFormat = "openai"
+				needsConversion = true
+			} else if ep.URLAnthropic != "" {
+				actualEndpointFormat = "anthropic"
+				endpointRequestFormat = "anthropic"
+				needsConversion = true
+			}
+		default:
+			if ep.URLAnthropic != "" {
+				actualEndpointFormat = "anthropic"
+				if endpointRequestFormat == "" {
+					endpointRequestFormat = "anthropic"
+				}
+			} else if ep.URLOpenAI != "" {
+				actualEndpointFormat = "openai"
+				if endpointRequestFormat == "" {
+					endpointRequestFormat = "openai"
+				}
+			} else if ep.URLGemini != "" {
+				actualEndpointFormat = "gemini"
+				if endpointRequestFormat == "" {
+					endpointRequestFormat = "gemini"
+				}
+			}
+		}
+	} else {
+		if ep.URLAnthropic != "" {
+			actualEndpointFormat = "anthropic"
+		} else if ep.URLOpenAI != "" {
+			actualEndpointFormat = "openai"
+		} else if ep.URLGemini != "" {
+			actualEndpointFormat = "gemini"
+		}
+		if endpointRequestFormat == "" {
+			endpointRequestFormat = actualEndpointFormat
+		}
+	}
+
+	if actualEndpointFormat == "" && endpointRequestFormat == "" {
+		targetFormat := clientRequestFormat
+		if targetFormat == "" {
+			targetFormat = "unknown"
+		}
+		s.logger.Debug("Skipping endpoint: no compatible upstream URL for request format", map[string]interface{}{
+			"endpoint":        ep.Name,
+			"request_format":  targetFormat,
+			"available_urls":  map[string]bool{"anthropic": ep.URLAnthropic != "", "openai": ep.URLOpenAI != "", "gemini": ep.URLGemini != ""},
+			"endpoint_type":   ep.EndpointType,
+			"inbound_path":    inboundPath,
+			"effective_path":  effectivePath,
+			"client_detected": formatDetection != nil && formatDetection.Format != utils.FormatUnknown,
+		})
+		c.Set("skip_health_record", true)
+		c.Set("last_error", fmt.Errorf("endpoint %s has no compatible URL for request format %s", ep.Name, targetFormat))
+		c.Set("last_status_code", http.StatusBadGateway)
+		elapsed := time.Since(endpointStartTime)
+		return false, true, elapsed, 0
+	}
+
+	if clientRequestFormat != "" && actualEndpointFormat != "" && clientRequestFormat != actualEndpointFormat {
+		needsConversion = true
+	}
+
+	s.logger.Debug("Format routing decision", map[string]interface{}{
+		"request_format":         clientRequestFormat,
+		"actual_endpoint_format": actualEndpointFormat,
+		"needs_conversion":       needsConversion,
+		"detection_confidence": func() float64 {
+			if formatDetection != nil {
+				return formatDetection.Confidence
+			}
+			return 0
+		}(),
+	})
+
+	actuallyUsingOpenAIURL := (actualEndpointFormat == "openai")
+
 	targetURL := ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
-	// 检查 GetFullURLWithFormat 返回的URL是否为空
 	if targetURL == "" {
 		s.logger.Debug("Skipping endpoint: GetFullURLWithFormat returned empty URL", map[string]interface{}{
 			"endpoint":       ep.Name,
@@ -221,14 +344,6 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		elapsed := time.Since(endpointStartTime)
 		return false, true, elapsed, 0
 	}
-
-	// Extract tags from taggedRequest
-	var tags []string
-	if taggedRequest != nil {
-		tags = taggedRequest.Tags
-	}
-
-	processingCache := getRequestProcessingCache(c, requestBody)
 
 	// 创建HTTP请求用于模型重写处理
 	tempReq, err := http.NewRequest(c.Request.Method, targetURL, bytes.NewReader(requestBody))
@@ -297,115 +412,51 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			finalRequestBody = requestBody
 		}
 
-	processingCache.StoreModelRewrite(ep.Name, finalRequestBody, originalModel, rewrittenModel)
+		processingCache.StoreModelRewrite(ep.Name, finalRequestBody, originalModel, rewrittenModel)
 	}
 
 	// 格式转换（在模型重写之后）
 	// 关键修复：只有当请求格式与端点格式不匹配时才需要转换
-	var conversionContext *conversion.ConversionContext
-    // 判断是否需要格式转换
-    // 关键修复：根据实际使用的URL来判断端点格式，而不是endpoint_type
-    needsConversion := false
-    actualEndpointFormat := ""
-
-	if formatDetection != nil && formatDetection.Format != utils.FormatUnknown {
-		// 确定实际使用的URL类型 - 严格匹配，不跨家族
-		requestIsAnthropic := (formatDetection.Format == utils.FormatAnthropic)
-		requestIsOpenAI := (formatDetection.Format == utils.FormatOpenAI)
-
-		if requestIsAnthropic {
-			// Anthropic 请求：仅当有 Anthropic URL 时才使用
-			if ep.URLAnthropic != "" {
-				actualEndpointFormat = "anthropic"
-			} else {
-				// 没有 Anthropic URL，这个端点不能服务 Anthropic 请求
-				// 该端点应该已经在早期检查中被跳过
-				s.logger.Debug("Anthropic request but no Anthropic URL", map[string]interface{}{
-					"endpoint": ep.Name,
-				})
-				actualEndpointFormat = "anthropic" // 设置为期望的格式，后续会报错
-			}
-		} else if requestIsOpenAI {
-			// OpenAI 请求：仅当有 OpenAI URL 时才使用
-			if ep.URLOpenAI != "" {
-				actualEndpointFormat = "openai"
-			} else {
-				// 没有 OpenAI URL，这个端点不能服务 OpenAI 请求
-				// 该端点应该已经在早期检查中被跳过
-				s.logger.Debug("OpenAI request but no OpenAI URL", map[string]interface{}{
-					"endpoint": ep.Name,
-				})
-				actualEndpointFormat = "openai" // 设置为期望的格式，后续会报错
-			}
-		} else {
-			// 未知格式：使用传统优先级策略（向后兼容）
-			if ep.URLAnthropic != "" {
-				actualEndpointFormat = "anthropic"
-			} else if ep.URLOpenAI != "" {
-				actualEndpointFormat = "openai"
-			} else {
-				actualEndpointFormat = "openai" // 默认
-			}
-		}
-
-		// 判断是否需要格式转换
-		// requestIsAnthropic 和 requestIsOpenAI 已在上面定义
-		// 由于路由层已经确保不会跨家族，这里的转换逻辑已被简化
-		// needsConversion 默认为 false，除非有特定的同家族转换需求
-
-		s.logger.Debug("Format conversion decision", map[string]interface{}{
-			"request_format":         formatDetection.Format,
-			"actual_endpoint_format": actualEndpointFormat,
-			"needs_conversion":       needsConversion,
-			"detection_confidence":   formatDetection.Confidence,
-		})
-	} else {
-		// 没有格式检测结果，使用默认逻辑
-		needsConversion = (ep.EndpointType == "openai")
-	}
-
-    actuallyUsingOpenAIURL := (actualEndpointFormat == "openai")
-
-    if needsConversion {
+	if needsConversion {
 		s.logger.Info(fmt.Sprintf("Starting request conversion for endpoint type: %s", ep.EndpointType))
 
 		var convertedBody []byte
 		var ctx *conversion.ConversionContext
 		var err error
 
-        // Anthropic → OpenAI 请求转换
-        reqConverter := conversion.NewRequestConverter(s.logger)
-        endpointInfo := &conversion.EndpointInfo{
-            Type:               ep.EndpointType,
-            MaxTokensFieldName: ep.MaxTokensFieldName,
-        }
+		// Anthropic → OpenAI 请求转换
+		reqConverter := conversion.NewRequestConverter(s.logger)
+		endpointInfo := &conversion.EndpointInfo{
+			Type:               ep.EndpointType,
+			MaxTokensFieldName: ep.MaxTokensFieldName,
+		}
 
-        convertedBody, ctx, err = reqConverter.Convert(finalRequestBody, endpointInfo)
-        if err != nil {
-            s.logger.Error("Request format conversion failed", err)
-            duration := time.Since(endpointStartTime)
-            s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
-            c.JSON(http.StatusBadRequest, gin.H{"error": "Request format conversion failed", "details": err.Error()})
-            c.Set("last_error", err)
-            c.Set("last_status_code", http.StatusBadRequest)
-            return false, false, duration, 0
-        }
-        conversionContext = ctx
+		convertedBody, ctx, err = reqConverter.Convert(finalRequestBody, endpointInfo)
+		if err != nil {
+			s.logger.Error("Request format conversion failed", err)
+			duration := time.Since(endpointStartTime)
+			s.logSimpleRequest(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path, requestBody, finalRequestBody, c, nil, nil, nil, duration, err, false, tags, "", originalModel, rewrittenModel, attemptNumber)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Request format conversion failed", "details": err.Error()})
+			c.Set("last_error", err)
+			c.Set("last_status_code", http.StatusBadRequest)
+			return false, false, duration, 0
+		}
+		conversionContext = ctx
 
 		finalRequestBody = convertedBody
 
-        // 如果进行了格式转换，也需要转换路径（仅针对标准消息路径）
-        if clientRequestFormat == "anthropic" && actualEndpointFormat == "openai" {
-            // Anthropic → OpenAI: /v1/messages → /v1/chat/completions
-            if effectivePath == "/v1/messages" {
-                effectivePath = "/v1/chat/completions"
-                s.logger.Debug("Path converted for format conversion", map[string]interface{}{
-                    "original_path":  "/v1/messages",
-                    "converted_path": "/v1/chat/completions",
-                    "conversion":     "anthropic_to_openai",
-                })
-            }
-        }
+		// 如果进行了格式转换，也需要转换路径（仅针对标准消息路径）
+		if clientRequestFormat == "anthropic" && actualEndpointFormat == "openai" {
+			// Anthropic → OpenAI: /v1/messages → /chat/completions （避免重复 /v1）
+			if effectivePath == "/v1/messages" {
+				effectivePath = "/chat/completions"
+				s.logger.Debug("Path converted for format conversion", map[string]interface{}{
+					"original_path":  "/v1/messages",
+					"converted_path": "/chat/completions",
+					"conversion":     "anthropic_to_openai",
+				})
+			}
+		}
 
 		s.logger.Debug("Request format converted successfully", map[string]interface{}{
 			"endpoint_type":  ep.EndpointType,
@@ -420,7 +471,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 
 		// 重新构建targetURL，因为路径可能已经改变
 		targetURL = ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
-    } else {
+	} else {
 		s.logger.Debug("Skipping format conversion (not needed)", map[string]interface{}{
 			"request_format": func() string {
 				if formatDetection != nil {
@@ -432,40 +483,40 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		})
 	}
 
-    // 路径转换（基于实际上游格式）
-    // - 当客户端为 Codex (/responses) 且上游为 OpenAI：根据偏好将路径保持为 /responses 或降级为 /chat/completions
-    // - 当客户端为 Codex (/responses) 且上游为 Anthropic：将路径映射为 /v1/messages
-    if inboundPath == "/responses" {
-        if actualEndpointFormat == "openai" {
-            if ep.OpenAIPreference == "chat_completions" {
-                effectivePath = "/chat/completions"
-                s.logger.Debug("Early path conversion applied (OpenAI upstream, prefer chat_completions)", map[string]interface{}{
-                    "endpoint":   ep.Name,
-                    "inbound":    "/responses",
-                    "effective":  "/chat/completions",
-                    "preference": ep.OpenAIPreference,
-                })
-            } else {
-                // 保持 /responses
-                effectivePath = "/responses"
-            }
-        } else {
-            // 上游是Anthropic，映射到 /v1/messages
-            effectivePath = "/v1/messages"
-            s.logger.Debug("Path converted for Codex->Anthropic routing", map[string]interface{}{
-                "endpoint":  ep.Name,
-                "inbound":   "/responses",
-                "effective": "/v1/messages",
-            })
-        }
-        // 路径变化后，更新 targetURL
-        targetURL = ep.GetFullURLWithFormat(effectivePath, func() string {
-            if actualEndpointFormat != "" {
-                return actualEndpointFormat
-            }
-            return endpointRequestFormat
-        }())
-    }
+	// 路径转换（基于实际上游格式）
+	// - 当客户端为 Codex (/responses) 且上游为 OpenAI：根据偏好将路径保持为 /responses 或降级为 /chat/completions
+	// - 当客户端为 Codex (/responses) 且上游为 Anthropic：将路径映射为 /v1/messages
+	if inboundPath == "/responses" {
+		if actualEndpointFormat == "openai" {
+			if ep.OpenAIPreference == "chat_completions" {
+				effectivePath = "/chat/completions"
+				s.logger.Debug("Early path conversion applied (OpenAI upstream, prefer chat_completions)", map[string]interface{}{
+					"endpoint":   ep.Name,
+					"inbound":    "/responses",
+					"effective":  "/chat/completions",
+					"preference": ep.OpenAIPreference,
+				})
+			} else {
+				// 保持 /responses
+				effectivePath = "/responses"
+			}
+		} else {
+			// 上游是Anthropic，映射到 /v1/messages
+			effectivePath = "/v1/messages"
+			s.logger.Debug("Path converted for Codex->Anthropic routing", map[string]interface{}{
+				"endpoint":  ep.Name,
+				"inbound":   "/responses",
+				"effective": "/v1/messages",
+			})
+		}
+		// 路径变化后，更新 targetURL
+		targetURL = ep.GetFullURLWithFormat(effectivePath, func() string {
+			if actualEndpointFormat != "" {
+				return actualEndpointFormat
+			}
+			return endpointRequestFormat
+		}())
+	}
 
 	// Codex /responses 格式转换为 OpenAI /chat/completions 格式
 	// 智能自适应逻辑：
@@ -481,7 +532,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 	codexNeedsConversion := false
 	// 关键修复：检查实际使用的URL类型，而不是endpoint_type
 	// 当请求格式是openai且路径是/responses时，需要考虑Codex转换
-    if actualEndpointFormat == "openai" && inboundPath == "/responses" {
+	if actualEndpointFormat == "openai" && inboundPath == "/responses" {
 		// 优先使用配置的偏好设置
 		preference := ep.OpenAIPreference
 		if preference == "" {
@@ -517,7 +568,7 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 			// 自动探测逻辑（原有逻辑）
 			if ep.NativeCodexFormat == nil {
 				// 首次请求，使用原生格式尝试（收到400后会自动转换并重试）
-            s.logger.Info("First /responses request to endpoint, trying native Codex format (auto)", map[string]interface{}{
+				s.logger.Info("First /responses request to endpoint, trying native Codex format (auto)", map[string]interface{}{
 					"endpoint": ep.Name,
 				})
 				codexNeedsConversion = false
@@ -551,10 +602,10 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 		}
 	}
 
-    if codexNeedsConversion {
+	if codexNeedsConversion {
 		// 将 Codex 格式转换为 OpenAI Chat Completions，并切换路径到 /chat/completions
 		// 大多数 OpenAI 兼容端点（包括 88code）不支持 /responses
-        if inboundPath == "/responses" {
+		if inboundPath == "/responses" {
 			effectivePath = "/chat/completions"
 			targetURL = ep.GetFullURLWithFormat(effectivePath, endpointRequestFormat)
 		}
@@ -582,13 +633,13 @@ func (s *Server) proxyToEndpoint(c *gin.Context, ep *endpoint.Endpoint, path str
 				"body": bodyPreview,
 			})
 
-	            // 确保 Codex /responses 转 Chat /chat/completions 的上游启用流式
-            if inboundPath == "/responses" && effectivePath == "/chat/completions" {
-                if updated, changed := ensureOpenAIStreamTrue(finalRequestBody); changed {
-                    finalRequestBody = updated
-                    s.logger.Debug("Ensured OpenAI chat request uses streaming for Codex /responses")
-                }
-            }
+			// 确保 Codex /responses 转 Chat /chat/completions 的上游启用流式
+			if inboundPath == "/responses" && effectivePath == "/chat/completions" {
+				if updated, changed := ensureOpenAIStreamTrue(finalRequestBody); changed {
+					finalRequestBody = updated
+					s.logger.Debug("Ensured OpenAI chat request uses streaming for Codex /responses")
+				}
+			}
 		}
 	}
 
@@ -713,7 +764,7 @@ attemptLoop:
 			// 只移除真正特有的头信息
 			if key == "Openai-Beta" || key == "openai-beta" {
 				s.logger.Debug("Preserving OpenAI-Beta header for potential端点兼容性", map[string]interface{}{
-					"header": key,
+					"header":   key,
 					"endpoint": ep.Name,
 				})
 				// 不再跳过，让 OpenAI-Beta 头继续传递
@@ -1146,7 +1197,7 @@ attemptLoop:
 	originalContentType := resp.Header.Get("Content-Type")
 	isStreamingResponse := strings.Contains(strings.ToLower(originalContentType), "text/event-stream")
 	if isStreamingResponse {
-        return s.handleStreamingResponse(
+		return s.handleStreamingResponse(
 			c,
 			resp,
 			req,
@@ -1347,7 +1398,7 @@ attemptLoop:
 		// 如果执行到这里，说明代码逻辑可能有问题
 	}
 
-    // 移除 Anthropic -> OpenAI 响应转换（跨家族转换已弃用）
+	// 移除 Anthropic -> OpenAI 响应转换（跨家族转换已弃用）
 
 	// 应用响应模型重写（如果进行了请求模型重写）
 	finalResponseBody := convertedResponseBody
@@ -1408,18 +1459,67 @@ attemptLoop:
 			finalResponseBody = s.convertChatCompletionsToResponsesSSE(finalResponseBody, ep.Name)
 		}
 	} else {
-    // 非流式响应的Codex格式转换
-    formatDetection, _ := c.Get("format_detection")
-    isCodexClient := false
-    if fd, ok := formatDetection.(*utils.FormatDetectionResult); ok {
-        isCodexClient = (fd.ClientType == utils.ClientCodex)
-    }
+		// Anthropic 客户端：OpenAI JSON → Anthropic JSON
+		if clientRequestFormat == "anthropic" && actuallyUsingOpenAIURL {
+			if converted, err := conversion.ConvertChatResponseJSONToAnthropic(finalResponseBody); err != nil {
+				s.logger.Error("Failed to convert OpenAI JSON to Anthropic format", err, map[string]interface{}{
+					"endpoint": ep.Name,
+				})
+			} else if len(converted) > 0 {
+				finalResponseBody = converted
+				actualEndpointFormat = "anthropic"
+				c.Header("Content-Length", fmt.Sprintf("%d", len(finalResponseBody)))
+				c.Header("Content-Type", "application/json")
+				if conversionStages != nil {
+					addConversionStage(&conversionStages, "response:openai->anthropic")
+				}
+			}
+		}
 
-    // 如果是Codex客户端，则统一转换为 /responses 格式（无论上游是OpenAI还是Anthropic；Anthropic场景已在上面先转为OpenAI）
-    if isCodexClient {
+		if errText, hasError := detectUpstreamErrorResponse(finalResponseBody); hasError {
+			duration := time.Since(endpointStartTime)
+			errObj := fmt.Errorf("upstream error: %s", errText)
+			if conversionStages != nil {
+				addConversionStage(&conversionStages, "response:upstream-error")
+				setConversionContext(c, conversionStages)
+			}
+			s.logSimpleRequest(
+				requestID,
+				ep.GetURLForFormat(endpointRequestFormat),
+				c.Request.Method,
+				path,
+				requestBody,
+				finalRequestBody,
+				c,
+				req,
+				resp,
+				finalResponseBody,
+				duration,
+				errObj,
+				isStreaming,
+				tags,
+				overrideInfo,
+				originalModel,
+				rewrittenModel,
+				attemptNumber,
+			)
+			c.Set("last_error", errObj)
+			c.Set("last_status_code", http.StatusBadGateway)
+			return false, true, duration, 0
+		}
+
+		// 非流式响应的Codex格式转换
+		formatDetection, _ := c.Get("format_detection")
+		isCodexClient := false
+		if fd, ok := formatDetection.(*utils.FormatDetectionResult); ok {
+			isCodexClient = (fd.ClientType == utils.ClientCodex)
+		}
+
+		// 如果是Codex客户端，则统一转换为 /responses 格式（无论上游是OpenAI还是Anthropic；Anthropic场景已在上面先转为OpenAI）
+		if isCodexClient {
 			// 检查客户端是否期望流式响应
 			clientExpectsStream := s.isRequestExpectingStream(c.Request)
-			
+
 			// 解析请求体检查 stream 参数
 			if !clientExpectsStream && len(requestBody) > 0 {
 				var reqData map[string]interface{}
@@ -1429,7 +1529,7 @@ attemptLoop:
 					}
 				}
 			}
-			
+
 			if clientExpectsStream {
 				// 客户端期望流式响应，将JSON转换为SSE流
 				s.logger.Info("Converting non-streaming JSON to SSE for Codex (client expects stream)", map[string]interface{}{
@@ -1437,7 +1537,7 @@ attemptLoop:
 					"client_type":            "codex",
 					"path":                   path,
 				})
-				
+
 				// 先将 Chat Completion JSON 转换为 Responses JSON
 				if converted, err := s.convertChatCompletionToResponse(finalResponseBody, ep.Name); err == nil {
 					// 再将 Responses JSON 转换为 SSE 流
@@ -1449,7 +1549,7 @@ attemptLoop:
 						c.Header("Connection", "keep-alive")
 						c.Header("X-Accel-Buffering", "no")
 						c.Header("Content-Length", "")
-						
+
 						// 🎯 关键修复：立即写入SSE流并返回
 						if _, err := c.Writer.Write(finalResponseBody); err != nil {
 							s.logger.Error("Failed to write SSE response", err)
@@ -1457,7 +1557,7 @@ attemptLoop:
 						if flusher, ok := c.Writer.(http.Flusher); ok {
 							flusher.Flush()
 						}
-						
+
 						// 记录日志
 						duration := time.Since(endpointStartTime)
 						requestLog := s.logger.CreateRequestLog(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path)
@@ -1467,7 +1567,7 @@ attemptLoop:
 						requestLog.AttemptNumber = attemptNumber
 						requestLog.IsStreaming = true
 						requestLog.WasStreaming = true
-						
+
 						// 设置格式检测信息
 						if formatDetection, exists := c.Get("format_detection"); exists {
 							if detection, ok := formatDetection.(*utils.FormatDetectionResult); ok && detection != nil {
@@ -1478,7 +1578,7 @@ attemptLoop:
 								requestLog.DetectedBy = detection.DetectedBy
 							}
 						}
-						
+
 						// 记录请求和响应数据
 						if len(requestBody) > 0 {
 							if s.config.Logging.LogRequestBody != "none" {
@@ -1486,7 +1586,7 @@ attemptLoop:
 								requestLog.OriginalRequestBody = preview
 							}
 						}
-						
+
 						if len(finalRequestBody) > 0 {
 							preview, hash, truncated := buildBodySnapshot(finalRequestBody)
 							if s.config.Logging.LogRequestBody != "none" {
@@ -1496,14 +1596,14 @@ attemptLoop:
 							requestLog.RequestBodyTruncated = truncated
 							requestLog.RequestBodySize = len(finalRequestBody)
 						}
-						
+
 						if len(finalResponseBody) > 0 {
 							if s.config.Logging.LogResponseBody != "none" {
 								preview, _, _ := buildBodySnapshot(finalResponseBody)
 								requestLog.FinalResponseBody = preview
 							}
 						}
-						
+
 						if originalModel != "" {
 							requestLog.OriginalModel = originalModel
 							requestLog.Model = originalModel
@@ -1512,16 +1612,16 @@ attemptLoop:
 							requestLog.RewrittenModel = rewrittenModel
 							requestLog.ModelRewriteApplied = (rewrittenModel != originalModel)
 						}
-						
+
 						s.logger.UpdateRequestLog(requestLog, req, resp, finalResponseBody, duration, nil)
 						s.logger.LogRequest(requestLog)
-						
+
 						// 清除错误信息
 						c.Set("last_error", nil)
 						c.Set("last_status_code", resp.StatusCode)
 						setConversionContext(c, conversionStages)
 						updateSupportsResponsesContext(c, ep)
-						
+
 						// 立即返回，避免后续写入覆盖SSE流
 						return true, false, duration, firstByteTime
 					} else {
@@ -1556,12 +1656,12 @@ attemptLoop:
 			"endpoint":    ep.Name,
 			"client_type": clientType,
 		})
-		
+
 		// Flush 确保数据发送
 		if flusher, ok := c.Writer.(http.Flusher); ok {
 			flusher.Flush()
 		}
-		
+
 		// 记录日志
 		duration := time.Since(endpointStartTime)
 		requestLog := s.logger.CreateRequestLog(requestID, ep.GetURLForFormat(endpointRequestFormat), c.Request.Method, path)
@@ -1569,9 +1669,9 @@ attemptLoop:
 		requestLog.Tags = tags
 		requestLog.ContentTypeOverride = overrideInfo
 		requestLog.AttemptNumber = attemptNumber
-		requestLog.IsStreaming = true  // SSE 是流式
+		requestLog.IsStreaming = true // SSE 是流式
 		requestLog.WasStreaming = true
-		
+
 		// 设置格式检测信息
 		if formatDetection, exists := c.Get("format_detection"); exists {
 			if detection, ok := formatDetection.(*utils.FormatDetectionResult); ok && detection != nil {
@@ -1582,7 +1682,7 @@ attemptLoop:
 				requestLog.DetectedBy = detection.DetectedBy
 			}
 		}
-		
+
 		// 记录原始和最终请求数据
 		if len(requestBody) > 0 {
 			if s.config.Logging.LogRequestBody != "none" {
@@ -1590,7 +1690,7 @@ attemptLoop:
 				requestLog.OriginalRequestBody = preview
 			}
 		}
-		
+
 		if len(finalRequestBody) > 0 {
 			preview, hash, truncated := buildBodySnapshot(finalRequestBody)
 			if s.config.Logging.LogRequestBody != "none" {
@@ -1600,7 +1700,7 @@ attemptLoop:
 			requestLog.RequestBodyTruncated = truncated
 			requestLog.RequestBodySize = len(finalRequestBody)
 		}
-		
+
 		// 记录响应数据（SSE 流）
 		if len(finalResponseBody) > 0 {
 			if s.config.Logging.LogResponseBody != "none" {
@@ -1608,7 +1708,7 @@ attemptLoop:
 				requestLog.FinalResponseBody = preview
 			}
 		}
-		
+
 		// 设置模型信息
 		if originalModel != "" {
 			requestLog.OriginalModel = originalModel
@@ -1618,17 +1718,17 @@ attemptLoop:
 			requestLog.RewrittenModel = rewrittenModel
 			requestLog.ModelRewriteApplied = (rewrittenModel != originalModel)
 		}
-		
+
 		s.logger.UpdateRequestLog(requestLog, req, resp, finalResponseBody, duration, nil)
 		s.logger.LogRequest(requestLog)
-		
+
 		// 清除错误信息
 		c.Set("last_error", nil)
 		c.Set("last_status_code", resp.StatusCode)
 		setConversionContext(c, conversionStages)
 		updateSupportsResponsesContext(c, ep)
 
-		return true, false, duration, firstByteTime  // 成功返回
+		return true, false, duration, firstByteTime // 成功返回
 	}
 
 	// 发送最终响应体给客户端
@@ -1942,6 +2042,108 @@ func addConversionStage(stages *[]string, stage string) {
 	*stages = append(*stages, stage)
 }
 
+var upstreamErrorKeywords = []string{
+	"api error:",
+	"cannot read properties of undefined",
+	"internal server error",
+}
+
+func detectUpstreamErrorResponse(body []byte) (string, bool) {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return "", false
+	}
+	lower := strings.ToLower(trimmed)
+	for _, kw := range upstreamErrorKeywords {
+		if strings.Contains(lower, kw) {
+			return trimmed, true
+		}
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", false
+	}
+
+	if errText, ok := extractOpenAIError(payload); ok {
+		return errText, true
+	}
+	if errText, ok := extractAnthropicError(payload); ok {
+		return errText, true
+	}
+	return "", false
+}
+
+func extractOpenAIError(payload map[string]interface{}) (string, bool) {
+	if errField, ok := payload["error"]; ok {
+		if errStr, ok := errField.(string); ok {
+			return strings.TrimSpace(errStr), true
+		}
+		if errMap, ok := errField.(map[string]interface{}); ok {
+			if msg, ok := errMap["message"].(string); ok {
+				return strings.TrimSpace(msg), true
+			}
+		}
+	}
+
+	choices, ok := payload["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return "", false
+	}
+	first, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	message, ok := first["message"].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	if content, ok := message["content"].(string); ok {
+		text := strings.TrimSpace(content)
+		lower := strings.ToLower(text)
+		for _, kw := range upstreamErrorKeywords {
+			if strings.Contains(lower, kw) {
+				return text, true
+			}
+		}
+	}
+	return "", false
+}
+
+func extractAnthropicError(payload map[string]interface{}) (string, bool) {
+	content, ok := payload["content"]
+	if !ok {
+		return "", false
+	}
+	switch blocks := content.(type) {
+	case []interface{}:
+		for _, item := range blocks {
+			blockMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, ok := blockMap["text"].(string); ok {
+				trim := strings.TrimSpace(text)
+				lower := strings.ToLower(trim)
+				for _, kw := range upstreamErrorKeywords {
+					if strings.Contains(lower, kw) {
+						return trim, true
+					}
+				}
+			}
+		}
+	case string:
+		trim := strings.TrimSpace(blocks)
+		lower := strings.ToLower(trim)
+		for _, kw := range upstreamErrorKeywords {
+			if strings.Contains(lower, kw) {
+				return trim, true
+			}
+		}
+	}
+	return "", false
+}
+
 func setConversionContext(c *gin.Context, stages []string) {
 	if c == nil {
 		return
@@ -2093,12 +2295,10 @@ func (s *Server) handleStreamingResponse(
 	originalCapture := newLimitedBuffer(responseCaptureLimit)
 	reader = io.TeeReader(reader, originalCapture)
 
-    isCodexClient := formatDetection != nil && formatDetection.ClientType == utils.ClientCodex
-    if conversionStages != nil {
-        if isCodexClient {
-            addConversionStage(conversionStages, "response:*->responses")
-        }
-    }
+	isCodexClient := formatDetection != nil && formatDetection.ClientType == utils.ClientCodex
+	if isCodexClient {
+		addConversionStage(conversionStages, "response:*->responses")
+	}
 
 	validationEndpointType := ep.EndpointType
 	if actualEndpointFormat != "" {
@@ -2134,36 +2334,12 @@ func (s *Server) handleStreamingResponse(
 		}
 	}
 
-    captureWriter := newTeeCaptureWriter(c.Writer, responseCaptureLimit)
-    outWriter := io.Writer(captureWriter)
+	captureWriter := newTeeCaptureWriter(c.Writer, responseCaptureLimit)
+	outWriter := io.Writer(captureWriter)
 	var streamErr error
 
-    if isCodexClient {
-        // Codex 客户端一律期望 Responses API 事件
-        if actualEndpointFormat == "openai" {
-            // 上游是 OpenAI Chat SSE → 转 Responses SSE
-            // 使用 ConversionManager 进行统一的流式转换
-            if s.conversionManager != nil {
-                _, streamErr = s.conversionManager.ConvertStream(
-                    "chat_sse_to_responses",
-                    ep.Name,
-                    reader,
-                    outWriter,
-                    conversion.StreamChatCompletionsToResponses,     // unified
-                    conversion.LegacyStreamChatCompletionsToResponses, // legacy
-                )
-            } else {
-                // 无 manager，直接使用统一模式
-                streamErr = conversion.StreamChatCompletionsToResponses(reader, outWriter)
-            }
-        } else {
-            // 上游是 Anthropic SSE → 对于Codex客户端，这种组合不支持，切换端点
-            streamErr = fmt.Errorf("Codex client with Anthropic endpoint not supported, switching endpoint")
-        }
-    } else {
-        // 透传
-        _, streamErr = io.Copy(captureWriter, reader)
-    }
+	// 根据客户端类型和上游格式决定是否需要流式转换
+	actualEndpointFormat, streamErr = s.handleStreamingConversion(formatDetection, actualEndpointFormat, reader, outWriter, ep)
 
 	if streamErr != nil {
 		duration := time.Since(endpointStartTime)
@@ -2175,6 +2351,10 @@ func (s *Server) handleStreamingResponse(
 		c.Set("last_error", errMsg)
 		c.Set("last_status_code", resp.StatusCode)
 		return false, false, duration, 0
+	}
+
+	if actualEndpointFormat != "" {
+		validationEndpointType = actualEndpointFormat
 	}
 
 	if flusher, ok := c.Writer.(http.Flusher); ok {
@@ -2240,11 +2420,11 @@ func (s *Server) handleStreamingResponse(
 		}
 	}
 
-    if formatDetection != nil {
+	if formatDetection != nil {
 		requestLog.ClientType = string(formatDetection.ClientType)
 		requestLog.RequestFormat = string(formatDetection.Format)
 		requestLog.TargetFormat = ep.EndpointType
-    requestLog.FormatConverted = isCodexClient
+		requestLog.FormatConverted = isCodexClient
 		requestLog.DetectionConfidence = formatDetection.Confidence
 		requestLog.DetectedBy = formatDetection.DetectedBy
 	}
@@ -2332,36 +2512,36 @@ func (s *Server) handleStreamingResponse(
 	s.logger.UpdateRequestLog(requestLog, req, resp, finalSample, duration, nil)
 	s.logger.LogRequest(requestLog)
 
-    if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil {
-        // 基于上游原始样本判断是否为原生 Codex /responses 流
-        isResponsesNative := bytes.Contains(originalSample, []byte("response.output_text.delta")) ||
-            bytes.Contains(originalSample, []byte("response.created")) ||
-            bytes.Contains(originalSample, []byte("\"type\":\"response.completed\""))
-        if isResponsesNative {
-            trueValue := true
-            ep.NativeCodexFormat = &trueValue
-            updateSupportsResponsesContext(c, ep)
-            s.logger.Info("Auto-detected: endpoint natively supports Codex format", map[string]interface{}{
-                "endpoint": ep.Name,
-            })
-            if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
-                ep.OpenAIPreference = "responses"
-                s.PersistEndpointLearning(ep)
-            }
-        }
-    }
+	if ep.EndpointType == "openai" && inboundPath == "/responses" && ep.NativeCodexFormat == nil {
+		// 基于上游原始样本判断是否为原生 Codex /responses 流
+		isResponsesNative := bytes.Contains(originalSample, []byte("response.output_text.delta")) ||
+			bytes.Contains(originalSample, []byte("response.created")) ||
+			bytes.Contains(originalSample, []byte("\"type\":\"response.completed\""))
+		if isResponsesNative {
+			trueValue := true
+			ep.NativeCodexFormat = &trueValue
+			updateSupportsResponsesContext(c, ep)
+			s.logger.Info("Auto-detected: endpoint natively supports Codex format", map[string]interface{}{
+				"endpoint": ep.Name,
+			})
+			if ep.OpenAIPreference == "" || ep.OpenAIPreference == "auto" {
+				ep.OpenAIPreference = "responses"
+				s.PersistEndpointLearning(ep)
+			}
+		}
+	}
 
-    if formatDetection != nil && formatDetection.ClientType == utils.ClientCodex && ep.EndpointType == "openai" {
-        if inboundPath == "/responses" {
-            // 使用原始样本判断是否原生Codex支持
-            isResponsesNative := bytes.Contains(originalSample, []byte("response.output_text.delta")) ||
-                bytes.Contains(originalSample, []byte("response.created")) ||
-                bytes.Contains(originalSample, []byte("\"type\":\"response.completed\""))
-            if isResponsesNative {
-                s.updateEndpointCodexSupport(ep, true)
-            }
-        }
-    } else if formatDetection != nil && formatDetection.ClientType == utils.ClientClaudeCode && ep.EndpointType == "anthropic" {
+	if formatDetection != nil && formatDetection.ClientType == utils.ClientCodex && ep.EndpointType == "openai" {
+		if inboundPath == "/responses" {
+			// 使用原始样本判断是否原生Codex支持
+			isResponsesNative := bytes.Contains(originalSample, []byte("response.output_text.delta")) ||
+				bytes.Contains(originalSample, []byte("response.created")) ||
+				bytes.Contains(originalSample, []byte("\"type\":\"response.completed\""))
+			if isResponsesNative {
+				s.updateEndpointCodexSupport(ep, true)
+			}
+		}
+	} else if formatDetection != nil && formatDetection.ClientType == utils.ClientClaudeCode && ep.EndpointType == "anthropic" {
 		s.updateEndpointCodexSupport(ep, false)
 	}
 
@@ -2573,25 +2753,25 @@ func min(a, b int) int {
 
 // ensureOpenAIStreamTrue 确保 OpenAI Chat 请求携带 stream:true，用于 Codex /responses 转换后的上游流式输出
 func ensureOpenAIStreamTrue(body []byte) ([]byte, bool) {
-    if len(body) == 0 {
-        return body, false
-    }
-    var m map[string]interface{}
-    if err := json.Unmarshal(body, &m); err != nil {
-        return body, false
-    }
-    // 已设置为 true 则不改动；若明确为 false，则改为 true 以获得流式
-    if v, ok := m["stream"]; ok {
-        if vb, okb := v.(bool); okb && vb {
-            return body, false
-        }
-    }
-    m["stream"] = true
-    b, err := json.Marshal(m)
-    if err != nil {
-        return body, false
-    }
-    return b, true
+	if len(body) == 0 {
+		return body, false
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body, false
+	}
+	// 已设置为 true 则不改动；若明确为 false，则改为 true 以获得流式
+	if v, ok := m["stream"]; ok {
+		if vb, okb := v.(bool); okb && vb {
+			return body, false
+		}
+	}
+	m["stream"] = true
+	b, err := json.Marshal(m)
+	if err != nil {
+		return body, false
+	}
+	return b, true
 }
 
 // processRateLimitHeaders 处理Anthropic rate limit headers
@@ -2677,14 +2857,7 @@ func (s *Server) requestHasTools(requestBody []byte) bool {
 func (s *Server) convertChatCompletionsToResponsesSSE(body []byte, endpointName string) []byte {
 	unified := func() ([]byte, error) {
 		var buf bytes.Buffer
-		if err := conversion.StreamChatCompletionsToResponsesUnified(bytes.NewReader(body), &buf); err != nil {
-			return nil, err
-		}
-		return buf.Bytes(), nil
-	}
-	legacy := func() ([]byte, error) {
-		var buf bytes.Buffer
-		if err := conversion.LegacyStreamChatCompletionsToResponses(bytes.NewReader(body), &buf); err != nil {
+		if err := conversion.StreamChatCompletionsToResponses(bytes.NewReader(body), &buf); err != nil {
 			return nil, err
 		}
 		return buf.Bytes(), nil
@@ -2697,7 +2870,7 @@ func (s *Server) convertChatCompletionsToResponsesSSE(body []byte, endpointName 
 	)
 
 	if s.conversionManager != nil {
-		result, mode, err = s.conversionManager.Convert("chat_sse_to_responses", endpointName, unified, legacy)
+		result, mode, err = s.conversionManager.Convert("chat_sse_to_responses", endpointName, unified, nil)
 	} else {
 		result, err = unified()
 		mode = conversion.ConversionModeUnified
@@ -2724,9 +2897,6 @@ func (s *Server) convertChatCompletionToResponse(body []byte, endpointName strin
 	unified := func() ([]byte, error) {
 		return conversion.ConvertChatResponseJSONToResponses(body)
 	}
-	legacy := func() ([]byte, error) {
-		return conversion.LegacyConvertChatResponseJSONToResponses(body)
-	}
 
 	var (
 		result []byte
@@ -2735,7 +2905,7 @@ func (s *Server) convertChatCompletionToResponse(body []byte, endpointName strin
 	)
 
 	if s.conversionManager != nil {
-		result, mode, err = s.conversionManager.Convert("chat_json_to_responses", endpointName, unified, legacy)
+		result, mode, err = s.conversionManager.Convert("chat_json_to_responses", endpointName, unified, nil)
 	} else {
 		result, err = unified()
 		mode = conversion.ConversionModeUnified
@@ -2760,9 +2930,6 @@ func (s *Server) convertCodexToOpenAI(requestBody []byte, endpointName string) (
 	unified := func() ([]byte, error) {
 		return conversion.ConvertResponsesRequestJSONToChat(requestBody)
 	}
-	legacy := func() ([]byte, error) {
-		return conversion.LegacyConvertResponsesRequestJSONToChat(requestBody)
-	}
 
 	var (
 		result []byte
@@ -2771,7 +2938,7 @@ func (s *Server) convertCodexToOpenAI(requestBody []byte, endpointName string) (
 	)
 
 	if s.conversionManager != nil {
-		result, mode, err = s.conversionManager.Convert("responses_json_to_chat", endpointName, unified, legacy)
+		result, mode, err = s.conversionManager.Convert("responses_json_to_chat", endpointName, unified, nil)
 	} else {
 		result, err = unified()
 		mode = conversion.ConversionModeUnified
@@ -2811,7 +2978,7 @@ func (s *Server) convertResponseJSONToSSE(jsonBody []byte) []byte {
 
 	// 构造 SSE 事件流
 	var buf bytes.Buffer
-	
+
 	// 1. response.created 事件
 	createdEvent := map[string]interface{}{
 		"type":     "response.created",
@@ -2821,11 +2988,11 @@ func (s *Server) convertResponseJSONToSSE(jsonBody []byte) []byte {
 		buf.WriteString("event: response.created\n")
 		buf.WriteString(fmt.Sprintf("data: %s\n\n", string(createdJSON)))
 	}
-	
+
 	// 2. response.output_text.delta 事件（包含完整内容）
 	// Responses API 格式的结构是: {"output": [{"content": [{"text": "..."}]}]}
 	var contentText string
-	
+
 	// 从 Responses API 格式中提取内容
 	if output, ok := respData["output"].([]interface{}); ok && len(output) > 0 {
 		if outputItem, ok := output[0].(map[string]interface{}); ok {
@@ -2838,7 +3005,7 @@ func (s *Server) convertResponseJSONToSSE(jsonBody []byte) []byte {
 			}
 		}
 	}
-	
+
 	// 如果没有找到内容，尝试从 Chat Completion 格式中提取（兼容性）
 	if contentText == "" {
 		if choices, ok := respData["choices"].([]interface{}); ok && len(choices) > 0 {
@@ -2851,7 +3018,7 @@ func (s *Server) convertResponseJSONToSSE(jsonBody []byte) []byte {
 			}
 		}
 	}
-	
+
 	// 如果还是没有找到内容，尝试其他可能的字段
 	if contentText == "" {
 		if text, ok := respData["text"].(string); ok {
@@ -2860,7 +3027,7 @@ func (s *Server) convertResponseJSONToSSE(jsonBody []byte) []byte {
 			contentText = content
 		}
 	}
-	
+
 	if contentText != "" {
 		deltaEvent := map[string]interface{}{
 			"type":  "response.output_text.delta",
@@ -2873,7 +3040,7 @@ func (s *Server) convertResponseJSONToSSE(jsonBody []byte) []byte {
 	} else {
 		s.logger.Debug("No content found in Response JSON for SSE conversion")
 	}
-	
+
 	// 3. response.completed 事件
 	completedEvent := map[string]interface{}{
 		"type":     "response.completed",
@@ -2883,7 +3050,7 @@ func (s *Server) convertResponseJSONToSSE(jsonBody []byte) []byte {
 		buf.WriteString("event: response.completed\n")
 		buf.WriteString(fmt.Sprintf("data: %s\n\n", string(completedJSON)))
 	}
-	
+
 	return buf.Bytes()
 }
 
@@ -2991,4 +3158,492 @@ func (s *Server) learnUnsupportedParamsFromError(errorBody []byte, ep *endpoint.
 			}
 		}
 	}
+}
+
+// handleStreamingConversion 根据客户端类型和上游格式决定流式转换策略
+func (s *Server) handleStreamingConversion(formatDetection *utils.FormatDetectionResult, upstreamFormat string, reader io.Reader, writer io.Writer, ep *endpoint.Endpoint) (string, error) {
+	if formatDetection == nil {
+		// 无格式检测信息，直接透传
+		_, err := io.Copy(writer, reader)
+		return upstreamFormat, err
+	}
+
+	clientType := formatDetection.ClientType
+	expectedFormat := s.getExpectedFormatForClient(clientType)
+
+	// 如果客户端期望格式与上游格式匹配，无需转换
+	if expectedFormat == upstreamFormat || expectedFormat == "" {
+		_, err := io.Copy(writer, reader)
+		return upstreamFormat, err
+	}
+
+	// 需要格式转换
+	if err := s.convertStreamingResponse(expectedFormat, upstreamFormat, reader, writer, ep); err != nil {
+		return upstreamFormat, err
+	}
+	return expectedFormat, nil
+}
+
+// getExpectedFormatForClient 根据客户端类型返回期望的上游格式
+func (s *Server) getExpectedFormatForClient(clientType utils.ClientType) string {
+	switch clientType {
+	case utils.ClientCodex:
+		// Codex 客户端期望 Responses API 格式，对应 openai 端点
+		return "openai"
+	case utils.ClientClaudeCode:
+		// Claude Code 客户端期望 Anthropic 格式，对应 anthropic 端点
+		return "anthropic"
+	case utils.ClientGemini:
+		// Gemini 客户端期望 Gemini 格式，对应 gemini 端点
+		return "gemini"
+	default:
+		return ""
+	}
+}
+
+// convertStreamingResponse 执行流式响应格式转换
+func (s *Server) convertStreamingResponse(targetFormat, sourceFormat string, reader io.Reader, writer io.Writer, ep *endpoint.Endpoint) error {
+	conversionKey := sourceFormat + "_to_" + targetFormat
+
+	// 记录流式转换操作
+	s.logger.Info("🔄 Streaming format conversion", map[string]interface{}{
+		"conversion":    conversionKey,
+		"source_format": sourceFormat,
+		"target_format": targetFormat,
+		"endpoint":      ep.Name,
+	})
+
+	switch conversionKey {
+	case "openai_to_openai":
+		// OpenAI Chat Completions SSE → OpenAI Responses SSE (Codex)
+		if s.conversionManager != nil {
+			_, err := s.conversionManager.ConvertStream(
+				"chat_sse_to_responses",
+				ep.Name,
+				reader,
+				writer,
+				conversion.StreamChatCompletionsToResponses, // unified
+				nil,
+			)
+			return err
+		}
+		return conversion.StreamChatCompletionsToResponses(reader, writer)
+
+	case "anthropic_to_openai":
+		// Anthropic SSE → OpenAI Chat Completions SSE
+		return conversion.StreamAnthropicSSEToOpenAI(reader, writer)
+
+	case "openai_to_anthropic":
+		// OpenAI Chat Completions SSE → Anthropic SSE
+		return conversion.StreamOpenAISSEToAnthropic(reader, writer)
+
+	case "gemini_to_openai":
+		// Gemini SSE → OpenAI Chat Completions SSE
+		return conversion.StreamGeminiSSEToOpenAI(reader, writer)
+
+	case "gemini_to_anthropic":
+		// Gemini SSE → Anthropic SSE
+		return conversion.StreamGeminiSSEToAnthropic(reader, writer)
+
+	case "openai_to_gemini":
+		// OpenAI Chat Completions SSE → Gemini SSE
+		// TODO: Implement StreamOpenAIToGemini
+		return fmt.Errorf("streaming conversion from OpenAI to Gemini not yet implemented")
+
+	case "anthropic_to_gemini":
+		// Anthropic SSE → Gemini SSE
+		// TODO: Implement StreamAnthropicToGemini
+		return fmt.Errorf("streaming conversion from Anthropic to Gemini not yet implemented")
+
+	default:
+		// 不支持的转换组合，返回错误
+		return fmt.Errorf("unsupported streaming conversion: %s to %s", sourceFormat, targetFormat)
+	}
+}
+
+// handleModelsList 处理模型列表API请求
+func (s *Server) handleModelsList(c *gin.Context) {
+	requestID := c.GetString("request_id")
+	if requestID == "" {
+		requestID = fmt.Sprintf("models-%d", time.Now().UnixNano())
+		c.Set("request_id", requestID)
+	}
+
+	path := c.Request.URL.Path
+	s.logger.Info("📋 Models list request", map[string]interface{}{
+		"request_id": requestID,
+		"path":       path,
+	})
+
+	// 检测客户端格式
+	clientFormat := s.detectModelsClientFormat(c)
+
+	// 选择合适的端点
+	ep, err := s.selectEndpointForModels(clientFormat)
+	if err != nil {
+		s.logger.Error("Failed to select endpoint for models", err, map[string]interface{}{
+			"request_id":    requestID,
+			"client_format": clientFormat,
+		})
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": gin.H{
+				"type":    "service_unavailable",
+				"message": "No suitable endpoint available for models list",
+			},
+		})
+		return
+	}
+
+	// 构建上游请求
+	upstreamURL := s.buildModelsUpstreamURL(ep, clientFormat, path)
+
+	// 创建上游请求
+	req, err := http.NewRequestWithContext(c.Request.Context(), "GET", upstreamURL, nil)
+	if err != nil {
+		s.logger.Error("Failed to create upstream request", err, map[string]interface{}{
+			"request_id": requestID,
+		})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"type":    "internal_error",
+				"message": "Failed to create upstream request",
+			},
+		})
+		return
+	}
+
+	// 设置认证头
+	authHeader, err := ep.GetAuthHeader()
+	if err != nil {
+		s.logger.Error("Failed to get auth header", err, map[string]interface{}{
+			"request_id": requestID,
+			"endpoint":   ep.Name,
+		})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"type":    "auth_error",
+				"message": "Failed to get authentication header",
+			},
+		})
+		return
+	}
+
+	// 根据客户端格式设置认证
+	s.setModelsAuthHeader(req, clientFormat, authHeader)
+
+	// 发送请求
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		s.logger.Error("Upstream request failed", err, map[string]interface{}{
+			"request_id": requestID,
+			"endpoint":   ep.Name,
+			"url":        upstreamURL,
+		})
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": gin.H{
+				"type":    "upstream_error",
+				"message": "Failed to fetch models from upstream",
+			},
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		s.logger.Error("Failed to read upstream response", err, map[string]interface{}{
+			"request_id": requestID,
+		})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"type":    "response_error",
+				"message": "Failed to read upstream response",
+			},
+		})
+		return
+	}
+
+	// 如果上游返回错误，直接返回
+	if resp.StatusCode >= 400 {
+		c.Data(resp.StatusCode, "application/json", body)
+		return
+	}
+
+	// 转换响应格式（如果需要）
+	convertedBody, err := s.convertModelsResponse(body, clientFormat, ep.EndpointType)
+	if err != nil {
+		s.logger.Error("Failed to convert models response", err, map[string]interface{}{
+			"request_id":    requestID,
+			"client_format": clientFormat,
+			"endpoint_type": ep.EndpointType,
+		})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"type":    "conversion_error",
+				"message": "Failed to convert models response format",
+			},
+		})
+		return
+	}
+
+	// 设置响应头并返回
+	c.Header("Content-Type", "application/json")
+	c.Data(http.StatusOK, "application/json", convertedBody)
+
+	s.logger.Info("📋 Models list completed", map[string]interface{}{
+		"request_id":    requestID,
+		"endpoint":      ep.Name,
+		"client_format": clientFormat,
+		"status_code":   resp.StatusCode,
+	})
+}
+
+// detectModelsClientFormat 检测模型列表请求的客户端格式
+func (s *Server) detectModelsClientFormat(c *gin.Context) string {
+	path := c.Request.URL.Path
+	authHeader := c.GetHeader("Authorization")
+	apiKey := c.GetHeader("x-api-key")
+	apiKeyParam := c.Query("key")
+
+	// 根据路径和认证方式判断
+	if strings.Contains(path, "/v1beta/models") {
+		return "gemini"
+	}
+
+	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+		return "openai"
+	}
+
+	if apiKey != "" {
+		return "anthropic"
+	}
+
+	if apiKeyParam != "" {
+		return "gemini"
+	}
+
+	// 默认返回openai格式
+	return "openai"
+}
+
+// selectEndpointForModels 为模型列表选择合适的端点
+func (s *Server) selectEndpointForModels(clientFormat string) (*endpoint.Endpoint, error) {
+	endpoints := s.endpointManager.GetAllEndpoints()
+
+	// 优先选择支持相应格式的端点
+	for _, ep := range endpoints {
+		if !ep.Enabled {
+			continue
+		}
+
+		switch clientFormat {
+		case "openai":
+			if ep.URLOpenAI != "" {
+				return ep, nil
+			}
+		case "anthropic":
+			if ep.URLAnthropic != "" {
+				return ep, nil
+			}
+		case "gemini":
+			if ep.URLGemini != "" {
+				return ep, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("no suitable endpoint found for format: %s", clientFormat)
+}
+
+// buildModelsUpstreamURL 构建上游模型列表URL
+func (s *Server) buildModelsUpstreamURL(ep *endpoint.Endpoint, clientFormat, path string) string {
+	switch clientFormat {
+	case "openai":
+		return ep.URLOpenAI + "/v1/models"
+	case "anthropic":
+		return ep.URLAnthropic + "/v1/models"
+	case "gemini":
+		return ep.URLGemini + path
+	default:
+		return ep.URLOpenAI + "/v1/models"
+	}
+}
+
+// setModelsAuthHeader 设置模型列表请求的认证头
+func (s *Server) setModelsAuthHeader(req *http.Request, clientFormat, authHeader string) {
+	switch clientFormat {
+	case "openai":
+		req.Header.Set("Authorization", authHeader)
+	case "anthropic":
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			req.Header.Set("x-api-key", strings.TrimPrefix(authHeader, "Bearer "))
+		} else {
+			req.Header.Set("x-api-key", authHeader)
+		}
+	case "gemini":
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			req.Header.Set("x-goog-api-key", strings.TrimPrefix(authHeader, "Bearer "))
+		} else {
+			req.Header.Set("x-goog-api-key", authHeader)
+		}
+	}
+}
+
+// convertModelsResponse 转换模型列表响应格式
+func (s *Server) convertModelsResponse(body []byte, clientFormat, endpointType string) ([]byte, error) {
+	// 如果客户端格式和端点类型相同，无需转换
+	if clientFormat == endpointType {
+		return body, nil
+	}
+
+	// 解析原始响应
+	var originalResp map[string]interface{}
+	if err := json.Unmarshal(body, &originalResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// 根据需要进行格式转换
+	switch clientFormat {
+	case "openai":
+		return s.convertToOpenAIModelsFormat(originalResp, endpointType)
+	case "anthropic":
+		return s.convertToAnthropicModelsFormat(originalResp, endpointType)
+	case "gemini":
+		return s.convertToGeminiModelsFormat(originalResp, endpointType)
+	default:
+		return body, nil
+	}
+}
+
+// convertToOpenAIModelsFormat 转换为OpenAI格式的模型列表
+func (s *Server) convertToOpenAIModelsFormat(resp map[string]interface{}, sourceFormat string) ([]byte, error) {
+	var models []map[string]interface{}
+
+	switch sourceFormat {
+	case "anthropic":
+		// Anthropic格式通常返回字符串数组
+		if data, ok := resp["data"].([]interface{}); ok {
+			for _, item := range data {
+				if modelID, ok := item.(string); ok {
+					models = append(models, map[string]interface{}{
+						"id":       modelID,
+						"object":   "model",
+						"created":  time.Now().Unix(),
+						"owned_by": "anthropic",
+					})
+				}
+			}
+		}
+	case "gemini":
+		// Gemini格式的模型列表
+		if modelsData, ok := resp["models"].([]interface{}); ok {
+			for _, item := range modelsData {
+				if modelData, ok := item.(map[string]interface{}); ok {
+					if name, ok := modelData["name"].(string); ok {
+						models = append(models, map[string]interface{}{
+							"id":       name,
+							"object":   "model",
+							"created":  time.Now().Unix(),
+							"owned_by": "google",
+						})
+					}
+				}
+			}
+		}
+	}
+
+	result := map[string]interface{}{
+		"object": "list",
+		"data":   models,
+	}
+
+	return json.Marshal(result)
+}
+
+// convertToAnthropicModelsFormat 转换为Anthropic格式的模型列表
+func (s *Server) convertToAnthropicModelsFormat(resp map[string]interface{}, sourceFormat string) ([]byte, error) {
+	var models []string
+
+	switch sourceFormat {
+	case "openai":
+		// OpenAI格式转换为Anthropic格式
+		if data, ok := resp["data"].([]interface{}); ok {
+			for _, item := range data {
+				if modelData, ok := item.(map[string]interface{}); ok {
+					if id, ok := modelData["id"].(string); ok {
+						models = append(models, id)
+					}
+				}
+			}
+		}
+	case "gemini":
+		// Gemini格式转换为Anthropic格式
+		if modelsData, ok := resp["models"].([]interface{}); ok {
+			for _, item := range modelsData {
+				if modelData, ok := item.(map[string]interface{}); ok {
+					if name, ok := modelData["name"].(string); ok {
+						models = append(models, name)
+					}
+				}
+			}
+		}
+	}
+
+	result := map[string]interface{}{
+		"data": models,
+	}
+
+	return json.Marshal(result)
+}
+
+// convertToGeminiModelsFormat 转换为Gemini格式的模型列表
+func (s *Server) convertToGeminiModelsFormat(resp map[string]interface{}, sourceFormat string) ([]byte, error) {
+	var models []map[string]interface{}
+
+	switch sourceFormat {
+	case "openai":
+		// OpenAI格式转换为Gemini格式
+		if data, ok := resp["data"].([]interface{}); ok {
+			for _, item := range data {
+				if modelData, ok := item.(map[string]interface{}); ok {
+					if id, ok := modelData["id"].(string); ok {
+						models = append(models, map[string]interface{}{
+							"name":                       id,
+							"version":                    "001",
+							"displayName":                id,
+							"description":                fmt.Sprintf("Model %s", id),
+							"inputTokenLimit":            32768,
+							"outputTokenLimit":           8192,
+							"supportedGenerationMethods": []string{"generateContent"},
+						})
+					}
+				}
+			}
+		}
+	case "anthropic":
+		// Anthropic格式转换为Gemini格式
+		if data, ok := resp["data"].([]interface{}); ok {
+			for _, item := range data {
+				if modelID, ok := item.(string); ok {
+					models = append(models, map[string]interface{}{
+						"name":                       modelID,
+						"version":                    "001",
+						"displayName":                modelID,
+						"description":                fmt.Sprintf("Model %s", modelID),
+						"inputTokenLimit":            32768,
+						"outputTokenLimit":           8192,
+						"supportedGenerationMethods": []string{"generateContent"},
+					})
+				}
+			}
+		}
+	}
+
+	result := map[string]interface{}{
+		"models": models,
+	}
+
+	return json.Marshal(result)
 }

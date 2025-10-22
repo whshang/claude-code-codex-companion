@@ -3,98 +3,70 @@ package conversion
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
+	"time"
 
 	"claude-code-codex-companion/internal/logger"
 )
 
-// OpenAIChatFormatAdapter 负责 OpenAI Chat Completions 与内部模型互转
+// OpenAIChatFormatAdapter normalises OpenAI Chat Completions payloads.
 type OpenAIChatFormatAdapter struct {
 	logger *logger.Logger
 }
 
-func (a *OpenAIChatFormatAdapter) Name() string {
+// NewOpenAIChatFormatAdapter creates a new adapter instance.
+func NewOpenAIChatFormatAdapter(log *logger.Logger) *OpenAIChatFormatAdapter {
+	return &OpenAIChatFormatAdapter{logger: log}
+}
+
+func (o *OpenAIChatFormatAdapter) Name() string {
 	return "openai_chat"
 }
 
-func (a *OpenAIChatFormatAdapter) ParseRequestJSON(payload []byte) (*InternalRequest, error) {
+func (o *OpenAIChatFormatAdapter) ParseRequestJSON(payload []byte) (*InternalRequest, error) {
 	var req OpenAIRequest
 	if err := json.Unmarshal(payload, &req); err != nil {
-		return nil, fmt.Errorf("failed to parse OpenAI chat request: %w", err)
+		return nil, NewConversionError("parse_error", fmt.Sprintf("failed to parse OpenAI request: %v", err), err)
 	}
 
-	if strings.TrimSpace(req.Model) == "" {
-		return nil, fmt.Errorf("openai chat request missing model")
+	stream := false
+	if req.Stream != nil {
+		stream = *req.Stream
 	}
 
-	internalReq := &InternalRequest{
+	internal := &InternalRequest{
 		Model:               req.Model,
 		Temperature:         req.Temperature,
 		TopP:                req.TopP,
 		MaxCompletionTokens: req.MaxCompletionTokens,
 		MaxOutputTokens:     req.MaxOutputTokens,
 		MaxTokens:           req.MaxTokens,
-		Stop:                copyStringSlice(req.Stop),
+		Stream:              stream,
+		Stop:                append([]string(nil), req.Stop...),
 		User:                req.User,
-		Metadata:            make(map[string]interface{}),
-		// 🆕 采样控制参数
+		ParallelToolCalls:   req.ParallelToolCalls,
 		PresencePenalty:     req.PresencePenalty,
 		FrequencyPenalty:    req.FrequencyPenalty,
 		LogitBias:           cloneLogitBias(req.LogitBias),
 		N:                   req.N,
-		// 🆕 输出格式控制
 		ResponseFormat:      convertOpenAIResponseFormatToInternal(req.ResponseFormat),
-		// 🆕 推理相关字段
 		ReasoningEffort:     req.ReasoningEffort,
 		MaxReasoningTokens:  req.MaxReasoningTokens,
 	}
 
-	if req.User != "" {
-		internalReq.Metadata["user_id"] = req.User
+	internal.Messages = openAIMessagesToInternal(req.Messages)
+	internal.Tools = openAIToolsToInternal(req.Tools)
+	internal.ToolChoice = convertOpenAIToolChoice(req.ToolChoice)
+	if thinking := InternalThinkingFromOpenAI(req.ReasoningEffort, req.MaxReasoningTokens); thinking != nil {
+		internal.Thinking = thinking
 	}
 
-	if req.Stream != nil {
-		internalReq.Stream = *req.Stream
-	}
-
-	if req.ParallelToolCalls != nil {
-		val := *req.ParallelToolCalls
-		internalReq.ParallelToolCalls = &val
-	}
-
-	if req.ToolChoice != nil {
-		internalReq.ToolChoice = convertOpenAIToolChoiceToInternal(req.ToolChoice)
-	}
-
-	if len(req.Tools) > 0 {
-		internalReq.Tools = make([]InternalTool, 0, len(req.Tools))
-		for _, tool := range req.Tools {
-			if strings.ToLower(tool.Type) != "function" {
-				continue
-			}
-			internalReq.Tools = append(internalReq.Tools, InternalTool{
-				Name:        tool.Function.Name,
-				Description: tool.Function.Description,
-				Parameters:  tool.Function.Parameters,
-			})
-		}
-	}
-
-	internalReq.Messages = make([]InternalMessage, 0, len(req.Messages))
-	for _, msg := range req.Messages {
-		internalReq.Messages = append(internalReq.Messages, convertOpenAIMessageToInternal(msg))
-	}
-
-	return internalReq, nil
+	return internal, nil
 }
 
-func (a *OpenAIChatFormatAdapter) BuildRequestJSON(req *InternalRequest) ([]byte, error) {
+func (o *OpenAIChatFormatAdapter) BuildRequestJSON(req *InternalRequest) ([]byte, error) {
 	if req == nil {
-		return nil, fmt.Errorf("internal request is nil")
-	}
-	if strings.TrimSpace(req.Model) == "" {
-		return nil, fmt.Errorf("internal request missing model")
+		return json.Marshal(nil)
 	}
 
 	out := OpenAIRequest{
@@ -104,479 +76,432 @@ func (a *OpenAIChatFormatAdapter) BuildRequestJSON(req *InternalRequest) ([]byte
 		MaxCompletionTokens: req.MaxCompletionTokens,
 		MaxOutputTokens:     req.MaxOutputTokens,
 		MaxTokens:           req.MaxTokens,
-		Stop:                copyStringSlice(req.Stop),
+		Stop:                append([]string(nil), req.Stop...),
 		User:                req.User,
-		// 🆕 采样控制参数
+		ParallelToolCalls:   req.ParallelToolCalls,
 		PresencePenalty:     req.PresencePenalty,
 		FrequencyPenalty:    req.FrequencyPenalty,
 		LogitBias:           cloneLogitBias(req.LogitBias),
 		N:                   req.N,
-		// 🆕 输出格式控制
 		ResponseFormat:      convertInternalResponseFormatToOpenAI(req.ResponseFormat),
+		ReasoningEffort:     req.ReasoningEffort,
+		MaxReasoningTokens:  req.MaxReasoningTokens,
 	}
 
 	if req.Stream {
-		out.Stream = boolPtrValue(true)
+		out.Stream = ptrBool(true)
 	}
 
-	if req.ParallelToolCalls != nil {
-		val := *req.ParallelToolCalls
-		out.ParallelToolCalls = &val
-	}
+	out.Messages = internalMessagesToOpenAI(req.Messages)
+	out.Tools = internalToolsToOpenAI(req.Tools)
+	out.ToolChoice = convertInternalToolChoice(req.ToolChoice)
+	ApplyInternalThinkingToOpenAI(req, &out, newDefaultThinkingMapper(o.logger))
 
-	if len(req.Tools) > 0 {
-		out.Tools = make([]OpenAITool, 0, len(req.Tools))
-		for _, tool := range req.Tools {
-			out.Tools = append(out.Tools, OpenAITool{
-				Type: "function",
-				Function: OpenAIFunctionDef{
-					Name:        tool.Name,
-					Description: tool.Description,
-					Parameters:  tool.Parameters,
-				},
-			})
-		}
-	}
-
-	if req.ToolChoice != nil {
-		out.ToolChoice = buildOpenAIToolChoice(req.ToolChoice)
-	}
-
-	out.Messages = make([]OpenAIMessage, 0, len(req.Messages))
-	for _, msg := range req.Messages {
-		out.Messages = append(out.Messages, convertInternalMessageToOpenAI(msg))
-	}
-
-	result, err := json.Marshal(out)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal OpenAI chat request: %w", err)
-	}
-	return result, nil
+	return json.Marshal(out)
 }
 
-func (a *OpenAIChatFormatAdapter) ParseResponseJSON(payload []byte) (*InternalResponse, error) {
+func (o *OpenAIChatFormatAdapter) ParseResponseJSON(payload []byte) (*InternalResponse, error) {
 	var resp OpenAIResponse
 	if err := json.Unmarshal(payload, &resp); err != nil {
-		return nil, fmt.Errorf("failed to parse OpenAI chat response: %w", err)
+		return nil, NewConversionError("parse_error", fmt.Sprintf("failed to parse OpenAI response: %v", err), err)
 	}
 
-	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("openai chat response contains no choices")
-	}
-
-	choice := resp.Choices[0]
-	internalMsg := convertOpenAIMessageToInternal(choice.Message)
-	internalMsg.FinishReason = normalizeOpenAIFinishReason(choice.FinishReason)
-
-	internalResp := &InternalResponse{
+	internal := &InternalResponse{
 		ID:      resp.ID,
 		Model:   resp.Model,
-		Message: &internalMsg,
-		Usage:   convertOpenAIUsage(resp.Usage),
-	}
-	internalResp.StopReason = internalMsg.FinishReason
-
-	return internalResp, nil
-}
-
-func (a *OpenAIChatFormatAdapter) BuildResponseJSON(resp *InternalResponse) ([]byte, error) {
-	if resp == nil {
-		return nil, fmt.Errorf("internal response is nil")
-	}
-	if resp.Message == nil {
-		return nil, fmt.Errorf("internal response missing message")
-	}
-
-	choice := OpenAIChoice{
-		Index:        0,
-		FinishReason: denormalizeOpenAIFinishReason(resp.Message.FinishReason),
-		Message:      convertInternalMessageToOpenAI(*resp.Message),
-	}
-
-	out := OpenAIResponse{
-		ID:      resp.ID,
-		Model:   resp.Model,
-		Choices: []OpenAIChoice{choice},
+		Success: true,
 	}
 
 	if resp.Usage != nil {
+		internal.TokenUsage = &TokenUsage{
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.TotalTokens,
+			RecordedAt:       time.Now(),
+		}
+	}
+
+	if len(resp.Choices) > 0 {
+		internal.FinishReason = resp.Choices[0].FinishReason
+		for _, choice := range resp.Choices {
+			internal.Messages = append(internal.Messages, openAIMessageToInternal(choice.Message))
+		}
+	}
+
+	return internal, nil
+}
+
+func (o *OpenAIChatFormatAdapter) BuildResponseJSON(resp *InternalResponse) ([]byte, error) {
+	if resp == nil {
+		return json.Marshal(nil)
+	}
+
+	out := OpenAIResponse{
+		ID:    resp.ID,
+		Model: resp.Model,
+	}
+
+	if resp.TokenUsage != nil {
 		out.Usage = &OpenAIUsage{
-			PromptTokens:     resp.Usage.InputTokens,
-			CompletionTokens: resp.Usage.OutputTokens,
-			TotalTokens:      totalTokensFallback(resp.Usage),
+			PromptTokens:     resp.TokenUsage.PromptTokens,
+			CompletionTokens: resp.TokenUsage.CompletionTokens,
+			TotalTokens:      resp.TokenUsage.TotalTokens,
 		}
 	}
 
-	result, err := json.Marshal(out)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal OpenAI chat response: %w", err)
+	if len(resp.Messages) == 0 && len(resp.Content) > 0 {
+		// synthesise assistant message from content blocks
+		resp.Messages = append(resp.Messages, InternalMessage{
+			Role:     "assistant",
+			Contents: resp.Content,
+		})
 	}
-	return result, nil
+
+	for idx, msg := range resp.Messages {
+		out.Choices = append(out.Choices, OpenAIChoice{
+			Index:        idx,
+			FinishReason: resp.FinishReason,
+			Message:      internalMessageToOpenAI(msg),
+		})
+	}
+
+	return json.Marshal(out)
 }
 
-// ParseSSE / BuildSSE 将在流式阶段实现
-func (a *OpenAIChatFormatAdapter) ParseSSE(event string, data []byte) ([]InternalEvent, error) {
-	return nil, fmt.Errorf("ParseSSE not implemented")
-}
-
-func (a *OpenAIChatFormatAdapter) BuildSSE(events []InternalEvent) ([]SSEPayload, error) {
-	return nil, fmt.Errorf("BuildSSE not implemented")
-}
-
-func convertOpenAIToolChoiceToInternal(choice interface{}) *InternalToolChoice {
-	switch v := choice.(type) {
-	case string:
-		switch v {
-		case "auto":
-			return &InternalToolChoice{Type: "auto"}
-		case "none":
-			return &InternalToolChoice{Type: "none"}
-		case "required":
-			return &InternalToolChoice{Type: "required"}
-		default:
-			return &InternalToolChoice{Type: v}
-		}
-	case map[string]interface{}:
-		if t, ok := v["type"].(string); ok {
-			if t == "function" {
-				if fn, ok := v["function"].(map[string]interface{}); ok {
-					name, _ := fn["name"].(string)
-					return &InternalToolChoice{Type: "tool", Name: name}
-				}
+func (o *OpenAIChatFormatAdapter) ParseSSE(event string, data []byte) ([]InternalEvent, error) {
+	if strings.TrimSpace(event) == "" {
+		return nil, nil
+	}
+	var decoded map[string]interface{}
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			decoded = map[string]interface{}{
+				"raw": string(data),
 			}
-			return &InternalToolChoice{Type: t}
 		}
 	}
-	return nil
+	return []InternalEvent{{Type: event, Data: decoded}}, nil
 }
 
-func buildOpenAIToolChoice(choice *InternalToolChoice) interface{} {
-	if choice == nil {
-		return nil
+func (o *OpenAIChatFormatAdapter) BuildSSE(events []InternalEvent) ([]SSEPayload, error) {
+	payloads := make([]SSEPayload, 0, len(events))
+	for _, ev := range events {
+		payloads = append(payloads, SSEPayload{
+			Event: ev.Type,
+			Data:  ev.Data,
+		})
 	}
-
-	switch choice.Type {
-	case "", "auto":
-		return "auto"
-	case "none":
-		return "none"
-	case "required":
-		return "required"
-	case "tool":
-		if choice.Name == "" {
-			return map[string]interface{}{"type": "function"}
-		}
-		return map[string]interface{}{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name": choice.Name,
-			},
-		}
-	default:
-		return choice.Type
-	}
+	return payloads, nil
 }
 
-func convertOpenAIMessageToInternal(msg OpenAIMessage) InternalMessage {
+// --- helper conversions -----------------------------------------------------
+
+func openAIMessagesToInternal(messages []OpenAIMessage) []InternalMessage {
+	result := make([]InternalMessage, 0, len(messages))
+	for _, msg := range messages {
+		result = append(result, openAIMessageToInternal(msg))
+	}
+	return result
+}
+
+func openAIMessageToInternal(msg OpenAIMessage) InternalMessage {
 	internal := InternalMessage{
 		Role:       msg.Role,
+		Name:       msg.Name,
 		ToolCallID: msg.ToolCallID,
-		Contents:   []InternalContent{},
-		ToolCalls:  []InternalToolCall{},
 	}
 
-	appendOpenAIContentForInternal(&internal, msg.Content)
+	// content can be string or []OpenAIMessageContent
+	switch content := msg.Content.(type) {
+	case string:
+		if msg.Role == "tool" {
+			internal.Contents = append(internal.Contents, InternalContent{
+				Type: "tool_result",
+				Text: content,
+				ToolResult: &InternalToolResult{
+					ToolUseID: msg.ToolCallID,
+					Content:   content,
+				},
+			})
+		} else {
+			internal.Contents = append(internal.Contents, InternalContent{
+				Type: "text",
+				Text: content,
+			})
+		}
+	case []interface{}:
+		for _, raw := range content {
+			if part, ok := raw.(map[string]interface{}); ok {
+				if partType, _ := part["type"].(string); partType == "image_url" {
+					if urlMap, ok := part["image_url"].(map[string]interface{}); ok {
+						if urlStr, _ := urlMap["url"].(string); urlStr != "" {
+							internal.Contents = append(internal.Contents, InternalContent{
+								Type:     "image",
+								ImageURL: urlStr,
+							})
+						}
+					}
+				} else if text, _ := part["text"].(string); text != "" {
+					internal.Contents = append(internal.Contents, InternalContent{
+						Type: "text",
+						Text: text,
+					})
+				}
+			}
+		}
+	case []OpenAIMessageContent:
+		for _, part := range content {
+			switch part.Type {
+			case "image_url":
+				if part.ImageURL != nil {
+					internal.Contents = append(internal.Contents, InternalContent{
+						Type:     "image",
+						ImageURL: part.ImageURL.URL,
+					})
+				}
+			default:
+				internal.Contents = append(internal.Contents, InternalContent{
+					Type: "text",
+					Text: part.Text,
+				})
+			}
+		}
+	}
 
-	for idx, call := range msg.ToolCalls {
-		id := call.ID
-		if id == "" {
-			id = fmt.Sprintf("tool_call_%d", idx)
+	for _, call := range msg.ToolCalls {
+		argsMap := map[string]interface{}{}
+		if err := json.Unmarshal([]byte(call.Function.Arguments), &argsMap); err != nil {
+			argsMap = nil
 		}
 		internal.ToolCalls = append(internal.ToolCalls, InternalToolCall{
-			Index:     idx,
-			ID:        id,
+			ID:        call.ID,
+			Type:      call.Type,
 			Name:      call.Function.Name,
 			Arguments: call.Function.Arguments,
+			Index:     call.Index,
+			Metadata:  map[string]interface{}{},
+		})
+		internal.Contents = append(internal.Contents, InternalContent{
+			Type: "tool_use",
+			ToolUse: &InternalToolUse{
+				ID:           call.ID,
+				Name:         call.Function.Name,
+				Arguments:    call.Function.Arguments,
+				ArgumentsMap: argsMap,
+				Index:        call.Index,
+			},
 		})
 	}
 
 	return internal
 }
 
-func convertInternalMessageToOpenAI(msg InternalMessage) OpenAIMessage {
+func internalMessagesToOpenAI(messages []InternalMessage) []OpenAIMessage {
+	result := make([]OpenAIMessage, 0, len(messages))
+	for _, msg := range messages {
+		result = append(result, internalMessageToOpenAI(msg))
+	}
+	return result
+}
+
+func internalMessageToOpenAI(msg InternalMessage) OpenAIMessage {
 	out := OpenAIMessage{
 		Role:       msg.Role,
+		Name:       msg.Name,
 		ToolCallID: msg.ToolCallID,
 	}
 
-	contentList := make([]OpenAIMessageContent, 0, len(msg.Contents))
+	contentParts := make([]OpenAIMessageContent, 0, len(msg.Contents))
+	hasImage := false
+	var textBuilder strings.Builder
+
 	for _, content := range msg.Contents {
 		switch content.Type {
-		case "image", "image_url":
-			if strings.TrimSpace(content.ImageURL) == "" {
-				continue
-			}
-			contentList = append(contentList, OpenAIMessageContent{
+		case "image":
+			hasImage = true
+			contentParts = append(contentParts, OpenAIMessageContent{
 				Type: "image_url",
 				ImageURL: &OpenAIImageURL{
 					URL: content.ImageURL,
 				},
 			})
 		case "tool_result":
-			if content.Text != "" {
-				contentList = append(contentList, OpenAIMessageContent{
-					Type: "text",
-					Text: content.Text,
-				})
-			}
+			textBuilder.WriteString(content.Text)
 		default:
-			if content.Text != "" {
-				contentList = append(contentList, OpenAIMessageContent{
-					Type: "text",
-					Text: content.Text,
-				})
+			textBuilder.WriteString(content.Text)
+		}
+	}
+
+	if hasImage {
+		text := strings.TrimSpace(textBuilder.String())
+		if text != "" {
+			contentParts = append(contentParts, OpenAIMessageContent{
+				Type: "text",
+				Text: text,
+			})
+		}
+		out.Content = contentParts
+	} else {
+		out.Content = textBuilder.String()
+	}
+
+	handledToolCalls := len(msg.ToolCalls) > 0
+	if handledToolCalls {
+		for idx, call := range msg.ToolCalls {
+			args := call.Arguments
+			if args == "" && call.Metadata != nil {
+				if raw, ok := call.Metadata["arguments_map"]; ok {
+					if bytes, err := json.Marshal(raw); err == nil {
+						args = string(bytes)
+					}
+				}
 			}
+			out.ToolCalls = append(out.ToolCalls, OpenAIToolCall{
+				Index: idx,
+				ID:    call.ID,
+				Type:  "function",
+				Function: OpenAIToolCallDetail{
+					Name:      call.Name,
+					Arguments: args,
+				},
+			})
 		}
+	} else {
+		for idx, content := range msg.Contents {
+			if content.ToolUse == nil {
+				continue
+			}
+			args := content.ToolUse.Arguments
+			if args == "" && content.ToolUse.ArgumentsMap != nil {
+				if bytes, err := json.Marshal(content.ToolUse.ArgumentsMap); err == nil {
+					args = string(bytes)
+				}
+			}
+			out.ToolCalls = append(out.ToolCalls, OpenAIToolCall{
+				Index: idx,
+				ID:    content.ToolUse.ID,
+				Type:  "function",
+				Function: OpenAIToolCallDetail{
+					Name:      content.ToolUse.Name,
+					Arguments: args,
+				},
+			})
+		}
+		handledToolCalls = len(out.ToolCalls) > 0
 	}
 
-	switch len(contentList) {
-	case 0:
+	if handledToolCalls && out.Content == nil && msg.Role == "assistant" {
 		out.Content = ""
-	case 1:
-		if contentList[0].Type == "text" && contentList[0].ImageURL == nil {
-			out.Content = contentList[0].Text
-		} else {
-			out.Content = contentList
-		}
-	default:
-		out.Content = contentList
-	}
-
-	for idx, call := range msg.ToolCalls {
-		id := call.ID
-		if id == "" {
-			id = fmt.Sprintf("tool_call_%d", idx)
-		}
-		out.ToolCalls = append(out.ToolCalls, OpenAIToolCall{
-			Index: idx,
-			ID:    id,
-			Type:  "function",
-			Function: OpenAIToolCallDetail{
-				Name:      call.Name,
-				Arguments: call.Arguments,
-			},
-		})
 	}
 
 	return out
 }
 
-func appendOpenAIContentForInternal(msg *InternalMessage, content interface{}) {
-	if content == nil {
-		return
+func openAIToolsToInternal(tools []OpenAITool) []InternalTool {
+	if len(tools) == 0 {
+		return nil
 	}
-
-	switch v := content.(type) {
-	case string:
-		if v != "" {
-			msg.Contents = append(msg.Contents, InternalContent{
-				Type: "text",
-				Text: v,
-			})
-		}
-	case []interface{}:
-		for _, item := range v {
-			appendOpenAIContentItem(msg, item)
-		}
-	case map[string]interface{}:
-		appendOpenAIContentItem(msg, v)
-	case []OpenAIMessageContent:
-		for _, block := range v {
-			switch block.Type {
-			case "image_url":
-				if block.ImageURL != nil && block.ImageURL.URL != "" {
-					msg.Contents = append(msg.Contents, InternalContent{
-						Type:      "image",
-						ImageURL:  block.ImageURL.URL,
-						MediaType: detectMediaType(block.ImageURL.URL),
-					})
-				}
-			default:
-				if block.Text != "" {
-					msg.Contents = append(msg.Contents, InternalContent{
-						Type: "text",
-						Text: block.Text,
-					})
-				}
-			}
-		}
-	default:
-		msg.Contents = append(msg.Contents, InternalContent{
-			Type: "text",
-			Text: fmt.Sprintf("%v", v),
+	result := make([]InternalTool, 0, len(tools))
+	for _, tool := range tools {
+		result = append(result, InternalTool{
+			Type: tool.Type,
+			Function: &InternalToolFunction{
+				Name:        tool.Function.Name,
+				Description: tool.Function.Description,
+				Parameters:  cloneAnyMap(tool.Function.Parameters),
+			},
 		})
 	}
+	return result
 }
 
-func appendOpenAIContentItem(msg *InternalMessage, item interface{}) {
-	switch block := item.(type) {
-	case string:
-		if block != "" {
-			msg.Contents = append(msg.Contents, InternalContent{
-				Type: "text",
-				Text: block,
-			})
+func internalToolsToOpenAI(tools []InternalTool) []OpenAITool {
+	if len(tools) == 0 {
+		return nil
+	}
+	result := make([]OpenAITool, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type != "function" || tool.Function == nil {
+			continue
 		}
-	case map[string]interface{}:
-		contentType, _ := block["type"].(string)
-		switch contentType {
-		case "text":
-			if text, ok := block["text"].(string); ok && text != "" {
-				msg.Contents = append(msg.Contents, InternalContent{
-					Type: "text",
-					Text: text,
-				})
-			}
-		case "image_url":
-			if imageMap, ok := block["image_url"].(map[string]interface{}); ok {
-				if url, ok := imageMap["url"].(string); ok && url != "" {
-					msg.Contents = append(msg.Contents, InternalContent{
-						Type:      "image",
-						ImageURL:  url,
-						MediaType: detectMediaType(url),
-					})
-				}
-			}
-		case "output_text":
-			if text, ok := block["text"].(string); ok && text != "" {
-				msg.Contents = append(msg.Contents, InternalContent{
-					Type: "text",
-					Text: text,
-				})
-			}
-		default:
-			if text, ok := block["text"].(string); ok && text != "" {
-				msg.Contents = append(msg.Contents, InternalContent{
-					Type: "text",
-					Text: text,
-				})
-			}
-		}
-	default:
-		msg.Contents = append(msg.Contents, InternalContent{
-			Type: "text",
-			Text: fmt.Sprintf("%v", block),
+		result = append(result, OpenAITool{
+			Type: "function",
+			Function: OpenAIFunctionDef{
+				Name:        tool.Function.Name,
+				Description: tool.Function.Description,
+				Parameters:  cloneAnyMap(tool.Function.Parameters),
+			},
 		})
 	}
+	return result
 }
 
-func convertOpenAIUsage(respUsage *OpenAIUsage) *InternalUsage {
-	if respUsage == nil {
-		return nil
-	}
-	internal := &InternalUsage{
-		InputTokens:  respUsage.PromptTokens,
-		OutputTokens: respUsage.CompletionTokens,
-		TotalTokens:  respUsage.TotalTokens,
-	}
-	if internal.TotalTokens == 0 && (internal.InputTokens > 0 || internal.OutputTokens > 0) {
-		internal.TotalTokens = internal.InputTokens + internal.OutputTokens
-	}
-	return internal
-}
-
-func totalTokensFallback(usage *InternalUsage) int {
-	if usage.TotalTokens > 0 {
-		return usage.TotalTokens
-	}
-	return usage.InputTokens + usage.OutputTokens
-}
-
-func denormalizeOpenAIFinishReason(reason string) string {
-	switch reason {
-	case "tool_use":
-		return "tool_calls"
-	case "max_tokens":
-		return "length"
-	case "stop_sequence":
-		return "stop"
-	case "", "end_turn":
-		return "stop"
+func convertOpenAIToolChoice(choice interface{}) *InternalToolChoice {
+	switch v := choice.(type) {
+	case string:
+		if v == "" {
+			return nil
+		}
+		return &InternalToolChoice{Type: v}
+	case map[string]interface{}:
+		t, _ := v["type"].(string)
+		if t == "" {
+			return nil
+		}
+		internal := &InternalToolChoice{Type: t}
+		if fn, ok := v["function"].(map[string]interface{}); ok {
+			if name, ok := fn["name"].(string); ok {
+				internal.FunctionName = name
+			}
+		}
+		return internal
 	default:
-		return reason
-	}
-}
-
-func boolPtrValue(v bool) *bool {
-	return &v
-}
-
-// 🆕 Helper函数：克隆 LogitBias
-func cloneLogitBias(src map[string]float64) map[string]float64 {
-	if src == nil {
 		return nil
 	}
-	dst := make(map[string]float64, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
-	return dst
 }
 
-// copyStringSlice 创建字符串切片的深度拷贝，保持空切片的语义
-func copyStringSlice(src []string) []string {
-	if src == nil {
+func convertInternalToolChoice(choice *InternalToolChoice) interface{} {
+	if choice == nil {
 		return nil
 	}
-	if len(src) == 0 {
-		return []string{} // 保持空切片的语义
+	if choice.Type == "function" && choice.FunctionName != "" {
+		return map[string]interface{}{
+			"type": "function",
+			"function": map[string]interface{}{
+				"name": choice.FunctionName,
+			},
+		}
 	}
-	return append([]string(nil), src...)
+	return choice.Type
 }
 
-// 🆕 OpenAI ResponseFormat → Internal ResponseFormat
+func cloneLogitBias(bias map[string]float64) map[string]float64 {
+	if bias == nil {
+		return nil
+	}
+	result := make(map[string]float64, len(bias))
+	for k, v := range bias {
+		result[k] = v
+	}
+	return result
+}
+
 func convertOpenAIResponseFormatToInternal(rf *OpenAIResponseFormat) *InternalResponseFormat {
 	if rf == nil {
 		return nil
 	}
-	internal := &InternalResponseFormat{
-		Type: rf.Type,
+	return &InternalResponseFormat{
+		Type:   rf.Type,
+		Schema: cloneAnyMap(rf.Schema),
 	}
-	if len(rf.Schema) > 0 {
-		internal.Schema = make(map[string]interface{}, len(rf.Schema))
-		for k, v := range rf.Schema {
-			internal.Schema[k] = v
-		}
-	}
-	return internal
 }
 
-// 🆕 Internal ResponseFormat → OpenAI ResponseFormat
-func convertInternalResponseFormatToOpenAI(irf *InternalResponseFormat) *OpenAIResponseFormat {
-	if irf == nil {
+func convertInternalResponseFormatToOpenAI(rf *InternalResponseFormat) *OpenAIResponseFormat {
+	if rf == nil {
 		return nil
 	}
-	openai := &OpenAIResponseFormat{
-		Type: irf.Type,
+	return &OpenAIResponseFormat{
+		Type:   rf.Type,
+		Schema: cloneAnyMap(rf.Schema),
 	}
-	if len(irf.Schema) > 0 {
-		openai.Schema = make(map[string]interface{}, len(irf.Schema))
-		for k, v := range irf.Schema {
-			openai.Schema[k] = v
-		}
-	}
-	return openai
 }
-
-// NewOpenAIChatAdapter creates a new adapter for the static proxy.
-func NewOpenAIChatAdapter() RequestAdapter {
-	return &OpenAIChatFormatAdapter{}
-}
-
-// ConvertRequest implements the RequestAdapter interface for the new static proxy.
-// It currently acts as a pass-through, as the new architecture prioritizes routing over conversion.
-func (a *OpenAIChatFormatAdapter) ConvertRequest(req *http.Request) (*http.Request, error) {
-	// No-op for now. The request is passed through as is.
-	return req, nil
-}
-

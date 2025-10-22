@@ -28,6 +28,14 @@ func (s *Server) handleProxy(c *gin.Context) {
 		}
 	}
 
+	// 特殊处理模型列表请求，避免与通配路由冲突
+	if c.Request.Method == http.MethodGet {
+		if path == "/v1/models" || path == "/v1beta/models" {
+			s.handleModelsList(c)
+			return
+		}
+	}
+
 	// 读取请求体
 	requestBody, err := s.readRequestBody(c)
 	if err != nil {
@@ -39,11 +47,11 @@ func (s *Server) handleProxy(c *gin.Context) {
 	formatDetection := utils.DetectRequestFormat(path, requestBody)
 	c.Set("format_detection", formatDetection)
 	s.logger.Debug("Request format detected", map[string]interface{}{
-		"client_type":  formatDetection.ClientType,
-		"format":       formatDetection.Format,
-		"confidence":   formatDetection.Confidence,
-		"detected_by":  formatDetection.DetectedBy,
-		"path":         path,
+		"client_type": formatDetection.ClientType,
+		"format":      formatDetection.Format,
+		"confidence":  formatDetection.Confidence,
+		"detected_by": formatDetection.DetectedBy,
+		"path":        path,
 	})
 
 	// 提取原始模型名（在任何重写之前）
@@ -104,19 +112,19 @@ func (s *Server) handleProxy(c *gin.Context) {
 // generateDetailedEndpointUnavailableMessage 生成详细的端点不可用错误消息
 func (s *Server) generateDetailedEndpointUnavailableMessage(requestID string, requestTags []string) string {
 	allEndpoints := s.endpointManager.GetAllEndpoints()
-	
+
 	if len(requestTags) > 0 {
 		// 有tag的请求
 		taggedActiveCount := 0
 		taggedTotalCount := 0
 		universalActiveCount := 0
 		universalTotalCount := 0
-		
+
 		for _, ep := range allEndpoints {
 			if !ep.Enabled {
 				continue
 			}
-			
+
 			if len(ep.Tags) == 0 {
 				// 通用端点
 				universalTotalCount++
@@ -133,20 +141,20 @@ func (s *Server) generateDetailedEndpointUnavailableMessage(requestID string, re
 				}
 			}
 		}
-		
-		return fmt.Sprintf("request %s with tag (%s) had failed on %d active out of %d (with tags) and %d active of %d (universal) endpoints", 
+
+		return fmt.Sprintf("request %s with tag (%s) had failed on %d active out of %d (with tags) and %d active of %d (universal) endpoints",
 			requestID, strings.Join(requestTags, ", "), taggedActiveCount, taggedTotalCount, universalActiveCount, universalTotalCount)
 	} else {
 		// 无tag的请求
 		universalActiveCount := 0
 		universalTotalCount := 0
 		allEndpointsAreTagged := true
-		
+
 		for _, ep := range allEndpoints {
 			if !ep.Enabled {
 				continue
 			}
-			
+
 			if len(ep.Tags) == 0 {
 				universalTotalCount++
 				allEndpointsAreTagged = false
@@ -155,14 +163,14 @@ func (s *Server) generateDetailedEndpointUnavailableMessage(requestID string, re
 				}
 			}
 		}
-		
-		message := fmt.Sprintf("request %s without tag had failed on %d active of %d (universal) endpoints", 
+
+		message := fmt.Sprintf("request %s without tag had failed on %d active of %d (universal) endpoints",
 			requestID, universalActiveCount, universalTotalCount)
-		
+
 		if allEndpointsAreTagged && universalTotalCount == 0 {
 			message += ". All endpoints are tagged but request is not tagged, make sure you understand how tags works"
 		}
-		
+
 		return message
 	}
 }
@@ -172,12 +180,12 @@ func (s *Server) endpointMatchesTags(ep *endpoint.Endpoint, requestTags []string
 	if len(requestTags) == 0 {
 		return len(ep.Tags) == 0
 	}
-	
+
 	epTagSet := make(map[string]bool)
 	for _, tag := range ep.Tags {
 		epTagSet[tag] = true
 	}
-	
+
 	for _, required := range requestTags {
 		if !epTagSet[required] {
 			return false
@@ -185,4 +193,3 @@ func (s *Server) endpointMatchesTags(ep *endpoint.Endpoint, requestTags []string
 	}
 	return true
 }
-

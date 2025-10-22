@@ -3,12 +3,12 @@ package httpclient
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 
+	commonutils "claude-code-codex-companion/internal/common/utils"
 	"claude-code-codex-companion/internal/config"
 
 	"golang.org/x/net/proxy"
@@ -93,7 +93,7 @@ func (h *httpProxyDialer) DialContext(ctx context.Context, network, address stri
 	}
 
 	if h.proxyURL.User != nil {
-		connectReq.Header.Set("Proxy-Authorization", "Basic "+basicAuth(h.proxyURL.User.String()))
+		connectReq.Header.Set("Proxy-Authorization", "Basic "+commonutils.BasicAuth(h.proxyURL.User.String()))
 	}
 
 	if err := connectReq.Write(proxyConn); err != nil {
@@ -144,9 +144,4 @@ func (s *socks5ProxyDialer) DialContext(ctx context.Context, network, address st
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-}
-
-// basicAuth 创建基本认证字符串
-func basicAuth(userInfo string) string {
-	return base64.StdEncoding.EncodeToString([]byte(userInfo))
 }
