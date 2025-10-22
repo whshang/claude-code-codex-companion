@@ -206,6 +206,55 @@
 
                         <div class="row mt-4">
                             <div class="col-12">
+                                <h6 data-t="retry_configuration">重试配置</h6>
+                            </div>
+                            <div class="col-12">
+                                <div class="mb-3">
+                                    <label class="form-label" data-t="retry_upstream_errors">上游错误规则</label>
+                                    <div id="retry-upstream-errors-container">
+                                        {{range $idx, $rule := .Config.Retry.UpstreamErrors}}
+                                        <div class="card mb-2 upstream-error-row" data-index="{{$idx}}">
+                                            <div class="card-body p-3">
+                                                <div class="row g-2 align-items-end">
+                                                    <div class="col-md-4">
+                                                        <label class="form-label" data-t="retry_pattern">匹配模式</label>
+                                                        <input type="text" class="form-control upstream-error-pattern" value="{{$rule.Pattern}}" placeholder="Contains...">
+                                                    </div>
+                                                    <div class="col-md-3">
+                                                        <label class="form-label" data-t="retry_action">动作</label>
+                                                        <select class="form-select upstream-error-action">
+                                                            <option value="retry_endpoint" {{if eq $rule.Action "retry_endpoint"}}selected{{end}} data-t="retry_endpoint">重试当前端点</option>
+                                                            <option value="switch_endpoint" {{if or (eq $rule.Action "switch_endpoint") (eq $rule.Action "")}}selected{{end}} data-t="switch_endpoint">切换下一个端点</option>
+                                                        </select>
+                                                    </div>
+                                                    <div class="col-md-2">
+                                                        <label class="form-label" data-t="retry_max_retries">最大重试</label>
+                                                        <input type="number" class="form-control upstream-error-max-retries" min="0" max="10" value="{{$rule.MaxRetries}}" placeholder="0">
+                                                    </div>
+                                                    <div class="col-md-2">
+                                                        <div class="form-check mt-4">
+                                                            <input class="form-check-input upstream-error-case" type="checkbox" {{if $rule.CaseInsensitive}}checked{{end}}>
+                                                            <label class="form-check-label" data-t="retry_case_insensitive">忽略大小写</label>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-1 text-end">
+                                                        <button type="button" class="btn btn-outline-danger btn-sm remove-upstream-error" title="删除">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {{end}}
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-primary mt-2" id="add-retry-upstream-error" data-t="add_rule">添加规则</button>
+                                    <div class="form-text" data-t="retry_upstream_hint">匹配上游错误文本并决定重试策略；支持配置匹配模式、动作（retry_endpoint 或 switch_endpoint）以及最大重试次数。</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mt-4">
+                            <div class="col-12">
                                 <h6 data-t="tool_call_configuration">工具调用配置</h6>
                             </div>
                             <div class="col-md-3">

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-code-codex-companion/internal/config"
 	"claude-code-codex-companion/internal/conversion"
 	"claude-code-codex-companion/internal/endpoint"
 	"claude-code-codex-companion/internal/tagging"
@@ -27,6 +28,23 @@ const responseCaptureLimit = 64 * 1024
 const conversionStageSeparator = "|"
 
 const requestProcessingCacheKey = "request_processing_cache"
+
+type upstreamErrorMatch struct {
+	Message    string
+	Action     string
+	MaxRetries int
+	Pattern    string
+}
+
+type upstreamError struct {
+	message    string
+	action     string
+	maxRetries int
+}
+
+func (e *upstreamError) Error() string {
+	return e.message
+}
 
 type cachedConversion struct {
 	body []byte
@@ -1476,9 +1494,13 @@ attemptLoop:
 			}
 		}
 
-		if errText, hasError := detectUpstreamErrorResponse(finalResponseBody); hasError {
+		if match := detectUpstreamErrorResponse(finalResponseBody, s.config.Retry.UpstreamErrors); match != nil {
 			duration := time.Since(endpointStartTime)
-			errObj := fmt.Errorf("upstream error: %s", errText)
+			errObj := &upstreamError{
+				message:    fmt.Sprintf("upstream error: %s", match.Message),
+				action:     match.Action,
+				maxRetries: match.MaxRetries,
+			}
 			if conversionStages != nil {
 				addConversionStage(&conversionStages, "response:upstream-error")
 				setConversionContext(c, conversionStages)
@@ -2042,106 +2064,118 @@ func addConversionStage(stages *[]string, stage string) {
 	*stages = append(*stages, stage)
 }
 
-var upstreamErrorKeywords = []string{
+var defaultUpstreamErrorKeywords = []string{
 	"api error:",
 	"cannot read properties of undefined",
 	"internal server error",
 }
 
-func detectUpstreamErrorResponse(body []byte) (string, bool) {
+func detectUpstreamErrorResponse(body []byte, rules []config.UpstreamErrorRule) *upstreamErrorMatch {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
-		return "", false
-	}
-	lower := strings.ToLower(trimmed)
-	for _, kw := range upstreamErrorKeywords {
-		if strings.Contains(lower, kw) {
-			return trimmed, true
-		}
+		return nil
 	}
 
+	candidates := []string{trimmed}
 	var payload map[string]interface{}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", false
+	if err := json.Unmarshal(body, &payload); err == nil {
+		candidates = append(candidates, collectUpstreamErrorTexts(payload)...)
 	}
 
-	if errText, ok := extractOpenAIError(payload); ok {
-		return errText, true
+	for _, rule := range rules {
+		if rule.Pattern == "" {
+			continue
+		}
+		if matchAnyPattern(candidates, rule.Pattern, rule.CaseInsensitive) {
+			action := strings.ToLower(strings.TrimSpace(rule.Action))
+			if action == "" {
+				action = "switch_endpoint"
+			}
+			return &upstreamErrorMatch{
+				Message:    trimmed,
+				Action:     action,
+				MaxRetries: rule.MaxRetries,
+				Pattern:    rule.Pattern,
+			}
+		}
 	}
-	if errText, ok := extractAnthropicError(payload); ok {
-		return errText, true
+
+	for _, kw := range defaultUpstreamErrorKeywords {
+		if matchAnyPattern(candidates, kw, true) {
+			return &upstreamErrorMatch{
+				Message: trimmed,
+				Action:  "switch_endpoint",
+				Pattern: kw,
+			}
+		}
 	}
-	return "", false
+
+	return nil
 }
 
-func extractOpenAIError(payload map[string]interface{}) (string, bool) {
+func collectUpstreamErrorTexts(payload map[string]interface{}) []string {
+	texts := make([]string, 0)
+
 	if errField, ok := payload["error"]; ok {
-		if errStr, ok := errField.(string); ok {
-			return strings.TrimSpace(errStr), true
-		}
-		if errMap, ok := errField.(map[string]interface{}); ok {
-			if msg, ok := errMap["message"].(string); ok {
-				return strings.TrimSpace(msg), true
+		switch v := errField.(type) {
+		case string:
+			texts = append(texts, strings.TrimSpace(v))
+		case map[string]interface{}:
+			if msg, ok := v["message"].(string); ok {
+				texts = append(texts, strings.TrimSpace(msg))
 			}
 		}
 	}
 
-	choices, ok := payload["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
-		return "", false
-	}
-	first, ok := choices[0].(map[string]interface{})
-	if !ok {
-		return "", false
-	}
-	message, ok := first["message"].(map[string]interface{})
-	if !ok {
-		return "", false
-	}
-	if content, ok := message["content"].(string); ok {
-		text := strings.TrimSpace(content)
-		lower := strings.ToLower(text)
-		for _, kw := range upstreamErrorKeywords {
-			if strings.Contains(lower, kw) {
-				return text, true
-			}
-		}
-	}
-	return "", false
-}
-
-func extractAnthropicError(payload map[string]interface{}) (string, bool) {
-	content, ok := payload["content"]
-	if !ok {
-		return "", false
-	}
-	switch blocks := content.(type) {
-	case []interface{}:
-		for _, item := range blocks {
-			blockMap, ok := item.(map[string]interface{})
+	if choices, ok := payload["choices"].([]interface{}); ok {
+		for _, item := range choices {
+			choice, ok := item.(map[string]interface{})
 			if !ok {
 				continue
 			}
-			if text, ok := blockMap["text"].(string); ok {
-				trim := strings.TrimSpace(text)
-				lower := strings.ToLower(trim)
-				for _, kw := range upstreamErrorKeywords {
-					if strings.Contains(lower, kw) {
-						return trim, true
-					}
+			if msg, ok := choice["message"].(map[string]interface{}); ok {
+				if content, ok := msg["content"].(string); ok {
+					texts = append(texts, strings.TrimSpace(content))
 				}
 			}
 		}
-	case string:
-		trim := strings.TrimSpace(blocks)
-		lower := strings.ToLower(trim)
-		for _, kw := range upstreamErrorKeywords {
-			if strings.Contains(lower, kw) {
-				return trim, true
+	}
+
+	if content, ok := payload["content"]; ok {
+		switch blocks := content.(type) {
+		case []interface{}:
+			for _, item := range blocks {
+				if blockMap, ok := item.(map[string]interface{}); ok {
+					if text, ok := blockMap["text"].(string); ok {
+						texts = append(texts, strings.TrimSpace(text))
+					}
+				}
 			}
+		case string:
+			texts = append(texts, strings.TrimSpace(blocks))
 		}
 	}
-	return "", false
+
+	return texts
+}
+
+func matchAnyPattern(texts []string, pattern string, caseInsensitive bool) bool {
+	if pattern == "" {
+		return false
+	}
+	for _, text := range texts {
+		if matchPattern(text, pattern, caseInsensitive) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchPattern(text, pattern string, caseInsensitive bool) bool {
+	if caseInsensitive {
+		return strings.Contains(strings.ToLower(text), strings.ToLower(pattern))
+	}
+	return strings.Contains(text, pattern)
 }
 
 func setConversionContext(c *gin.Context, stages []string) {

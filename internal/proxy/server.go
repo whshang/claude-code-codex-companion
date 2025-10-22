@@ -276,6 +276,10 @@ func (s *Server) HotUpdateConfig(newConfig *config.Config) error {
 	s.config = newConfig
 	s.configMutex.Unlock()
 
+	if s.configPersister != nil {
+		s.configPersister.UpdateConfig(newConfig)
+	}
+
 	if s.conversionManager != nil {
 		if err := s.conversionManager.ApplyConfig(conversion.ManagerConfig{
 			Mode:              conversion.ConversionMode(newConfig.Conversion.AdapterMode),

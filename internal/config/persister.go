@@ -215,6 +215,16 @@ func (cp *ConfigPersister) flushForce() error {
 	return nil
 }
 
+// UpdateConfig 在热更新后替换持久化器追踪的配置指针
+func (cp *ConfigPersister) UpdateConfig(newConfig *Config) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	cp.config = newConfig
+	// 热更新说明最新配置已写入文件，重置脏标记
+	cp.pendingChanges = false
+}
+
 // GetStats 获取统计信息
 func (cp *ConfigPersister) GetStats() PersisterStats {
 	cp.mu.RLock()

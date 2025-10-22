@@ -86,6 +86,8 @@ func (s *AdminServer) saveConfigImmediately() error {
 	if s.hotUpdateHandler != nil {
 		persister := s.hotUpdateHandler.GetConfigPersister()
 		if persister != nil {
+			// 确保持久化器使用最新的配置指针
+			persister.UpdateConfig(s.config)
 			return persister.FlushNow()
 		}
 	}

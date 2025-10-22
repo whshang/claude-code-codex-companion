@@ -2,50 +2,51 @@ package config
 
 // EndpointConfig 端点配置（完整版，支持所有功能）
 type EndpointConfig struct {
-Name               string              `yaml:"name" json:"name"`
-URLAnthropic       string              `yaml:"url_anthropic,omitempty" json:"url_anthropic,omitempty"` // Anthropic格式URL
-URLOpenAI          string              `yaml:"url_openai,omitempty" json:"url_openai,omitempty"`       // OpenAI格式URL
-URLGemini          string              `yaml:"url_gemini,omitempty" json:"url_gemini,omitempty"`       // Gemini格式URL
-AuthType           string              `yaml:"auth_type" json:"auth_type"`
-AuthValue          string              `yaml:"auth_value" json:"auth_value"`
-Enabled            bool                `yaml:"enabled" json:"enabled"`
-Priority           int                 `yaml:"priority" json:"priority"`
-Tags               []string            `yaml:"tags" json:"tags"`                                                           // 支持的tag列表
-ModelRewrite       *ModelRewriteConfig `yaml:"model_rewrite,omitempty" json:"model_rewrite,omitempty"`                     // 模型重写配置
-Proxy              *ProxyConfig        `yaml:"proxy,omitempty" json:"proxy,omitempty"`                                     // 代理配置
-OAuthConfig        *OAuthConfig        `yaml:"oauth_config,omitempty" json:"oauth_config,omitempty"`                       // OAuth配置
-HeaderOverrides    map[string]string   `yaml:"header_overrides,omitempty" json:"header_overrides,omitempty"`           // HTTP Header覆盖配置
-ParameterOverrides map[string]string   `yaml:"parameter_overrides,omitempty" json:"parameter_overrides,omitempty"`     // Request Parameters覆盖配置
-MaxTokensFieldName string              `yaml:"max_tokens_field_name,omitempty" json:"max_tokens_field_name,omitempty"` // max_tokens 参数名转换选项
-RateLimitReset     *int64              `yaml:"rate_limit_reset,omitempty" json:"rate_limit_reset,omitempty"`           // Anthropic-Ratelimit-Unified-Reset
-RateLimitStatus    *string             `yaml:"rate_limit_status,omitempty" json:"rate_limit_status,omitempty"`         // Anthropic-Ratelimit-Unified-Status
-EnhancedProtection bool                `yaml:"enhanced_protection,omitempty" json:"enhanced_protection,omitempty"`     // 官方帐号增强保护：allowed_warning时即禁用端点
-SSEConfig          *SSEConfig          `yaml:"sse_config,omitempty" json:"sse_config,omitempty"`                       // SSE行为配置
-OpenAIPreference   string              `yaml:"openai_preference,omitempty" json:"openai_preference,omitempty"`         // OpenAI格式偏好："responses"|"chat_completions"|"auto"
-CountTokensEnabled *bool               `yaml:"count_tokens_enabled,omitempty" json:"count_tokens_enabled,omitempty"`   // 是否允许使用 /count_tokens 接口
+	Name               string              `yaml:"name" json:"name"`
+	URLAnthropic       string              `yaml:"url_anthropic,omitempty" json:"url_anthropic,omitempty"` // Anthropic格式URL
+	URLOpenAI          string              `yaml:"url_openai,omitempty" json:"url_openai,omitempty"`       // OpenAI格式URL
+	URLGemini          string              `yaml:"url_gemini,omitempty" json:"url_gemini,omitempty"`       // Gemini格式URL
+	AuthType           string              `yaml:"auth_type" json:"auth_type"`
+	AuthValue          string              `yaml:"auth_value" json:"auth_value"`
+	Enabled            bool                `yaml:"enabled" json:"enabled"`
+	Priority           int                 `yaml:"priority" json:"priority"`
+	Tags               []string            `yaml:"tags" json:"tags"`                                                       // 支持的tag列表
+	ModelRewrite       *ModelRewriteConfig `yaml:"model_rewrite,omitempty" json:"model_rewrite,omitempty"`                 // 模型重写配置
+	Proxy              *ProxyConfig        `yaml:"proxy,omitempty" json:"proxy,omitempty"`                                 // 代理配置
+	OAuthConfig        *OAuthConfig        `yaml:"oauth_config,omitempty" json:"oauth_config,omitempty"`                   // OAuth配置
+	HeaderOverrides    map[string]string   `yaml:"header_overrides,omitempty" json:"header_overrides,omitempty"`           // HTTP Header覆盖配置
+	ParameterOverrides map[string]string   `yaml:"parameter_overrides,omitempty" json:"parameter_overrides,omitempty"`     // Request Parameters覆盖配置
+	MaxTokensFieldName string              `yaml:"max_tokens_field_name,omitempty" json:"max_tokens_field_name,omitempty"` // max_tokens 参数名转换选项
+	RateLimitReset     *int64              `yaml:"rate_limit_reset,omitempty" json:"rate_limit_reset,omitempty"`           // Anthropic-Ratelimit-Unified-Reset
+	RateLimitStatus    *string             `yaml:"rate_limit_status,omitempty" json:"rate_limit_status,omitempty"`         // Anthropic-Ratelimit-Unified-Status
+	EnhancedProtection bool                `yaml:"enhanced_protection,omitempty" json:"enhanced_protection,omitempty"`     // 官方帐号增强保护：allowed_warning时即禁用端点
+	SSEConfig          *SSEConfig          `yaml:"sse_config,omitempty" json:"sse_config,omitempty"`                       // SSE行为配置
+	OpenAIPreference   string              `yaml:"openai_preference,omitempty" json:"openai_preference,omitempty"`         // OpenAI格式偏好："responses"|"chat_completions"|"auto"
+	CountTokensEnabled *bool               `yaml:"count_tokens_enabled,omitempty" json:"count_tokens_enabled,omitempty"`   // 是否允许使用 /count_tokens 接口
 	SupportsResponses  *bool               `yaml:"supports_responses,omitempty" json:"supports_responses,omitempty"`       // 显式声明是否原生支持 /responses 接口
 
-// 新增：智能转换标记（方案A核心字段）
-NativeFormat     bool   `yaml:"native_format,omitempty" json:"native_format,omitempty"`         // 是否原生支持客户端格式（true=无需转换）
-TargetFormat     string `yaml:"target_format,omitempty" json:"target_format,omitempty"`         // 转换目标格式："anthropic"|"openai_chat"|"openai_responses"|"gemini"
-	ClientType       string `yaml:"client_type,omitempty" json:"client_type,omitempty"`             // 客户端类型过滤："claude_code"|"codex"|"openai"|"gemini"|""（空表示通用）
+	// 新增：智能转换标记（方案A核心字段）
+	NativeFormat bool   `yaml:"native_format,omitempty" json:"native_format,omitempty"` // 是否原生支持客户端格式（true=无需转换）
+	TargetFormat string `yaml:"target_format,omitempty" json:"target_format,omitempty"` // 转换目标格式："anthropic"|"openai_chat"|"openai_responses"|"gemini"
+	ClientType   string `yaml:"client_type,omitempty" json:"client_type,omitempty"`     // 客户端类型过滤："claude_code"|"codex"|"openai"|"gemini"|""（空表示通用）
 }
 
 type Config struct {
 	Server          ServerConfig          `yaml:"server"`
-	Endpoints       []EndpointConfig      `yaml:"endpoints"`  // 恢复：端点列表（方案A核心）
+	Endpoints       []EndpointConfig      `yaml:"endpoints"` // 恢复：端点列表（方案A核心）
 	Logging         LoggingConfig         `yaml:"logging"`
 	Validation      ValidationConfig      `yaml:"validation"`
-	Tagging         TaggingConfig         `yaml:"tagging"`   // 标签系统配置（永远启用）
-	Timeouts        TimeoutConfig         `yaml:"timeouts"`  // 超时配置
-	I18n            I18nConfig            `yaml:"i18n"`      // 国际化配置
-	Blacklist       BlacklistConfig       `yaml:"blacklist"` // 端点拉黑配置
-	Conversion      ConversionConfig      `yaml:"conversion"` // 格式转换配置
-	Streaming       StreamingConfig       `yaml:"streaming"` // 流式转换配置
-	Tools           ToolsConfig           `yaml:"tools"`     // 工具调用配置
-	HTTPClient      HTTPClientConfig      `yaml:"http_client"` // HTTP客户端配置
-	Monitoring      MonitoringConfig      `yaml:"monitoring"` // 性能监控配置
-	FormatDetection FormatDetectionConfig `yaml:"format_detection"` // 格式检测配置
+	Tagging         TaggingConfig         `yaml:"tagging"`            // 标签系统配置（永远启用）
+	Timeouts        TimeoutConfig         `yaml:"timeouts"`           // 超时配置
+	I18n            I18nConfig            `yaml:"i18n"`               // 国际化配置
+	Blacklist       BlacklistConfig       `yaml:"blacklist"`          // 端点拉黑配置
+	Conversion      ConversionConfig      `yaml:"conversion"`         // 格式转换配置
+	Streaming       StreamingConfig       `yaml:"streaming"`          // 流式转换配置
+	Tools           ToolsConfig           `yaml:"tools"`              // 工具调用配置
+	HTTPClient      HTTPClientConfig      `yaml:"http_client"`        // HTTP客户端配置
+	Monitoring      MonitoringConfig      `yaml:"monitoring"`         // 性能监控配置
+	FormatDetection FormatDetectionConfig `yaml:"format_detection"`   // 格式检测配置
+	Retry           RetryConfig           `yaml:"retry" json:"retry"` // 重试策略配置
 }
 
 // I18nConfig 国际化配置
@@ -206,54 +207,67 @@ type ConversionConfig struct {
 	// legacy: 使用原有的直接函数调用转换
 	// unified: 使用新的适配器架构转换（推荐）
 	// auto: 智能选择，优先使用unified，失败时自动回退到legacy
-	AdapterMode string `yaml:"adapter_mode" json:"adapter_mode"` 
+	AdapterMode string `yaml:"adapter_mode" json:"adapter_mode"`
 	// 转换模式验证：在模式切换后进行小流量验证
 	ValidateModeSwitch bool `yaml:"validate_mode_switch" json:"validate_mode_switch"`
 	// 转换失败回退阈值：当失败率达到此百分比时，自动回退到legacy模式
 	FailbackThreshold int `yaml:"failback_threshold" json:"failback_threshold"` // 默认: 30 (30%)
 }
 
+// RetryConfig 重试策略配置
+type RetryConfig struct {
+	UpstreamErrors []UpstreamErrorRule `yaml:"upstream_errors" json:"upstream_errors"`
+}
+
+// UpstreamErrorRule 定义上游错误的匹配与处理方式
+type UpstreamErrorRule struct {
+	Pattern         string `yaml:"pattern" json:"pattern"`
+	Action          string `yaml:"action,omitempty" json:"action,omitempty"`           // retry_endpoint | switch_endpoint
+	MaxRetries      int    `yaml:"max_retries,omitempty" json:"max_retries,omitempty"` // 同一端点最大重试次数（受全局限制）
+	CaseInsensitive bool   `yaml:"case_insensitive,omitempty" json:"case_insensitive,omitempty"`
+}
+
 // （已移除）全局 ToolCallingConfig：采用零配置 + 端点级自动学习/开关
 
 // StreamingConfig 流式转换配置
 type StreamingConfig struct {
-	Timeout           string `yaml:"timeout" json:"timeout"`                           // 流式超时时间，默认30s
-	MaxRetries        int    `yaml:"max_retries" json:"max_retries"`                   // 最大重试次数，默认3
-	MinChunkSize      int    `yaml:"min_chunk_size" json:"min_chunk_size"`             // 最小数据包大小，默认10
-	EnableSSEValidation bool `yaml:"enable_sse_validation" json:"enable_sse_validation"` // 是否启用SSE格式验证
-	EnableCaching     bool `yaml:"enable_caching" json:"enable_caching"`               // 是否启用流式缓存
+	Timeout             string `yaml:"timeout" json:"timeout"`                             // 流式超时时间，默认30s
+	MaxRetries          int    `yaml:"max_retries" json:"max_retries"`                     // 最大重试次数，默认3
+	MinChunkSize        int    `yaml:"min_chunk_size" json:"min_chunk_size"`               // 最小数据包大小，默认10
+	EnableSSEValidation bool   `yaml:"enable_sse_validation" json:"enable_sse_validation"` // 是否启用SSE格式验证
+	EnableCaching       bool   `yaml:"enable_caching" json:"enable_caching"`               // 是否启用流式缓存
 }
 
 // ToolsConfig 工具调用配置
 type ToolsConfig struct {
-	Timeout           string `yaml:"timeout" json:"timeout"`                         // 工具调用超时时间，默认60s
-	MaxParallel       int    `yaml:"max_parallel" json:"max_parallel"`                 // 最大并行工具数，默认10
-	EnableValidation  bool `yaml:"enable_validation" json:"enable_validation"`         // 是否启用工具验证
-	EnableCaching     bool `yaml:"enable_caching" json:"enable_caching"`               // 是否启用工具缓存
+	Timeout          string `yaml:"timeout" json:"timeout"`                     // 工具调用超时时间，默认60s
+	MaxParallel      int    `yaml:"max_parallel" json:"max_parallel"`           // 最大并行工具数，默认10
+	EnableValidation bool   `yaml:"enable_validation" json:"enable_validation"` // 是否启用工具验证
+	EnableCaching    bool   `yaml:"enable_caching" json:"enable_caching"`       // 是否启用工具缓存
 }
 
 // HTTPClientConfig HTTP客户端配置
 type HTTPClientConfig struct {
-	MaxConnsPerHost   int    `yaml:"max_conns_per_host" json:"max_conns_per_host"`     // 每主机最大连接数，默认10
-	WriteBufferSize int    `yaml:"write_buffer_size" json:"write_buffer_size"`       // 写缓冲区大小，默认4096
-	ReadBufferSize  int    `yaml:"read_buffer_size" json:"read_buffer_size"`         // 读缓冲区大小，默认4096
-	ForceAttemptHTTP2 bool `yaml:"force_attempt_http2" json:"force_attempt_http2"`   // 是否强制使用HTTP/2
-	EnableCompression bool `yaml:"enable_compression" json:"enable_compression"`       // 是否启用压缩
-	EnableKeepAlive bool `yaml:"enable_keep_alive" json:"enable_keep_alive"`         // 是否启用长连接
+	MaxConnsPerHost   int  `yaml:"max_conns_per_host" json:"max_conns_per_host"`   // 每主机最大连接数，默认10
+	WriteBufferSize   int  `yaml:"write_buffer_size" json:"write_buffer_size"`     // 写缓冲区大小，默认4096
+	ReadBufferSize    int  `yaml:"read_buffer_size" json:"read_buffer_size"`       // 读缓冲区大小，默认4096
+	ForceAttemptHTTP2 bool `yaml:"force_attempt_http2" json:"force_attempt_http2"` // 是否强制使用HTTP/2
+	EnableCompression bool `yaml:"enable_compression" json:"enable_compression"`   // 是否启用压缩
+	EnableKeepAlive   bool `yaml:"enable_keep_alive" json:"enable_keep_alive"`     // 是否启用长连接
 }
 
 // MonitoringConfig 性能监控配置
 type MonitoringConfig struct {
-	CollectionInterval string `yaml:"collection_interval" json:"collection_interval"` // 指标收集间隔，默认60s
-	SlowRequestThreshold string `yaml:"slow_request_threshold" json:"slow_request_threshold"` // 慢请求阈值，默认5s
-	EnableDetailedMetrics bool `yaml:"enable_detailed_metrics" json:"enable_detailed_metrics"` // 是否启用详细指标
-	EnableRequestTracing bool `yaml:"enable_request_tracing" json:"enable_request_tracing"` // 是否启用请求追踪
+	CollectionInterval    string `yaml:"collection_interval" json:"collection_interval"`         // 指标收集间隔，默认60s
+	SlowRequestThreshold  string `yaml:"slow_request_threshold" json:"slow_request_threshold"`   // 慢请求阈值，默认5s
+	EnableDetailedMetrics bool   `yaml:"enable_detailed_metrics" json:"enable_detailed_metrics"` // 是否启用详细指标
+	EnableRequestTracing  bool   `yaml:"enable_request_tracing" json:"enable_request_tracing"`   // 是否启用请求追踪
 }
 
 // FormatDetectionConfig 格式检测配置
 type FormatDetectionConfig struct {
-	CacheMaxSize      int  `yaml:"cache_max_size" json:"cache_max_size"`             // 缓存最大大小，默认1000
-	LRUCacheSize      int  `yaml:"lru_cache_size" json:"lru_cache_size"`             // LRU缓存大小，默认500
-	EnablePathCaching bool `yaml:"enable_path_caching" json:"enable_path_caching"`   // 是否启用路径缓存
+	CacheMaxSize                 int  `yaml:"cache_max_size" json:"cache_max_size"`                                   // 缓存最大大小，默认1000
+	LRUCacheSize                 int  `yaml:"lru_cache_size" json:"lru_cache_size"`                                   // LRU缓存大小，默认500
+	EnablePathCaching            bool `yaml:"enable_path_caching" json:"enable_path_caching"`                         // 是否启用路径缓存
 	EnableBodyStructureDetection bool `yaml:"enable_body_structure_detection" json:"enable_body_structure_detection"` // 是否启用请求体结构检测
 }

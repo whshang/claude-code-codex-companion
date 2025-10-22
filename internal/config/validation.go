@@ -117,6 +117,10 @@ func validateConfig(config *Config) error {
 		return fmt.Errorf("oauth configuration error: %v", err)
 	}
 
+	if err := validateRetryConfig(&config.Retry); err != nil {
+		return fmt.Errorf("retry configuration error: %v", err)
+	}
+
 	return nil
 }
 
@@ -220,6 +224,34 @@ func validateTimeoutConfig(config *TimeoutConfig) error {
 			if _, err := time.ParseDuration(value); err != nil {
 				return fmt.Errorf("invalid timeout '%s' for field '%s': %v", value, fieldName, err)
 			}
+		}
+	}
+
+	return nil
+}
+
+func validateRetryConfig(cfg *RetryConfig) error {
+	for i, rule := range cfg.UpstreamErrors {
+		pattern := strings.TrimSpace(rule.Pattern)
+		if pattern == "" {
+			return fmt.Errorf("upstream_errors[%d]: pattern is required", i)
+		}
+
+		action := strings.ToLower(strings.TrimSpace(rule.Action))
+		if action == "" {
+			action = "switch_endpoint"
+			cfg.UpstreamErrors[i].Action = action
+		}
+
+		switch action {
+		case "retry_endpoint", "switch_endpoint":
+			// ok
+		default:
+			return fmt.Errorf("upstream_errors[%d]: invalid action '%s'", i, action)
+		}
+
+		if rule.MaxRetries < 0 {
+			return fmt.Errorf("upstream_errors[%d]: max_retries cannot be negative", i)
 		}
 	}
 
@@ -443,7 +475,6 @@ func validateEndpoint(endpoint EndpointConfig, index int) error {
 	if endpoint.OpenAIPreference != "" && endpoint.URLOpenAI == "" {
 		fmt.Printf("[WARNING] Endpoint %d (%s): openai_preference='%s' but url_openai is empty. This setting will be ignored.\n", index, endpoint.Name, endpoint.OpenAIPreference)
 	}
-
 
 	if endpoint.AuthType != "" && endpoint.AuthType != "api_key" && endpoint.AuthType != "auth_token" && endpoint.AuthType != "oauth" && endpoint.AuthType != "auto" {
 		return fmt.Errorf("endpoint %d: invalid auth_type '%s', must be 'api_key', 'auth_token', 'oauth', 'auto', or empty", index, endpoint.AuthType)

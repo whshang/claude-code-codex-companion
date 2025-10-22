@@ -1,6 +1,148 @@
 // Settings Page JavaScript
 
 let originalConfig = null;
+let upstreamErrorRuleCounter = 0;
+let retryUpstreamHandlersInitialized = false;
+
+function collectUpstreamErrorRules() {
+    const container = document.getElementById('retry-upstream-errors-container');
+    if (!container) return [];
+
+    const rows = container.querySelectorAll('.upstream-error-row');
+    const rules = [];
+
+    rows.forEach(row => {
+        const patternInput = row.querySelector('.upstream-error-pattern');
+        const actionSelect = row.querySelector('.upstream-error-action');
+        const maxInput = row.querySelector('.upstream-error-max-retries');
+        const caseCheckbox = row.querySelector('.upstream-error-case');
+
+        if (!patternInput || !actionSelect) {
+            return;
+        }
+
+        const pattern = patternInput.value.trim();
+        const action = (actionSelect.value || '').trim() || 'switch_endpoint';
+        const maxRetriesValue = maxInput ? parseInt(maxInput.value, 10) : 0;
+        const caseInsensitive = caseCheckbox ? caseCheckbox.checked : false;
+
+        if (pattern.length === 0) {
+            return;
+        }
+
+        rules.push({
+            pattern,
+            action,
+            max_retries: Number.isFinite(maxRetriesValue) ? maxRetriesValue : 0,
+            case_insensitive: caseInsensitive
+        });
+    });
+
+    return rules;
+}
+
+function createUpstreamErrorRow(rule = {}) {
+    const pattern = rule.pattern || rule.Pattern || '';
+    const action = (rule.action || rule.Action || 'switch_endpoint').toLowerCase();
+    const maxRetries = Number.isFinite(rule.max_retries) ? rule.max_retries : (Number.isFinite(rule.MaxRetries) ? rule.MaxRetries : 0);
+    const caseInsensitive = typeof rule.case_insensitive === 'boolean' ? rule.case_insensitive :
+        (typeof rule.CaseInsensitive === 'boolean' ? rule.CaseInsensitive : false);
+
+    const card = document.createElement('div');
+    card.className = 'card mb-2 upstream-error-row';
+    card.setAttribute('data-index', upstreamErrorRuleCounter++);
+    card.innerHTML = `
+        <div class="card-body p-3">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label" data-t="retry_pattern">匹配模式</label>
+                    <input type="text" class="form-control upstream-error-pattern" placeholder="Contains...">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" data-t="retry_action">动作</label>
+                    <select class="form-select upstream-error-action">
+                        <option value="retry_endpoint" data-t="retry_endpoint">重试当前端点</option>
+                        <option value="switch_endpoint" data-t="switch_endpoint">切换下一个端点</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label" data-t="retry_max_retries">最大重试</label>
+                    <input type="number" class="form-control upstream-error-max-retries" min="0" max="10" placeholder="0">
+                </div>
+                <div class="col-md-2">
+                    <div class="form-check mt-4">
+                        <input class="form-check-input upstream-error-case" type="checkbox">
+                        <label class="form-check-label" data-t="retry_case_insensitive">忽略大小写</label>
+                    </div>
+                </div>
+                <div class="col-md-1 text-end">
+                    <button type="button" class="btn btn-outline-danger btn-sm remove-upstream-error" title="删除">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const patternInput = card.querySelector('.upstream-error-pattern');
+    const actionSelect = card.querySelector('.upstream-error-action');
+    const maxInput = card.querySelector('.upstream-error-max-retries');
+    const caseCheckbox = card.querySelector('.upstream-error-case');
+
+    if (patternInput) patternInput.value = pattern;
+    if (actionSelect) actionSelect.value = action === 'retry_endpoint' ? 'retry_endpoint' : 'switch_endpoint';
+    if (maxInput) maxInput.value = Number.isFinite(maxRetries) ? maxRetries : 0;
+    if (caseCheckbox) caseCheckbox.checked = !!caseInsensitive;
+
+    if (window.I18n && typeof window.I18n.processDataTElements === 'function') {
+        window.I18n.processDataTElements();
+    }
+
+    return card;
+}
+
+function setupRetryUpstreamErrors(initialRules = []) {
+    const container = document.getElementById('retry-upstream-errors-container');
+    const addBtn = document.getElementById('add-retry-upstream-error');
+    if (!container || !addBtn) {
+        return;
+    }
+
+    const existingRows = container.querySelectorAll('.upstream-error-row');
+    if (existingRows.length > upstreamErrorRuleCounter) {
+        upstreamErrorRuleCounter = existingRows.length;
+    }
+
+    if (!retryUpstreamHandlersInitialized) {
+        addBtn.addEventListener('click', function() {
+            container.appendChild(createUpstreamErrorRow({}));
+        });
+
+        container.addEventListener('click', function(e) {
+            const btn = e.target.closest('.remove-upstream-error');
+            if (!btn) return;
+            const row = btn.closest('.upstream-error-row');
+            if (row) {
+                row.remove();
+            }
+            if (container.querySelectorAll('.upstream-error-row').length === 0) {
+                container.appendChild(createUpstreamErrorRow({}));
+            }
+        });
+
+        retryUpstreamHandlersInitialized = true;
+    }
+
+    if (existingRows.length === 0) {
+        if (Array.isArray(initialRules) && initialRules.length > 0) {
+            initialRules.forEach(rule => {
+                container.appendChild(createUpstreamErrorRow(rule));
+            });
+        } else {
+            container.appendChild(createUpstreamErrorRow({}));
+        }
+    }
+}
 
 // Initialize settings page after translations are loaded
 function initializeSettingsPage() {
@@ -36,6 +178,11 @@ function initializeSettingsPage() {
 
     // Collect original configuration
     originalConfig = collectFormData();
+
+    const initialRetryRules = originalConfig.retry && Array.isArray(originalConfig.retry.upstream_errors)
+        ? originalConfig.retry.upstream_errors
+        : [];
+    setupRetryUpstreamErrors(initialRetryRules);
 
     // Add event listeners for action buttons
     document.addEventListener('click', function(e) {
@@ -145,6 +292,9 @@ function collectFormData() {
             lru_cache_size: parseInt(document.getElementById('lruCacheSize').value),
             enable_path_caching: document.getElementById('enablePathCaching').checked,
             enable_body_structure_detection: document.getElementById('enableBodyStructureDetection').checked
+        },
+        retry: {
+            upstream_errors: collectUpstreamErrorRules()
         }
     };
 }
@@ -330,6 +480,16 @@ function resetSettings() {
         document.getElementById('enablePathCaching').checked = originalConfig.format_detection.enable_path_caching;
         document.getElementById('enableBodyStructureDetection').checked = originalConfig.format_detection.enable_body_structure_detection;
     }
+
+    const retryRules = originalConfig.retry && Array.isArray(originalConfig.retry.upstream_errors)
+        ? originalConfig.retry.upstream_errors
+        : [];
+    const retryContainer = document.getElementById('retry-upstream-errors-container');
+    if (retryContainer) {
+        retryContainer.innerHTML = '';
+        upstreamErrorRuleCounter = 0;
+    }
+    setupRetryUpstreamErrors(retryRules);
 
     showAlert('配置已重置为初始值', 'info');
 }

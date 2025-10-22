@@ -9,6 +9,40 @@ let isAuthVisible = false;
 let specialSortableInstance = null;
 let generalSortableInstance = null;
 
+function renderStatusBadges(endpoint) {
+    const badges = [];
+    const enabled = endpoint && endpoint.enabled;
+
+    badges.push(enabled
+        ? '<span class="badge bg-success">Enabled</span>'
+        : '<span class="badge bg-secondary text-dark">Disabled</span>');
+
+    const status = endpoint && endpoint.status;
+    switch (status) {
+        case 'active':
+            badges.push('<span class="badge bg-primary">Active</span>');
+            break;
+        case 'inactive':
+            badges.push('<span class="badge bg-warning text-dark">Idle</span>');
+            break;
+        case 'blacklisted':
+            badges.push('<span class="badge bg-danger">Blacklisted</span>');
+            break;
+        case 'recovering':
+            badges.push('<span class="badge bg-warning text-dark">Recovering</span>');
+            break;
+        case 'degraded':
+            badges.push('<span class="badge bg-info text-dark">Degraded</span>');
+            break;
+        default:
+            badges.push('<span class="badge bg-info text-dark">Check</span>');
+    }
+
+    return badges.join(' ');
+}
+
+window.renderStatusBadges = renderStatusBadges;
+
 document.addEventListener('DOMContentLoaded', function() {
     initializeCommonFeatures();
     endpointModal = new bootstrap.Modal(document.getElementById('endpointModal'));
@@ -158,18 +192,11 @@ function updateEndpointRowStatus(row, endpoint) {
     const statusCell = row.querySelector('.status-cell');
     if (!statusCell) return;
 
-    const badges = [];
-    badges.push(endpoint.enabled ? '<span class="badge bg-success">Enabled</span>' : '<span class="badge bg-secondary text-dark">Disabled</span>');
-
-    if (endpoint.status === 'active') {
-        badges.push('<span class="badge bg-primary">Active</span>');
-    } else if (endpoint.status === 'inactive') {
-        badges.push('<span class="badge bg-warning text-dark">Idle</span>');
-    } else {
-        badges.push('<span class="badge bg-info text-dark">Check</span>');
+    if (endpoint && endpoint.status !== undefined) {
+        row.dataset.endpointStatus = endpoint.status || '';
     }
 
-    statusCell.innerHTML = badges.join(' ');
+    statusCell.innerHTML = `<div class="status-section">${renderStatusBadges(endpoint)}</div>`;
 }
 
 function refreshTable() {

@@ -13,26 +13,38 @@ import (
 func deepCopyConfig(src *config.Config) config.Config {
 	// 拷贝基本字段
 	dst := config.Config{
-		Server:      src.Server,
-		Logging:     src.Logging,
-		Validation:  src.Validation,
-		Timeouts:    src.Timeouts, // 新的TimeoutConfig是值类型，可以直接赋值
-		I18n:        src.I18n,
-		Blacklist:   src.Blacklist,
+		Server:          src.Server,
+		Logging:         src.Logging,
+		Validation:      src.Validation,
+		Timeouts:        src.Timeouts, // 新的TimeoutConfig是值类型，可以直接赋值
+		I18n:            src.I18n,
+		Blacklist:       src.Blacklist,
+		Streaming:       src.Streaming,
+		Tools:           src.Tools,
+		HTTPClient:      src.HTTPClient,
+		Monitoring:      src.Monitoring,
+		FormatDetection: src.FormatDetection,
+		Conversion:      src.Conversion,
+		Retry:           src.Retry,
 	}
-	
+
+	if src.Retry.UpstreamErrors != nil {
+		dst.Retry.UpstreamErrors = make([]config.UpstreamErrorRule, len(src.Retry.UpstreamErrors))
+		copy(dst.Retry.UpstreamErrors, src.Retry.UpstreamErrors)
+	}
+
 	// 深拷贝 Tagging.Taggers slice
 	dst.Tagging = src.Tagging
 	if src.Tagging.Taggers != nil {
 		dst.Tagging.Taggers = make([]config.TaggerConfig, len(src.Tagging.Taggers))
 		copy(dst.Tagging.Taggers, src.Tagging.Taggers)
 	}
-	
+
 	// 深拷贝 Endpoints slice
 	dst.Endpoints = make([]config.EndpointConfig, len(src.Endpoints))
 	for i, ep := range src.Endpoints {
 		dst.Endpoints[i] = ep
-		
+
 		// 深拷贝指针字段
 		if ep.ModelRewrite != nil {
 			modelRewrite := *ep.ModelRewrite
@@ -43,12 +55,12 @@ func deepCopyConfig(src *config.Config) config.Config {
 			}
 			dst.Endpoints[i].ModelRewrite = &modelRewrite
 		}
-		
+
 		if ep.Proxy != nil {
 			proxy := *ep.Proxy
 			dst.Endpoints[i].Proxy = &proxy
 		}
-		
+
 		if ep.OAuthConfig != nil {
 			oauth := *ep.OAuthConfig
 			// 深拷贝 Scopes slice
@@ -58,14 +70,13 @@ func deepCopyConfig(src *config.Config) config.Config {
 			}
 			dst.Endpoints[i].OAuthConfig = &oauth
 		}
-		
-		
+
 		// 深拷贝 Tags slice
 		if ep.Tags != nil {
 			dst.Endpoints[i].Tags = make([]string, len(ep.Tags))
 			copy(dst.Endpoints[i].Tags, ep.Tags)
 		}
-		
+
 		// 深拷贝 HeaderOverrides map
 		if ep.HeaderOverrides != nil {
 			dst.Endpoints[i].HeaderOverrides = make(map[string]string)
@@ -74,7 +85,7 @@ func deepCopyConfig(src *config.Config) config.Config {
 			}
 		}
 	}
-	
+
 	return dst
 }
 
@@ -86,7 +97,7 @@ func (s *AdminServer) handleSettingsPage(c *gin.Context) {
 			enabledCount++
 		}
 	}
-	
+
 	data := s.mergeTemplateData(c, "settings", map[string]interface{}{
 		"Title":        "Settings",
 		"Config":       s.config,
@@ -103,13 +114,19 @@ func (s *AdminServer) handleGetSettings(c *gin.Context) {
 			"host": s.config.Server.Host,
 			"port": s.config.Server.Port,
 		},
-		"logging": s.config.Logging,
-		"validation": s.config.Validation,
-		"timeouts": s.config.Timeouts,
-		"blacklist": s.config.Blacklist,
-		"i18n": s.config.I18n,
+		"logging":          s.config.Logging,
+		"validation":       s.config.Validation,
+		"timeouts":         s.config.Timeouts,
+		"blacklist":        s.config.Blacklist,
+		"i18n":             s.config.I18n,
+		"streaming":        s.config.Streaming,
+		"tools":            s.config.Tools,
+		"http_client":      s.config.HTTPClient,
+		"monitoring":       s.config.Monitoring,
+		"format_detection": s.config.FormatDetection,
+		"retry":            s.config.Retry,
 	}
-	
+
 	c.JSON(http.StatusOK, settings)
 }
 
@@ -117,11 +134,17 @@ func (s *AdminServer) handleGetSettings(c *gin.Context) {
 func (s *AdminServer) handleUpdateSettings(c *gin.Context) {
 	// 定义请求结构
 	type SettingsRequest struct {
-		Server     config.ServerConfig         `json:"server"`
-		Logging    config.LoggingConfig        `json:"logging"`
-		Validation config.ValidationConfig    `json:"validation"`
-		Timeouts   config.TimeoutConfig        `json:"timeouts"`
-		Blacklist  config.BlacklistConfig      `json:"blacklist"`
+		Server          config.ServerConfig          `json:"server"`
+		Logging         config.LoggingConfig         `json:"logging"`
+		Validation      config.ValidationConfig      `json:"validation"`
+		Timeouts        config.TimeoutConfig         `json:"timeouts"`
+		Blacklist       config.BlacklistConfig       `json:"blacklist"`
+		Streaming       config.StreamingConfig       `json:"streaming"`
+		Tools           config.ToolsConfig           `json:"tools"`
+		HTTPClient      config.HTTPClientConfig      `json:"http_client"`
+		Monitoring      config.MonitoringConfig      `json:"monitoring"`
+		FormatDetection config.FormatDetectionConfig `json:"format_detection"`
+		Retry           config.RetryConfig           `json:"retry"`
 	}
 
 	var request SettingsRequest
@@ -140,6 +163,12 @@ func (s *AdminServer) handleUpdateSettings(c *gin.Context) {
 	newConfig.Validation = request.Validation
 	newConfig.Timeouts = request.Timeouts
 	newConfig.Blacklist = request.Blacklist
+	newConfig.Streaming = request.Streaming
+	newConfig.Tools = request.Tools
+	newConfig.HTTPClient = request.HTTPClient
+	newConfig.Monitoring = request.Monitoring
+	newConfig.FormatDetection = request.FormatDetection
+	newConfig.Retry = request.Retry
 
 	// 验证新配置
 	if err := config.ValidateConfig(&newConfig); err != nil {
@@ -158,6 +187,17 @@ func (s *AdminServer) handleUpdateSettings(c *gin.Context) {
 		return
 	}
 
+	// 使用热更新保持代理服务器与新配置一致
+	if s.hotUpdateHandler != nil {
+		if err := s.hotUpdateHandler.HotUpdateConfig(&newConfig); err != nil {
+			s.logger.Error("Failed to hot update configuration after settings change", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Configuration saved but failed to apply changes: " + err.Error(),
+			})
+			return
+		}
+	}
+
 	// 更新内存中的配置
 	s.config = &newConfig
 
@@ -172,7 +212,7 @@ func (s *AdminServer) handleHelpPage(c *gin.Context) {
 	// 调试日志
 	if s.logger != nil {
 		s.logger.Info("handleHelpPage called", map[string]interface{}{
-			"path": c.Request.URL.Path,
+			"path":   c.Request.URL.Path,
 			"method": c.Request.Method,
 		})
 	}
@@ -206,26 +246,26 @@ func (s *AdminServer) handleHelpPage(c *gin.Context) {
 
 	// 原始模板渲染逻辑（暂时注释掉）
 	/*
-	// 获取基础 URL（从请求中推断）
-	scheme := "http"
-	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
-		scheme = "https"
-	}
+		// 获取基础 URL（从请求中推断）
+		scheme := "http"
+		if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
 
-	baseURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
+		baseURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
 
-	data := s.mergeTemplateData(c, "help", map[string]interface{}{
-		"Title":   "Claude Code Setup Guide",
-		"BaseURL": baseURL,
-	})
-
-	// 调试日志
-	if s.logger != nil {
-		s.logger.Info("Rendering help template", map[string]interface{}{
-			"data_keys": fmt.Sprintf("%+v", data),
+		data := s.mergeTemplateData(c, "help", map[string]interface{}{
+			"Title":   "Claude Code Setup Guide",
+			"BaseURL": baseURL,
 		})
-	}
 
-	s.renderHTML(c, "help.html", data)
+		// 调试日志
+		if s.logger != nil {
+			s.logger.Info("Rendering help template", map[string]interface{}{
+				"data_keys": fmt.Sprintf("%+v", data),
+			})
+		}
+
+		s.renderHTML(c, "help.html", data)
 	*/
 }

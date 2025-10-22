@@ -187,6 +187,23 @@ func (s *Server) determineRetryBehaviorFromError(err error, statusCode int, curr
 		return RetryBehaviorReturnError
 	}
 
+	if ue, ok := err.(*upstreamError); ok {
+		switch ue.action {
+		case "retry_endpoint":
+			if ue.maxRetries > 0 && currentAttempt >= ue.maxRetries {
+				return RetryBehaviorSwitchEndpoint
+			}
+			if currentAttempt < MaxEndpointRetries {
+				return RetryBehaviorRetryEndpoint
+			}
+			return RetryBehaviorSwitchEndpoint
+		case "switch_endpoint":
+			return RetryBehaviorSwitchEndpoint
+		default:
+			return RetryBehaviorSwitchEndpoint
+		}
+	}
+
 	errorCategory := s.categorizeError(err, statusCode)
 
 	switch errorCategory {

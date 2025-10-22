@@ -19,6 +19,46 @@ function refreshTooltip(element) {
     bootstrap.Tooltip.getOrCreateInstance(element);
 }
 
+function getStatusBadgesHTML(endpoint) {
+    if (window.renderStatusBadges && typeof window.renderStatusBadges === 'function') {
+        return window.renderStatusBadges(endpoint);
+    }
+
+    const badges = [];
+    if (endpoint && endpoint.enabled) {
+        badges.push('<span class="badge bg-success">Enabled</span>');
+    } else {
+        badges.push('<span class="badge bg-secondary text-dark">Disabled</span>');
+    }
+
+    if (!endpoint) {
+        badges.push('<span class="badge bg-info text-dark">Check</span>');
+        return badges.join(' ');
+    }
+
+    switch (endpoint.status) {
+        case 'active':
+            badges.push('<span class="badge bg-primary">Active</span>');
+            break;
+        case 'inactive':
+            badges.push('<span class="badge bg-warning text-dark">Idle</span>');
+            break;
+        case 'blacklisted':
+            badges.push('<span class="badge bg-danger">Blacklisted</span>');
+            break;
+        case 'recovering':
+            badges.push('<span class="badge bg-warning text-dark">Recovering</span>');
+            break;
+        case 'degraded':
+            badges.push('<span class="badge bg-info text-dark">Degraded</span>');
+            break;
+        default:
+            badges.push('<span class="badge bg-info text-dark">Check</span>');
+    }
+
+    return badges.join(' ');
+}
+
 function rebuildTable(endpoints) {
     const specialTbody = document.getElementById('special-endpoint-list');
     const generalTbody = document.getElementById('general-endpoint-list');
@@ -57,24 +97,9 @@ function rebuildTable(endpoints) {
         }
         row.className = rowClasses.join(' ');
         row.setAttribute('data-endpoint-name', escapeHtml(endpoint.name));
+        row.dataset.endpointStatus = endpoint.status || '';
         
-        // Build status badge - 三种状态：禁用（灰色）、正常（绿色）、不可用（红色）
-        const profileBadges = [];
-        if (endpoint.enabled) {
-            profileBadges.push('<span class="badge bg-success">Enabled</span>');
-        } else {
-            profileBadges.push('<span class="badge bg-secondary text-dark">Disabled</span>');
-        }
-
-        if (endpoint.status === 'active') {
-            profileBadges.push('<span class="badge bg-primary">Active</span>');
-        } else if (endpoint.status === 'inactive') {
-            profileBadges.push('<span class="badge bg-warning text-dark">Idle</span>');
-        } else {
-            profileBadges.push('<span class="badge bg-info text-dark">Check</span>');
-        }
-
-        const profileBadgesHTML = profileBadges.join(' ');
+        const profileBadgesHTML = getStatusBadgesHTML(endpoint);
 
         // Build URL display: show full URLs (matching dashboard style)
         let urlDisplay = '';
@@ -331,6 +356,24 @@ function updateEndpointToggleButton(endpointName, enabled) {
                 event.stopPropagation();
                 toggleEndpointEnabled(endpointName, enabled);
             };
+        }
+
+        if (!enabled) {
+            row.classList.add('endpoint-disabled');
+        } else {
+            row.classList.remove('endpoint-disabled');
+        }
+
+        const endpointData = currentEndpoints.find(ep => ep.name === endpointName);
+        if (endpointData) {
+            endpointData.enabled = enabled;
+            row.dataset.endpointStatus = endpointData.status || '';
+        }
+
+        const statusCell = row.querySelector('.status-cell');
+        if (statusCell) {
+            const badgesHTML = getStatusBadgesHTML(endpointData || { enabled, status: row.dataset.endpointStatus });
+            statusCell.innerHTML = `<div class="status-section">${badgesHTML}</div>`;
         }
     }
 }
