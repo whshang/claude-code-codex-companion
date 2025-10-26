@@ -12,6 +12,7 @@ import (
 	"time"
 
     "claude-code-codex-companion/internal/endpoint"
+    jsonutils "claude-code-codex-companion/internal/common/json"
     "claude-code-codex-companion/internal/logger"
     "claude-code-codex-companion/internal/modelrewrite"
     "claude-code-codex-companion/internal/validator"
@@ -95,7 +96,7 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 				},
 			},
 		}
-		requestBody, err = json.Marshal(reqBody)
+		requestBody, err = jsonutils.SafeMarshal(reqBody)
 		if err != nil {
 			result.Error = fmt.Sprintf("failed to marshal request: %v", err)
 			return result
@@ -109,7 +110,8 @@ func (s *AdminServer) testEndpointFormatWithStream(ep *endpoint.Endpoint, format
 
 		// 根据端点偏好选择API格式
 		openaiPath := s.selectOpenAIPath(ep)
-		testURL = ep.URLOpenAI + openaiPath
+		// 修复：为OpenAI URL添加/v1前缀
+		testURL = strings.TrimSuffix(ep.URLOpenAI, "/") + "/v1" + openaiPath
 		result.URL = testURL
 
 		// 根据端点配置选择测试模型
@@ -693,7 +695,8 @@ func (s *AdminServer) testOpenAIPath(ep *endpoint.Endpoint, path string, timeout
 		Format: "openai",
 	}
 	
-	testURL := ep.URLOpenAI + path
+	// 修复：为OpenAI URL添加/v1前缀
+	testURL := strings.TrimSuffix(ep.URLOpenAI, "/") + "/v1" + path
 	result.URL = testURL
 
 	// 根据端点配置选择测试模型

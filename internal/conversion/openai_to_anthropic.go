@@ -1,8 +1,9 @@
 package conversion
 
 import (
-	"encoding/json"
 	"errors"
+	
+	jsonutils "claude-code-codex-companion/internal/common/json"
 )
 
 // ConvertChatResponseJSONToAnthropic converts an OpenAI Chat Completions response
@@ -13,7 +14,7 @@ func ConvertChatResponseJSONToAnthropic(body []byte) ([]byte, error) {
 	}
 
 	var resp OpenAIResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
+	if err := jsonutils.SafeUnmarshal(body, &resp); err != nil {
 		return nil, err
 	}
 
@@ -74,5 +75,5 @@ func ConvertChatResponseJSONToAnthropic(body []byte) ([]byte, error) {
 		}
 	}
 
-	return json.Marshal(out)
+	return jsonutils.SafeMarshal(out)
 }

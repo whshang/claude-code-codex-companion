@@ -199,7 +199,7 @@ func (qt *QueryTagger) ShouldTag(request *http.Request) (bool, error) {
 
 // BodyJSONTagger JSON请求体字段匹配tagger
 type BodyJSONTagger struct {
-	BaseTagger
+	EnhancedBaseTagger
 	jsonPath      string
 	expectedValue string
 }
@@ -217,43 +217,32 @@ func NewBodyJSONTagger(name, tag string, config map[string]interface{}) (interfa
 	}
 
 	return &BodyJSONTagger{
-		BaseTagger:    BaseTagger{name: name, tag: tag},
-		jsonPath:      jsonPath,
-		expectedValue: expectedValue,
+		EnhancedBaseTagger: *NewEnhancedBaseTagger(name, tag),
+		jsonPath:           jsonPath,
+		expectedValue:      expectedValue,
 	}, nil
 }
 
 func (bt *BodyJSONTagger) ShouldTag(request *http.Request) (bool, error) {
 	// 只处理JSON内容类型
-	contentType := request.Header.Get("Content-Type")
-	if !strings.Contains(contentType, "application/json") {
+	if !bt.IsJSONContent(request) {
 		return false, nil
 	}
 
-	// 从请求上下文中获取预处理的请求体数据
-	// 这需要在调用tagger之前由pipeline预处理并设置到context中
-	bodyContent, ok := request.Context().Value("cached_body").([]byte)
-	if !ok || len(bodyContent) == 0 {
-		return false, nil
-	}
-
-	var jsonData map[string]interface{}
-	if err := json.Unmarshal(bodyContent, &jsonData); err != nil {
-		return false, nil // JSON解析失败，不匹配
-	}
-
-	// 简单的JSON路径解析（支持如 "model" 或 "data.model" 格式）
-	value, err := bt.extractJSONValue(jsonData, bt.jsonPath)
+	// 解析JSON请求体
+	jsonData, err := bt.ParseJSONBody(request)
 	if err != nil {
+		return false, nil // JSON解析失败或没有缓存的请求体，不匹配
+	}
+
+	// 提取指定路径的字符串值
+	strValue, err := bt.ExtractStringValue(jsonData, bt.jsonPath)
+	if err != nil || strValue == "" {
 		return false, nil
 	}
 
-	if strValue, ok := value.(string); ok {
-		// 使用统一的通配符匹配函数
-		return wildcardMatch(bt.expectedValue, strValue)
-	}
-
-	return false, nil
+	// 使用统一的通配符匹配函数
+	return wildcardMatch(bt.expectedValue, strValue)
 }
 
 // extractJSONValue 从JSON数据中提取指定路径的值
@@ -281,7 +270,7 @@ func (bt *BodyJSONTagger) extractJSONValue(data map[string]interface{}, path str
 // UserMessageTagger 用户最新消息内容匹配tagger
 // 匹配 messages 中最后一条 role 为 user 的消息的最后一个 text 类型内容
 type UserMessageTagger struct {
-	BaseTagger
+	EnhancedBaseTagger
 	expectedValue string
 }
 
@@ -293,36 +282,26 @@ func NewUserMessageTagger(name, tag string, config map[string]interface{}) (inte
 	}
 
 	return &UserMessageTagger{
-		BaseTagger:    BaseTagger{name: name, tag: tag},
-		expectedValue: expectedValue,
+		EnhancedBaseTagger: *NewEnhancedBaseTagger(name, tag),
+		expectedValue:      expectedValue,
 	}, nil
 }
 
 func (ut *UserMessageTagger) ShouldTag(request *http.Request) (bool, error) {
 	// 只处理JSON内容类型
-	contentType := request.Header.Get("Content-Type")
-	if !strings.Contains(contentType, "application/json") {
+	if !ut.IsJSONContent(request) {
 		return false, nil
 	}
 
-	// 从请求上下文中获取预处理的请求体数据
-	bodyContent, ok := request.Context().Value("cached_body").([]byte)
-	if !ok || len(bodyContent) == 0 {
-		return false, nil
-	}
-
-	var requestData map[string]interface{}
-	if err := json.Unmarshal(bodyContent, &requestData); err != nil {
-		return false, nil // JSON解析失败，不匹配
+	// 解析JSON请求体
+	requestData, err := ut.ParseJSONBody(request)
+	if err != nil {
+		return false, nil // JSON解析失败或没有缓存的请求体，不匹配
 	}
 
 	// 提取用户最新消息的文本内容
 	userText, err := ut.extractLatestUserMessage(requestData)
-	if err != nil {
-		return false, nil
-	}
-
-	if userText == "" {
+	if err != nil || userText == "" {
 		return false, nil
 	}
 

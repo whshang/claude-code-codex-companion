@@ -49,6 +49,7 @@ function addRewriteRule(sourcePattern = '', targetModel = '') {
                 <option value="gpt-5">GPT-5</option>
                 <option value="gpt-5-codex">GPT-5 Codex</option>
                 <option value="gpt-*">所有 GPT</option>
+                <option value="*">所有模型</option>
                 <option value="custom">${customWildcardText}</option>
             </select>
             <input type="text" class="form-control mt-1 source-pattern-input" 

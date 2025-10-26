@@ -475,6 +475,8 @@
         "gpt5_pattern": "• GPT-5: gpt-5",
         "gpt5_codex_pattern": "• GPT-5 Codex: gpt-5-codex",
         "all_gpt_pattern": "• All GPT: gpt-*",
+        "all_models_pattern": "• すべてのモデル: *",
+        "all_models_option": "すべてのモデル",
         "max_tokens_override_description": "• すべてのリクエストのmax_tokensパラメータを指定値に強制します",
         "max_tokens_zero_disable_description": "• 0に設定すると上書き機能が無効になります",
         "max_tokens_timing_description": "• モデル書き換え後、フォーマット変換前に適用されます",

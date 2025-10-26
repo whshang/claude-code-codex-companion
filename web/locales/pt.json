@@ -475,6 +475,8 @@
         "gpt5_pattern": "• GPT-5: gpt-5",
         "gpt5_codex_pattern": "• GPT-5 Codex: gpt-5-codex",
         "all_gpt_pattern": "• All GPT: gpt-*",
+        "all_models_pattern": "• Todos os modelos: *",
+        "all_models_option": "Todos os modelos",
         "max_tokens_override_description": "• Força o parâmetro max_tokens para o valor especificado em todas as solicitações",
         "max_tokens_zero_disable_description": "• Definir como 0 para desabilitar a funcionalidade de sobrescrever",
         "max_tokens_timing_description": "• Aplicado após reescrita do modelo, antes da conversão de formato",

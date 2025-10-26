@@ -80,3 +80,6 @@ config-*.yaml
 
 tmp/
 build-errors.log
+
+# Reference project (prevent nested git repo)
+reference-project/

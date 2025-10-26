@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"claude-code-codex-companion/internal/endpoint"
@@ -91,6 +92,21 @@ func (s *Server) sendFailureResponse(c *gin.Context, requestID string, startTime
 			blacklistedEndpoints, blacklistReasons)
 	}
 
+	if hints := getUpstreamHints(c); len(hints) > 0 {
+		hintMsg := strings.Join(hints, " ")
+		if errorMsg != "" {
+			errorMsg = fmt.Sprintf("%s. %s", strings.TrimRight(errorMsg, ". "), hintMsg)
+		} else {
+			errorMsg = hintMsg
+		}
+		if requestLog.ErrorDetails == nil {
+			requestLog.ErrorDetails = map[string]interface{}{}
+		}
+		requestLog.ErrorDetails["upstream_hints"] = hints
+		requestLog.ErrorCategory = "upstream"
+		requestLog.LastRetryError = hintMsg
+	}
+
 	requestLog.Tags = requestTags
 	requestLog.Error = errorMsg
 
@@ -109,7 +125,7 @@ func (s *Server) sendFailureResponse(c *gin.Context, requestID string, startTime
 }
 
 // logSimpleRequest creates and logs a simple request log entry for error cases
-func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, originalRequestBody []byte, finalRequestBody []byte, c *gin.Context, req *http.Request, resp *http.Response, responseBody []byte, duration time.Duration, err error, isStreaming bool, tags []string, contentTypeOverride string, originalModel, rewrittenModel string, attemptNumber int) {
+func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, originalRequestBody []byte, finalRequestBody []byte, c *gin.Context, req *http.Request, resp *http.Response, responseBody []byte, duration time.Duration, err error, isStreaming bool, tags []string, contentTypeOverride string, originalModel, rewrittenModel string, attemptNumber int, targetURL string) {
 	requestLog := s.logger.CreateRequestLog(requestID, endpoint, method, path)
 	requestLog.RequestBodySize = len(originalRequestBody)
 	requestLog.Tags = tags
@@ -242,6 +258,29 @@ func (s *Server) logSimpleRequest(requestID, endpoint, method, path string, orig
 	// 更新并记录日志
 	s.logger.UpdateRequestLog(requestLog, req, resp, responseBody, duration, err)
 	requestLog.IsStreaming = isStreaming
+
+	if ue, ok := err.(*upstreamError); ok {
+		if requestLog.ErrorDetails == nil {
+			requestLog.ErrorDetails = map[string]interface{}{}
+		}
+		requestLog.ErrorDetails["type"] = "upstream_error"
+		requestLog.ErrorDetails["raw_message"] = ue.rawMessage
+		if ue.endpoint != "" {
+			requestLog.ErrorDetails["upstream_endpoint"] = ue.endpoint
+		}
+		if ue.model != "" {
+			requestLog.ErrorDetails["upstream_model"] = ue.model
+		}
+		if ue.pattern != "" {
+			requestLog.ErrorDetails["matched_pattern"] = ue.pattern
+		}
+		if ue.action != "" {
+			requestLog.ErrorDetails["retry_action"] = ue.action
+		}
+		requestLog.ErrorCategory = "upstream"
+		requestLog.LastRetryError = ue.rawMessage
+	}
+
 	s.logger.LogRequest(requestLog)
 }
 

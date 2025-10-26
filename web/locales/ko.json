@@ -475,6 +475,8 @@
         "gpt5_pattern": "• GPT-5: gpt-5",
         "gpt5_codex_pattern": "• GPT-5 Codex: gpt-5-codex",
         "all_gpt_pattern": "• All GPT: gpt-*",
+        "all_models_pattern": "• 모든 모델: *",
+        "all_models_option": "모든 모델",
         "max_tokens_override_description": "• 모든 요청에 대해 max_tokens 매개변수를 지정된 값으로 강제 설정",
         "max_tokens_zero_disable_description": "• 0으로 설정하면 재정의 기능이 비활성화됩니다",
         "max_tokens_timing_description": "• 모델 재작성 후, 형식 변환 전에 적용됩니다",

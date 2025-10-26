@@ -1,11 +1,12 @@
 package conversion
 
 import (
-    "encoding/json"
     "fmt"
     "io"
     "strings"
     "time"
+    
+    jsonutils "claude-code-codex-companion/internal/common/json"
 )
 
 // Removed unused helpers: parseOpenAISSEToMessage, buildResponsesSSE
@@ -197,7 +198,7 @@ func convertResponsesEventToChatChunk(eventType, dataContent, responseID, model 
 				Model string `json:"model"`
 			} `json:"response"`
 		}
-		if err := json.Unmarshal([]byte(dataContent), &event); err == nil {
+		if err := jsonutils.SafeUnmarshal([]byte(dataContent), &event); err == nil {
 			if event.Response.ID != "" {
 				responseID = event.Response.ID
 			}
@@ -222,7 +223,7 @@ func convertResponsesEventToChatChunk(eventType, dataContent, responseID, model 
 		var event struct {
 			Delta string `json:"delta"`
 		}
-		if err := json.Unmarshal([]byte(dataContent), &event); err != nil {
+		if err := jsonutils.SafeUnmarshal([]byte(dataContent), &event); err != nil {
 			return nil, err
 		}
 		
@@ -243,7 +244,7 @@ func convertResponsesEventToChatChunk(eventType, dataContent, responseID, model 
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		}
-		if err := json.Unmarshal([]byte(dataContent), &event); err != nil {
+		if err := jsonutils.SafeUnmarshal([]byte(dataContent), &event); err != nil {
 			return nil, err
 		}
 		
@@ -270,7 +271,7 @@ func convertResponsesEventToChatChunk(eventType, dataContent, responseID, model 
 			ID    string `json:"id"`
 			Delta string `json:"delta"`
 		}
-		if err := json.Unmarshal([]byte(dataContent), &event); err != nil {
+		if err := jsonutils.SafeUnmarshal([]byte(dataContent), &event); err != nil {
 			return nil, err
 		}
 		
@@ -301,7 +302,7 @@ func convertResponsesEventToChatChunk(eventType, dataContent, responseID, model 
 				TotalTokens  int `json:"total_tokens"`
 			} `json:"usage"`
 		}
-		if err := json.Unmarshal([]byte(dataContent), &event); err != nil {
+		if err := jsonutils.SafeUnmarshal([]byte(dataContent), &event); err != nil {
 			return nil, err
 		}
 		
@@ -329,7 +330,7 @@ func convertResponsesEventToChatChunk(eventType, dataContent, responseID, model 
 // buildChatSSEFromChunks 从OpenAI chunks构建Chat格式的SSE流
 func buildChatSSEFromChunks(chunks []OpenAIStreamChunk, w io.Writer) error {
 	for _, chunk := range chunks {
-		data, err := json.Marshal(chunk)
+		data, err := jsonutils.SafeMarshal(chunk)
 		if err != nil {
 			continue
 		}
@@ -352,7 +353,7 @@ func buildChatSSEFromChunks(chunks []OpenAIStreamChunk, w io.Writer) error {
 // Removed unused helper: buildChatSSE
 
 func writeSSEEvent(builder *strings.Builder, event string, payload interface{}) {
-	bytes, err := json.Marshal(payload)
+	bytes, err := jsonutils.SafeMarshal(payload)
 	if err != nil {
 		return
 	}
@@ -367,7 +368,7 @@ func writeSSEEvent(builder *strings.Builder, event string, payload interface{}) 
 }
 
 func writeChatChunk(builder *strings.Builder, payload map[string]interface{}) {
-	bytes, err := json.Marshal(payload)
+	bytes, err := jsonutils.SafeMarshal(payload)
 	if err != nil {
 		return
 	}

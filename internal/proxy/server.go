@@ -30,7 +30,7 @@ type Server struct {
 	adminServer     *web.AdminServer
 	taggingManager  *tagging.Manager       // 新增：tagging系统管理器
 	modelRewriter   *modelrewrite.Rewriter // 新增：模型重写器
-	i18nManager     *i18n.Manager          // 新增：国际化管理器
+	i18nManager      *i18n.Manager          // 新增：国际化管理器
 	router          *gin.Engine
 	configFilePath  string
 	configMutex     sync.Mutex // 新增：保护配置文件操作的互斥锁
@@ -43,6 +43,9 @@ type Server struct {
 
 	// 配置持久化管理器
 	configPersister *config.ConfigPersister
+
+	// 错误模式匹配器
+	errorPatternMatcher *ErrorPatternMatcher
 }
 
 func NewServer(cfg *config.Config, configFilePath string, version string) (*Server, error) {
@@ -164,6 +167,9 @@ func NewServer(cfg *config.Config, configFilePath string, version string) (*Serv
 	server.conversionManager = manager
 	adminServer.SetConversionManager(manager)
 	adminServer.SetDynamicSorter(server.dynamicSorter)
+
+	// 初始化错误模式匹配器
+	server.errorPatternMatcher = NewErrorPatternMatcher()
 
 	// 设置持久化回调，让AdminServer可以被Server调用
 	adminServer.SetPersistenceCallbacks(server)

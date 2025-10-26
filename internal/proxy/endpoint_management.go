@@ -54,6 +54,8 @@ func (s *Server) shouldSkipHealthRecord(errorCategory ErrorCategory) bool {
 
 // tryProxyRequestWithRetry 尝试向端点发送请求，支持单端点重试
 func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint, requestBody []byte, requestID string, startTime time.Time, path string, taggedRequest *tagging.TaggedRequest, globalAttemptNumber int) (success bool, shouldTryNextEndpoint bool) {
+	immutableRequestBody := append([]byte(nil), requestBody...)
+
 	// 检查端点是否被拉黑，如果是则记录虚拟日志并跳过
 	if !ep.IsAvailable() {
 		duration := time.Since(startTime)
@@ -70,18 +72,37 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 		}
 
 		// 记录被拉黑端点的虚拟请求日志
-		s.logBlacklistedEndpointRequest(requestID, ep, path, requestBody, c, duration, errorMsg, causingRequestIDs, globalAttemptNumber, taggedRequest)
+		s.logBlacklistedEndpointRequest(requestID, ep, path, immutableRequestBody, c, duration, errorMsg, causingRequestIDs, globalAttemptNumber, taggedRequest)
 
 		// 立即尝试下一个端点
 		s.logger.Debug(fmt.Sprintf("Endpoint %s is blacklisted, skipping to next endpoint", ep.Name))
 		return false, true
 	}
 
+	baseModel := ""
+	if val, ok := c.Get("base_client_model"); ok {
+		if s, ok := val.(string); ok {
+			baseModel = s
+		}
+	} else if val, ok := c.Get("original_model"); ok {
+		if s, ok := val.(string); ok {
+			baseModel = s
+		}
+	}
+
 	for endpointAttempt := 1; endpointAttempt <= MaxEndpointRetries; endpointAttempt++ {
 		currentGlobalAttempt := globalAttemptNumber + endpointAttempt - 1
 		s.logger.Debug(fmt.Sprintf("Trying endpoint %s (endpoint attempt %d/%d, global attempt %d)", ep.Name, endpointAttempt, MaxEndpointRetries, currentGlobalAttempt))
 
-		success, shouldRetryAnywhere, responseTime, firstByteTime := s.proxyToEndpoint(c, ep, path, requestBody, requestID, startTime, taggedRequest, currentGlobalAttempt)
+		requestBodyCopy := append([]byte(nil), immutableRequestBody...)
+
+		if baseModel != "" {
+			if updatedBody, changed := restoreBaseModel(requestBodyCopy, baseModel); changed {
+				requestBodyCopy = updatedBody
+			}
+		}
+
+		success, shouldRetryAnywhere, responseTime, firstByteTime := s.proxyToEndpoint(c, ep, path, requestBodyCopy, requestID, startTime, taggedRequest, currentGlobalAttempt)
 		if success {
 			// 检查是否应该跳过健康统计记录
 			skipHealthRecord, _ := c.Get("skip_health_record")
@@ -90,8 +111,8 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 			}
 
 			// 尝试提取基准信息用于健康检查
-			if len(requestBody) > 0 {
-				extracted := s.healthChecker.GetExtractor().ExtractFromRequest(requestBody, c.Request.Header)
+			if len(requestBodyCopy) > 0 {
+				extracted := s.healthChecker.GetExtractor().ExtractFromRequest(requestBodyCopy, c.Request.Header)
 				if extracted {
 					s.logger.Info("Successfully updated health check baseline info from request")
 				}
@@ -147,7 +168,7 @@ func (s *Server) tryProxyRequestWithRetry(c *gin.Context, ep *endpoint.Endpoint,
 			if endpointAttempt < MaxEndpointRetries {
 				s.logger.Debug(fmt.Sprintf("Endpoint %s: RetryBehaviorRetryEndpoint - retrying same endpoint (attempt %d/%d)", ep.Name, endpointAttempt+1, MaxEndpointRetries))
 				// 重新构建请求体，继续循环
-				s.rebuildRequestBody(c, requestBody)
+				s.rebuildRequestBody(c, immutableRequestBody)
 				continue
 			} else {
 				s.logger.Debug(fmt.Sprintf("Endpoint %s: Max retries reached, switching to next endpoint", ep.Name))
@@ -190,8 +211,10 @@ func (s *Server) determineRetryBehaviorFromError(err error, statusCode int, curr
 	if ue, ok := err.(*upstreamError); ok {
 		switch ue.action {
 		case "retry_endpoint":
-			if ue.maxRetries > 0 && currentAttempt >= ue.maxRetries {
-				return RetryBehaviorSwitchEndpoint
+			if ue.maxRetries > 0 {
+				if currentAttempt-1 >= ue.maxRetries {
+					return RetryBehaviorSwitchEndpoint
+				}
 			}
 			if currentAttempt < MaxEndpointRetries {
 				return RetryBehaviorRetryEndpoint
@@ -359,13 +382,31 @@ func (s *Server) tryProxyRequest(c *gin.Context, ep *endpoint.Endpoint, requestB
 // tryEndpointList 尝试端点列表，返回(成功, 尝试次数)
 func (s *Server) tryEndpointList(c *gin.Context, endpoints []utils.EndpointSorter, path string, requestBody []byte, requestID string, startTime time.Time, taggedRequest *tagging.TaggedRequest, phase string, startingAttemptNumber int) (bool, int) {
 	totalAttempts := 0
+	immutableRequestBody := append([]byte(nil), requestBody...)
+	baseModel := ""
+	if val, ok := c.Get("base_client_model"); ok {
+		if s, ok := val.(string); ok {
+			baseModel = s
+		}
+	} else if val, ok := c.Get("original_model"); ok {
+		if s, ok := val.(string); ok {
+			baseModel = s
+		}
+	}
 
 	for _, epInterface := range endpoints {
 		ep := epInterface.(*endpoint.Endpoint)
 		currentGlobalAttempt := startingAttemptNumber + totalAttempts
 		s.logger.Debug(fmt.Sprintf("%s: Attempting endpoint %s (starting from global attempt #%d)", phase, ep.Name, currentGlobalAttempt))
 
-		success, shouldTryNextEndpoint := s.tryProxyRequestWithRetry(c, ep, requestBody, requestID, startTime, path, taggedRequest, currentGlobalAttempt)
+		bodyForEndpoint := append([]byte(nil), immutableRequestBody...)
+		if baseModel != "" {
+			if updatedBody, changed := restoreBaseModel(bodyForEndpoint, baseModel); changed {
+				bodyForEndpoint = updatedBody
+			}
+		}
+
+		success, shouldTryNextEndpoint := s.tryProxyRequestWithRetry(c, ep, bodyForEndpoint, requestID, startTime, path, taggedRequest, currentGlobalAttempt)
 
 		// 更新总尝试次数（包括该端点的所有重试）
 		totalAttempts += MaxEndpointRetries
@@ -383,7 +424,7 @@ func (s *Server) tryEndpointList(c *gin.Context, endpoints []utils.EndpointSorte
 		s.logger.Debug(fmt.Sprintf("%s: All attempts failed on endpoint %s, trying next endpoint", phase, ep.Name))
 
 		// 重新构建请求体
-		s.rebuildRequestBody(c, requestBody)
+		s.rebuildRequestBody(c, immutableRequestBody)
 	}
 
 	return false, totalAttempts
@@ -416,6 +457,32 @@ func (s *Server) filterAndSortEndpoints(allEndpoints []*endpoint.Endpoint, faile
 	utils.SortEndpointsByPriority(sorter)
 
 	return sorter
+}
+
+func restoreBaseModel(requestBody []byte, baseModel string) ([]byte, bool) {
+	if len(requestBody) == 0 || baseModel == "" {
+		return requestBody, false
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(requestBody, &data); err != nil {
+		return requestBody, false
+	}
+
+	if current, ok := data["model"].(string); ok {
+		if current == baseModel {
+			return requestBody, false
+		}
+	} else if baseModel == "" {
+		return requestBody, false
+	}
+
+	data["model"] = baseModel
+	updated, err := json.Marshal(data)
+	if err != nil {
+		return requestBody, false
+	}
+	return updated, true
 }
 
 // endpointContainsAllTags 检查endpoint的标签是否包含请求的所有标签

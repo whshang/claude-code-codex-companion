@@ -144,6 +144,11 @@ func (c *RequestConverter) Convert(anthropicReq []byte, endpointInfo *EndpointIn
 	// 需要一个（工具名 -> 最近一次生成的 call id）的映射（当上游历史中包含过 tool_use）
 	latestCallIDByName := map[string]string{}
 
+	// 验证Anthropic请求必须有messages字段
+	if len(anthReq.Messages) == 0 {
+		return nil, nil, NewConversionError("invalid_request", "Anthropic request must contain at least one message", fmt.Errorf("missing messages field"))
+	}
+
 	// 遍历对话消息，逐条转换
 	for _, m := range anthReq.Messages {
 		switch m.Role {

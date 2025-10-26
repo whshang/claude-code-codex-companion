@@ -75,3 +75,21 @@ func ConvertChatResponseJSONToResponses(body []byte) ([]byte, error) {
 	}
 	return converted, nil
 }
+
+// ConvertAnthropicResponseJSONToChat 将 Anthropic 响应转换为 Chat Completions 响应
+func ConvertAnthropicResponseJSONToChat(body []byte) ([]byte, error) {
+	factory := NewAdapterFactory(nil)
+	anthropicAdapter := factory.AnthropicAdapter()
+	chatAdapter := factory.OpenAIChatAdapter()
+
+	internalResp, err := anthropicAdapter.ParseResponseJSON(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to normalize anthropic response: %w", err)
+	}
+
+	converted, err := chatAdapter.BuildResponseJSON(internalResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to render chat response: %w", err)
+	}
+	return converted, nil
+}

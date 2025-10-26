@@ -202,89 +202,77 @@ func InitializeLRUCache(maxSize int) {
 
 // DetectRequestFormat automatically detects the API format from request path and body
 func DetectRequestFormat(path string, requestBody []byte) *FormatDetectionResult {
-	// 1. 先尝试从缓存获取路径检测结果
-	if cached, exists := getCachedPathDetection(path); exists {
-		return cached
-	}
-	result := &FormatDetectionResult{
-		Format:     FormatUnknown,
-		ClientType: ClientUnknown,
-		Confidence: 0.0,
-	}
-
-	// 1. Path-based detection (highest confidence)
-	// 使用更精确的路径匹配，避免误判
-
-	// Anthropic API paths - 精确匹配端点路径
-	if strings.HasSuffix(path, "/messages") || strings.HasSuffix(path, "/v1/messages") ||
-		strings.HasSuffix(path, "/count_tokens") || strings.HasSuffix(path, "/v1/count_tokens") {
-		result.Format = FormatAnthropic
-		result.ClientType = ClientClaudeCode
-		result.Confidence = 0.95
-		result.DetectedBy = "path"
-		setCachedPathDetection(path, result) // 缓存路径检测结果
-		return result
-	}
-
-	// OpenAI API paths - 精确匹配端点路径（包含常见和新增路由）
-	openaiPaths := []string{
-		"/chat/completions",
-		"/v1/chat/completions",
-		"/completions",
-		"/v1/completions",
-		"/embeddings",
-		"/v1/embeddings",
-		"/models",
-		"/v1/models",
-		"/images/generations",
-		"/v1/images/generations",
-		"/audio/transcriptions",
-		"/v1/audio/transcriptions",
-		"/audio/translations",
-		"/v1/audio/translations",
-		"/audio/speech",
-		"/v1/audio/speech",
-		"/files",
-		"/v1/files",
-		"/fine_tuning",
-		"/v1/fine_tuning",
-		"/batches",
-		"/v1/batches",
-		"/responses",  // 新增：OpenAI responses API
-		"/v1/responses",
-		"/realtime",   // 新增：实时 API
-		"/v1/realtime",
-	}
-
-	for _, openaiPath := range openaiPaths {
-		if strings.HasSuffix(path, openaiPath) || strings.Contains(path, openaiPath+"/") {
-			result.Format = FormatOpenAI
-			result.ClientType = ClientCodex
-			result.Confidence = 0.95
-			result.DetectedBy = "path"
-			setCachedPathDetection(path, result) // 缓存路径检测结果
-			return result
-		}
-	}
-
-	// 2. Body structure detection (medium confidence)
+	// 1. Body-based detection first, as it's more reliable than path.
 	if len(requestBody) > 0 {
 		var reqData map[string]interface{}
 		if err := json.Unmarshal(requestBody, &reqData); err == nil {
 			bodyResult := detectFromBody(reqData)
-			if bodyResult.Confidence > 0.3 { // 只有足够信心时才使用
+			// If body detection is highly confident, trust it regardless of path.
+			if bodyResult.Confidence > 0.7 {
 				return bodyResult
 			}
 		}
 	}
 
-	// 3. 无法确定格式时保持 unknown，避免误判
-	// 让后续代码根据端点类型决定是否需要转换
-	result.Format = FormatUnknown
-	result.ClientType = ClientUnknown
-	result.Confidence = 0.0
-	result.DetectedBy = "unknown"
-	return result
+	// 2. Path-based detection as a strong secondary signal if body is not conclusive.
+	if cached, exists := getCachedPathDetection(path); exists {
+		return cached
+	}
+
+	// Anthropic API paths
+	if strings.HasSuffix(path, "/messages") || strings.HasSuffix(path, "/v1/messages") ||
+		strings.HasSuffix(path, "/count_tokens") || strings.HasSuffix(path, "/v1/count_tokens") {
+		result := &FormatDetectionResult{
+			Format:     FormatAnthropic,
+			ClientType: ClientClaudeCode,
+			Confidence: 0.95, // Path is a strong indicator, but body can override.
+			DetectedBy: "path",
+		}
+		setCachedPathDetection(path, result)
+		return result
+	}
+
+	// OpenAI API paths
+	openaiPaths := []string{
+		"/chat/completions", "/v1/chat/completions", "/completions", "/v1/completions",
+		"/embeddings", "/v1/embeddings", "/models", "/v1/models", "/images/generations",
+		"/v1/images/generations", "/audio/transcriptions", "/v1/audio/transcriptions",
+		"/audio/translations", "/v1/audio/translations", "/audio/speech", "/v1/audio/speech",
+		"/files", "/v1/files", "/fine_tuning", "/v1/fine_tuning", "/batches", "/v1/batches",
+		"/responses", "/v1/responses", "/realtime", "/v1/realtime",
+	}
+
+	for _, openaiPath := range openaiPaths {
+		if strings.HasSuffix(path, openaiPath) || strings.Contains(path, openaiPath+"/") {
+			result := &FormatDetectionResult{
+				Format:     FormatOpenAI,
+				ClientType: ClientCodex,
+				Confidence: 0.95,
+				DetectedBy: "path",
+			}
+			setCachedPathDetection(path, result)
+			return result
+		}
+	}
+
+	// 3. If path detection also fails, fall back to any body detection result.
+	if len(requestBody) > 0 {
+		var reqData map[string]interface{}
+		if err := json.Unmarshal(requestBody, &reqData); err == nil {
+			bodyResult := detectFromBody(reqData)
+			if bodyResult.Confidence > 0.3 { // Use a lower threshold here.
+				return bodyResult
+			}
+		}
+	}
+
+	// 4. Default to unknown
+	return &FormatDetectionResult{
+		Format:     FormatUnknown,
+		ClientType: ClientUnknown,
+		Confidence: 0.0,
+		DetectedBy: "unknown",
+	}
 }
 
 // detectFromBody detects format from request body structure

@@ -2,7 +2,6 @@ package modelrewrite
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	"claude-code-codex-companion/internal/config"
+	jsonutils "claude-code-codex-companion/internal/common/json"
 	"claude-code-codex-companion/internal/logger"
 )
 
@@ -46,7 +46,7 @@ func (r *Rewriter) RewriteRequestWithTags(req *http.Request, modelRewriteConfig 
 
 	// 尝试解析JSON
 	var requestData map[string]interface{}
-	if err := json.Unmarshal(body, &requestData); err != nil {
+	if err := jsonutils.SafeUnmarshal(body, &requestData); err != nil {
 		r.logger.Debug("Request body is not valid JSON, skipping model rewrite")
 		return "", "", nil // 非JSON请求，跳过重写
 	}
@@ -85,6 +85,9 @@ func (r *Rewriter) RewriteRequestWithTags(req *http.Request, modelRewriteConfig 
 			// Codex 客户端：非 GPT 模型转为 GPT 默认模型
 			defaultModel = "gpt-5"
 			shouldApplyImplicit = true
+		} else if clientType == "codex" && originalModel == "*" {
+			// Codex 客户端："所有模型" (*) 不做重写，保持用户选择
+			shouldApplyImplicit = false
 		}
 
 		if shouldApplyImplicit {
@@ -116,7 +119,7 @@ func (r *Rewriter) RewriteRequestWithTags(req *http.Request, modelRewriteConfig 
 
 	// 重写model字段
 	requestData["model"] = newModel
-	newBody, err := json.Marshal(requestData)
+	newBody, err := jsonutils.SafeMarshal(requestData)
 	if err != nil {
 		r.logger.Error("Failed to marshal request body after model rewrite", err)
 		return "", "", fmt.Errorf("failed to rewrite model in request: %v", err)
@@ -144,7 +147,7 @@ func (r *Rewriter) RewriteResponse(responseBody []byte, originalModel, rewritten
 
 	// 首先尝试作为JSON处理
 	var responseData map[string]interface{}
-	if err := json.Unmarshal(responseBody, &responseData); err == nil {
+	if err := jsonutils.SafeUnmarshal(responseBody, &responseData); err == nil {
 		return r.rewriteJSONResponse(responseBody, responseData, originalModel, rewrittenModel)
 	}
 
@@ -163,7 +166,7 @@ func (r *Rewriter) rewriteJSONResponse(responseBody []byte, responseData map[str
 	if modelField, exists := responseData["model"]; exists {
 		if modelStr, ok := modelField.(string); ok && modelStr == rewrittenModel {
 			responseData["model"] = originalModel
-			newBody, err := json.Marshal(responseData)
+			newBody, err := jsonutils.SafeMarshal(responseData)
 			if err != nil {
 				r.logger.Error("Failed to marshal response body after model rewrite", err)
 				return responseBody, nil // 重写失败，返回原始内容
@@ -199,14 +202,14 @@ func (r *Rewriter) rewriteSSEResponse(responseBody []byte, originalModel, rewrit
 
 			// 尝试解析JSON
 			var eventData map[string]interface{}
-			if err := json.Unmarshal([]byte(jsonStr), &eventData); err == nil {
+			if err := jsonutils.SafeUnmarshal([]byte(jsonStr), &eventData); err == nil {
 				// 递归查找并替换所有包含model字段的对象
 				if r.replaceModelInObject(eventData, rewrittenModel, originalModel) {
 					rewriteCount++
 				}
 
 				// 重新序列化JSON
-				if newJsonBytes, err := json.Marshal(eventData); err == nil {
+				if newJsonBytes, err := jsonutils.SafeMarshal(eventData); err == nil {
 					modifiedLines = append(modifiedLines, "data: "+string(newJsonBytes))
 				} else {
 					modifiedLines = append(modifiedLines, line) // 序列化失败，保持原样

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 )
 
@@ -186,6 +187,78 @@ func CloneViaJSON[T any](src T) (T, error) {
 	}
 	
 	return dst, nil
+}
+
+// UnmarshalFromReader 从io.Reader读取并反序列化JSON
+func UnmarshalFromReader[T any](reader io.Reader, target *T) error {
+	if reader == nil {
+		return fmt.Errorf("reader is nil")
+	}
+	
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read data: %w", err)
+	}
+	
+	if len(data) == 0 {
+		return fmt.Errorf("empty data from reader")
+	}
+	
+	return SafeUnmarshal(data, target)
+}
+
+// MarshalToWriter 将数据序列化为JSON并写入io.Writer
+func MarshalToWriter[T any](writer io.Writer, data T) error {
+	if writer == nil {
+		return fmt.Errorf("writer is nil")
+	}
+	
+	jsonData, err := SafeMarshal(data)
+	if err != nil {
+		return err
+	}
+	
+	_, err = writer.Write(jsonData)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON data: %w", err)
+	}
+	
+	return nil
+}
+
+// MustMarshal 必须成功的JSON序列化，失败时panic（仅用于测试或初始化）
+func MustMarshal[T any](v T) []byte {
+	data, err := SafeMarshal(v)
+	if err != nil {
+		panic(fmt.Sprintf("MustMarshal failed for %T: %v", v, err))
+	}
+	return data
+}
+
+// MustUnmarshal 必须成功的JSON反序列化，失败时panic（仅用于测试或初始化）
+func MustUnmarshal[T any](data []byte, target *T) {
+	if err := SafeUnmarshal(data, target); err != nil {
+		panic(fmt.Sprintf("MustUnmarshal failed for %T: %v", target, err))
+	}
+}
+
+// TryUnmarshal 尝试反序列化，返回是否成功
+func TryUnmarshal[T any](data []byte, target *T) bool {
+	return SafeUnmarshal(data, target) == nil
+}
+
+// UnmarshalString 从字符串反序列化JSON
+func UnmarshalString[T any](jsonStr string, target *T) error {
+	return SafeUnmarshal([]byte(jsonStr), target)
+}
+
+// MarshalString 序列化为JSON字符串
+func MarshalString[T any](v T) (string, error) {
+	data, err := SafeMarshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // GetJSONType 获取JSON值的类型

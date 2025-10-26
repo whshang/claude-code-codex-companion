@@ -42,6 +42,7 @@ func (s *Server) handleProxy(c *gin.Context) {
 		s.sendProxyError(c, http.StatusBadRequest, "request_body_error", "Failed to read request body", requestID)
 		return
 	}
+	originalRequestBody := append([]byte(nil), requestBody...)
 
 	// 检测请求格式和客户端类型
 	formatDetection := utils.DetectRequestFormat(path, requestBody)
@@ -58,6 +59,7 @@ func (s *Server) handleProxy(c *gin.Context) {
 	originalModel := s.extractModelFromRequest(requestBody)
 	// 存储到context中，供后续使用
 	c.Set("original_model", originalModel)
+	c.Set("base_client_model", originalModel)
 
 	// 提取 thinking 信息
 	thinkingInfo, err := utils.ExtractThinkingInfo(string(requestBody))
@@ -86,7 +88,7 @@ func (s *Server) handleProxy(c *gin.Context) {
 		}
 		// 生成详细的错误消息
 		errorMsg := s.generateDetailedEndpointUnavailableMessage(requestID, tags)
-		s.sendFailureResponse(c, requestID, startTime, requestBody, tags, 0, errorMsg, "no_available_endpoints")
+		s.sendFailureResponse(c, requestID, startTime, originalRequestBody, tags, 0, errorMsg, "no_available_endpoints")
 		return
 	}
 
@@ -98,14 +100,14 @@ func (s *Server) handleProxy(c *gin.Context) {
 	})
 
 	// 尝试向选择的端点发送请求，失败时回退到其他端点
-	success, shouldRetry := s.tryProxyRequest(c, selectedEndpoint, requestBody, requestID, startTime, path, taggedRequest, 1)
+	success, shouldRetry := s.tryProxyRequest(c, selectedEndpoint, originalRequestBody, requestID, startTime, path, taggedRequest, 1)
 	if success {
 		return
 	}
 
 	if shouldRetry {
 		// 使用回退逻辑
-		s.fallbackToOtherEndpoints(c, path, requestBody, requestID, startTime, selectedEndpoint, taggedRequest)
+		s.fallbackToOtherEndpoints(c, path, originalRequestBody, requestID, startTime, selectedEndpoint, taggedRequest)
 	}
 }
 
