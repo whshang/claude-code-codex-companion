@@ -1,4 +1,4 @@
-.PHONY: build clean test run dev stop windows-amd64 linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 all docker-build docker-run docker-compose-up docker-compose-down
+.PHONY: build clean test run dev stop windows-amd64 linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 all
 
 # Use bash for better shell compatibility
 SHELL := /bin/bash
@@ -128,21 +128,6 @@ fmt:
 lint:
 	golangci-lint run
 
-# Docker build
-docker-build:
-	docker build -t cccc .
-
-# Docker run
-docker-run: docker-build
-	docker run -p 8080:8080 -v $(PWD)/config.yaml:/root/config.yaml cccc
-
-# Docker compose up
-docker-compose-up:
-	docker-compose up -d
-
-# Docker compose down
-docker-compose-down:
-	docker-compose down
 
 # Show help
 help:
@@ -158,10 +143,6 @@ help:
 	@echo "  test               - Run tests"
 	@echo "  run                - Build and run with default config"
 	@echo "  dev                - Run in development mode with hot reload"
-	@echo "  docker-build       - Build Docker image"
-	@echo "  docker-run         - Run in Docker container"
-	@echo "  docker-compose-up  - Start with docker-compose"
-	@echo "  docker-compose-down- Stop docker-compose services"
 	@echo "  init               - Initialize and tidy go modules"
 	@echo "  deps               - Download dependencies"
 	@echo "  fmt                - Format code"
