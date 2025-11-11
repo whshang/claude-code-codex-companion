@@ -1,0 +1,176 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a release after build'
+        required: false
+        default: 'true'
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            suffix: .exe
+            name: windows-amd64
+          - goos: linux
+            goarch: amd64
+            suffix: ""
+            name: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: ""
+            name: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: ""
+            name: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: ""
+            name: darwin-arm64
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+
+    - name: Get version info
+      id: version
+      run: |
+        DATE=$(date +%Y%m%d)
+        HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        if [ "$HASH" != "unknown" ]; then
+          VERSION="$DATE-$HASH"
+          if ! git diff-index --quiet HEAD 2>/dev/null; then
+            VERSION="$VERSION-dirty"
+          fi
+          # Add release suffix for release events or manual dispatch with create_release=true
+          if [ "${{ github.event_name }}" = "release" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="$VERSION-release"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$VERSION" >> $GITHUB_OUTPUT
+        else
+          echo "VERSION=dev" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=dev" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        BINARY_NAME=claude-code-codex-companion-${{ matrix.name }}${{ matrix.suffix }}
+        go build -ldflags "-X main.Version=${{ steps.version.outputs.VERSION }}" \
+          -o $BINARY_NAME .
+        
+        # Create zip archive
+        if [[ "${{ matrix.goos }}" == "windows" ]]; then
+          zip claude-code-codex-companion-${{ matrix.name }}.zip $BINARY_NAME
+        else
+          tar -czf claude-code-codex-companion-${{ matrix.name }}.tar.gz $BINARY_NAME
+        fi
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: claude-code-codex-companion-${{ matrix.name }}
+        path: |
+          claude-code-codex-companion-${{ matrix.name }}.zip
+          claude-code-codex-companion-${{ matrix.name }}.tar.gz
+        retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Debug inputs
+      run: |
+        echo "Event name: ${{ github.event_name }}"
+        echo "Create release input: ${{ inputs.create_release }}"
+        echo "Input value type: boolean"
+    
+    - name: Get version info for release
+      id: version
+      run: |
+        DATE=$(date +%Y%m%d)
+        HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        if [ "$HASH" != "unknown" ]; then
+          VERSION="$DATE-$HASH-release"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$VERSION" >> $GITHUB_OUTPUT
+        else
+          echo "VERSION=dev" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=dev" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.TAG_NAME }}
+        name: Release ${{ steps.version.outputs.VERSION }}
+        body: |
+          ## Release ${{ steps.version.outputs.VERSION }}
+          
+          Automatically generated release from commit ${{ github.sha }}.
+          
+          ### ✨ Key Features
+          - **Self-contained**: All web assets (HTML, CSS, JS) are embedded in the binary
+          - **No external dependencies**: No need to deploy separate web directories
+          - **Easy deployment**: Single executable file contains everything needed
+          
+          ### Build Information
+          - Build date: ${{ steps.version.outputs.VERSION }}
+          - Commit: ${{ github.sha }}
+          - Workflow: ${{ github.workflow }}
+          - Go version: 1.23 with embedded assets support
+          
+          ### Downloads
+          Choose the appropriate binary for your platform:
+          - **Windows**: claude-code-codex-companion-windows-amd64.zip
+          - **Linux x64**: claude-code-codex-companion-linux-amd64.tar.gz  
+          - **Linux ARM64**: claude-code-codex-companion-linux-arm64.tar.gz
+          - **macOS Intel**: claude-code-codex-companion-darwin-amd64.tar.gz
+          - **macOS Apple Silicon**: claude-code-codex-companion-darwin-arm64.tar.gz
+        files: |
+          artifacts/claude-code-codex-companion-windows-amd64/claude-code-codex-companion-windows-amd64.zip
+          artifacts/claude-code-codex-companion-linux-amd64/claude-code-codex-companion-linux-amd64.tar.gz
+          artifacts/claude-code-codex-companion-linux-arm64/claude-code-codex-companion-linux-arm64.tar.gz
+          artifacts/claude-code-codex-companion-darwin-amd64/claude-code-codex-companion-darwin-amd64.tar.gz
+          artifacts/claude-code-codex-companion-darwin-arm64/claude-code-codex-companion-darwin-arm64.tar.gz
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

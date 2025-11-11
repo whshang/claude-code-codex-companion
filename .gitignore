@@ -1,0 +1,74 @@
+# Go / build artifacts
+build/
+*.exe
+*.dll
+*.so
+*.dylib
+*.app
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+*.test
+
+# Go workspaces
+go.work
+go.work.sum
+
+# Runtime data
+.cccc-data/
+.cccc-proxy/
+logs/
+*.log
+*.db
+*.db-shm
+*.db-wal
+.binding-info.json
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+!frontend/dist/.gitkeep
+frontend/wailsjs/
+frontend/.next/
+frontend/.nuxt/
+frontend/.cache/
+frontend/package-lock.json
+frontend/yarn.lock
+frontend/pnpm-lock.yaml
+
+# Node tooling at repo root
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*.old
+.tmp/
+tmp/
+
+# Wails generated logs/assets
+wails.*
+build/bin/
+
+# Misc tooling
+.claude/
+.crush/
+WARP.md
+AGENTS.md
+
+# Legacy artifacts
+cccc-proxy.db
+legacy/
