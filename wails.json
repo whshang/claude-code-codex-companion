@@ -1,0 +1,183 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "cccc-proxy",
+  "outputfilename": "cccc-proxy",
+  "frontend:install": "yarn install",
+  "frontend:build": "yarn build",
+  "author": {
+    "name": "whshang",
+    "email": "whshang@gmail.com"
+  },
+  "info": {
+    "companyName": "CCCC",
+    "productName": "CCCC Proxy Desktop",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2024 CCCC Team",
+    "comments": "Claude Code and Codex Companion Proxy Desktop Application"
+  },
+  "nsisType": "multiple",
+  "obfuscated": false,
+  "garbleargs": "",
+  "build": {
+    "dir": "build",
+    "name": "bin"
+  },
+  "frontend": {
+    "dir": "./frontend"
+  },
+  "backend": {
+    "dir": "./"
+  },
+  "upx": false,
+  "upxflags": "",
+  "upxdir": "",
+  "runNonNativeBuildHooks": false,
+  "windows": {
+    "buildmode": "release",
+    "cgo": true,
+    "ldflags": "",
+    "tags": [],
+    "goarch": ["amd64"],
+    "wineprefix": "",
+    "winedrive": "",
+    "uac": false,
+    "versionInfo": {
+      "companyName": "CCCC",
+      "productName": "CCCC Proxy Desktop",
+      "productVersion": "1.0.0",
+      "copyright": "Copyright © 2024 CCCC Team",
+      "comments": "Claude Code and Codex Companion Proxy Desktop Application",
+      "fileVersion": "1.0.0",
+      "productName": "CCCC Proxy Desktop",
+      "originalFilename": "cccc-proxy.exe"
+    },
+    "icon": "build/appicon.ico",
+    "fileDescription": "CCCC Proxy Desktop Application",
+    "manifest": "",
+    "resourceTable": "",
+    "certificate": "",
+    "certificatePassword": "",
+    "signCommand": "",
+    "compression": "0"
+  },
+  "mac": {
+    "buildmode": "release",
+    "cgo": true,
+    "ldflags": "",
+    "tags": [],
+    "goarch": ["amd64", "arm64"],
+    "category": "public.app-category.developer-tools",
+    "entitlements": "build/entitlements.plist",
+    "entitlementsDev": "build/entitlements-dev.plist",
+    "entitlementsMAS": "build/entitlements.mas.plist",
+    "provisioningProfile": "",
+    "sign": "",
+    "hardenedRuntime": true,
+    "strictNotarization": false,
+    "versionInfo": {
+      "productName": "CCCC Proxy Desktop",
+      "productVersion": "1.0.0",
+      "copyright": "Copyright © 2024 CCCC Team"
+    },
+    "icon": "build/appicon.icns",
+    "minimumSystemVersion": "11.0",
+    "windowRuntimeState": "normal",
+    "highSierra": false,
+    "fileAssociation": [],
+    "fileAssociationIcon": "",
+    "packageInfo": {
+      "packageId": "com.cccc.proxy",
+      "sign": "",
+      "installId": "",
+      "publisherId": "",
+      "certificate": "",
+      "certificatePassword": ""
+    }
+  },
+  "linux": {
+    "buildmode": "release",
+    "cgo": true,
+    "ldflags": "",
+    "tags": [],
+    "goarch": ["amd64", "arm64"],
+    "package": {
+      "app": {
+        "icon": "build/appicon.png",
+        "desktopFile": {
+          "Name": "CCCC Proxy Desktop",
+          "Comment": "Claude Code and Codex Companion Proxy Desktop Application",
+          "Keywords": "proxy;api;claude;codex;development",
+          "Categories": "Development;Network;",
+          "StartupWMClass": "cccc-proxy"
+        }
+      },
+      "deb": {
+        "depends": [],
+        "recommends": [],
+        "suggests": [],
+        "conflicts": [],
+        "provides": [],
+        "replaces": [],
+        "section": "",
+        "priority": "",
+        "homepage": "",
+        "maintainer": "",
+        "fileAssociation": []
+      },
+      "rpm": {
+        "depends": [],
+        "recommends": [],
+        "suggests": [],
+        "conflicts": [],
+        "provides": [],
+        "replaces": [],
+        "group": "",
+        "license": "",
+        "summary": "",
+        "url": "",
+        "buildTime": "",
+        "release": "",
+        "fileAssociation": []
+      },
+      "appimage": {
+        "depends": [],
+        "recommends": [],
+        "suggests": [],
+        "conflicts": [],
+        "provides": [],
+        "replaces": [],
+        "fileAssociation": []
+      },
+      "bin": {
+        "depends": [],
+        "recommends": [],
+        "suggests": [],
+        "conflicts": [],
+        "provides": [],
+        "replaces": [],
+        "fileAssociation": []
+      },
+      "pacman": {
+        "depends": [],
+        "recommends": [],
+        "suggests": [],
+        "conflicts": [],
+        "provides": [],
+        "replaces": [],
+        "fileAssociation": []
+      }
+    }
+  },
+  "embed": {
+    "resources": [],
+  "symlinks": false
+  },
+  "assets": {
+    "dir": "./frontend/dist"
+  },
+  "shared": {
+    "dir": "",
+    "src": "",
+    "name": "libshared"
+  }
+}

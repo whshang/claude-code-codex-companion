@@ -60,7 +60,8 @@ pnpm-lock.yaml
 tmp/
 
 # Wails generated logs/assets
-wails.*
+wails.log
+wails_new.log
 build/bin/
 
 # Misc tooling
