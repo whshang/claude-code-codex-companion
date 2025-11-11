@@ -1,7 +1,5 @@
 # Claude Code and Codex Companion (CCCC)
 
-[English Version / README_en.md](README_en.md)
-
 [![GitHub Stars](https://img.shields.io/github/stars/whshang/claude-code-codex-companion?style=social)](https://github.com/whshang/claude-code-codex-companion)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://golang.org/)
 [![React Version](https://img.shields.io/badge/React-18+-61DAFB?logo=react)](https://reactjs.org/)
@@ -44,17 +42,12 @@ CCCC（Claude Code and Codex Companion）是一个**桌面客户端 + 代理服�
 - **同步启动**：应用启动时自动同步启动内置 HTTP 服务器
 - **轻量化设计**：采用简洁架构，避免复杂的依赖关系，确保高可靠性
 
-### 📊 功能矩阵
+## ✨ 功能概览
 
-| 功能特性 | CCCC 桌面版 | 说明 |
-|---|---|---|
-| **用户界面** | ✅ 现代化桌面应用 | React + shadcn/ui |
-| **端点管理** | ✅ 图形化配置 | 直观的 CRUD 操作 |
-| **实时监控** | ✅ 实时仪表板 | 响应式数据展示 |
-| **日志查看** | ✅ 结构化日志 | 分页、过滤、搜索 |
-| **配置管理** | ✅ 在线编辑 | 实时保存验证 |
-| **性能统计** | ✅ 可视化图表 | 数据图表展示 |
-| **部署方式** | ✅ 单文件应用 | 无需 Web 服务器 |
+- **桌面体验**：React + TypeScript + shadcn/ui 打造的原生桌面 UI，响应式布局、快捷键、暗色主题开箱即用。
+- **智能代理**：图形化端点 CRUD、优先级/负载均衡、健康检查、失败回退，以及 OpenAI Chat ↔ Responses ↔ Anthropic 的双向格式转换。
+- **可观测性**：实时仪表板、结构化日志（搜索/过滤/导出）、请求追踪与错误诊断，帮助快速排查问题。
+- **配置与部署**：内置在线配置编辑器，单二进制跨平台分发（macOS/Windows/Linux），无需额外 Web 服务器。
 
 ### 🧭 能力进展
 
@@ -67,31 +60,6 @@ CCCC（Claude Code and Codex Companion）是一个**桌面客户端 + 代理服�
 
 ### ⚠️ 已知限制
 - 响应体尚未恢复模型重写前的名称，客户端会看到供应商别名。
-
----
-
-## ✨ 核心特性
-
-### 🖥️ 现代化桌面界面
-
-- **📱 响应式设计**：适配各种屏幕尺寸的桌面应用
-- **🎨 优雅界面**：基于 shadcn/ui 的现代化设计系统
-- **⚡ 快速响应**：优化的前端性能，流畅的用户体验
-- **🔧 功能完整**：仪表板、端点管理、日志监控、配置编辑
-
-### 🚀 智能代理服务
-
-- **🎯 智能端点选择**：4层排序算法，优先选择最优端点
-- **🔄 条件格式转换**：智能判断是否需要格式转换，避免性能损耗
-- **🏷️ 客户端路由**：支持 Claude Code、Codex、OpenAI 等多种客户端
-- **🛡️ 高可用保障**：多端点负载均衡、健康检查、自动故障转移
-
-### 📊 完整的可观测性
-
-- **📈 实时仪表板**：端点状态、请求统计、性能指标实时展示
-- **📋 详细日志**：结构化日志记录，支持过滤、搜索、导出
-- **🔍 调试工具**：请求追踪、错误诊断、性能分析
-- **⚙️ 配置管理**：在线配置编辑，实时生效验证
 
 ---
 
@@ -538,7 +506,6 @@ ls -la build/bin/
 - 📧 **邮箱**：support@cccc-proxy.dev
 - 💬 **讨论**：[GitHub Discussions](https://github.com/whshang/claude-code-codex-companion/discussions)
 - 🐛 **问题**：[GitHub Issues](https://github.com/whshang/claude-code-codex-companion/issues)
-- 📖 **文档**：[完整文档](docs/)
 
 ---
 
